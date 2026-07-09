@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import {
   updateOrganizationCurrency,
+  updateOrganizationLanguage,
   updateOrganizationName,
 } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
@@ -138,6 +139,7 @@ export default function SettingsPage() {
       setForm(toFormState(updated));
       updateOrganizationName(updated.name);
       updateOrganizationCurrency(updated.currency_code);
+      updateOrganizationLanguage(updated.language);
       toast.dismiss(loadingId);
       toast.success("Organization profile saved.");
     } catch (err) {

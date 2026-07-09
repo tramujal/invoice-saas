@@ -1,8 +1,11 @@
+"use client";
+
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   PAYMENT_STATUS_CHART_COLOR,
-  PAYMENT_STATUS_LABELS,
+  getPaymentStatusLabel,
 } from "@/lib/payment-status";
 import type { PaymentStatusCountPoint } from "@/lib/types";
 
@@ -15,12 +18,13 @@ export function PaymentStatusChart({
   data,
   loading = false,
 }: PaymentStatusChartProps) {
+  const { t } = useTranslation();
   const total = data.reduce((sum, point) => sum + point.count, 0);
 
   const chartData = data
     .filter((point) => point.count > 0)
     .map((point) => ({
-      name: PAYMENT_STATUS_LABELS[point.status],
+      name: getPaymentStatusLabel(t, point.status),
       value: point.count,
       color: PAYMENT_STATUS_CHART_COLOR[point.status],
     }));

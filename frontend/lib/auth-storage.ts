@@ -3,6 +3,7 @@ const API_BASE_KEY = "invoicing_api_base_url";
 const ORG_ID_KEY = "invoicing_organization_id";
 const ORG_NAME_KEY = "invoicing_organization_name";
 const ORG_CURRENCY_KEY = "invoicing_organization_currency";
+const ORG_LANGUAGE_KEY = "invoicing_organization_language";
 const USER_EMAIL_KEY = "invoicing_user_email";
 
 export function getAuthToken(): string | null {
@@ -16,6 +17,7 @@ export function setAuthSession(params: {
   organizationId: string;
   organizationName?: string;
   organizationCurrency?: string;
+  organizationLanguage?: string;
   userEmail?: string;
 }): void {
   window.localStorage.setItem(TOKEN_KEY, params.token.trim());
@@ -26,6 +28,9 @@ export function setAuthSession(params: {
   }
   if (params.organizationCurrency) {
     window.localStorage.setItem(ORG_CURRENCY_KEY, params.organizationCurrency);
+  }
+  if (params.organizationLanguage) {
+    window.localStorage.setItem(ORG_LANGUAGE_KEY, params.organizationLanguage);
   }
   if (params.userEmail) {
     window.localStorage.setItem(USER_EMAIL_KEY, params.userEmail);
@@ -38,6 +43,7 @@ export function clearAuthSession(): void {
   window.localStorage.removeItem(ORG_ID_KEY);
   window.localStorage.removeItem(ORG_NAME_KEY);
   window.localStorage.removeItem(ORG_CURRENCY_KEY);
+  window.localStorage.removeItem(ORG_LANGUAGE_KEY);
   window.localStorage.removeItem(USER_EMAIL_KEY);
 }
 
@@ -69,6 +75,16 @@ export function getOrganizationCurrency(): string | null {
 export function updateOrganizationCurrency(currencyCode: string): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(ORG_CURRENCY_KEY, currencyCode);
+}
+
+export function getOrganizationLanguage(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(ORG_LANGUAGE_KEY);
+}
+
+export function updateOrganizationLanguage(language: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ORG_LANGUAGE_KEY, language);
 }
 
 export function getUserEmail(): string | null {

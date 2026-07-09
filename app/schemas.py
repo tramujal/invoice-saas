@@ -97,6 +97,7 @@ class OrganizationSummary(BaseModel):
     id: str
     name: str
     currency_code: str
+    language: str
 
 
 class AuthResponse(BaseModel):

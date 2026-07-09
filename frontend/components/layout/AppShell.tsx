@@ -11,12 +11,13 @@ import {
   getUserEmail,
   isAuthenticated,
 } from "@/lib/auth-storage";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 
 const links = [
-  { href: "/", label: "Dashboard" },
-  { href: "/invoices", label: "Invoices" },
-  { href: "/customers", label: "Customers" },
-  { href: "/settings", label: "Settings" },
+  { href: "/", labelKey: "nav.dashboard" },
+  { href: "/invoices", labelKey: "nav.invoices" },
+  { href: "/customers", labelKey: "nav.customers" },
+  { href: "/settings", labelKey: "nav.settings" },
 ] as const;
 
 function isNavActive(pathname: string, href: string): boolean {
@@ -27,6 +28,7 @@ function isNavActive(pathname: string, href: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { t } = useTranslation();
   const [organizationName, setOrganizationName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
@@ -71,7 +73,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={logout}
             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 md:mt-4 md:w-full"
           >
-            Log out
+            {t("nav.logout")}
           </button>
         </div>
         {organizationName || userEmail ? (
@@ -99,7 +101,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : "text-slate-700 hover:bg-surface-muted"
                 }`}
               >
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             );
           })}

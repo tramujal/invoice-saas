@@ -6,10 +6,11 @@ import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { formatApiError } from "@/lib/format-api-error";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   PAYMENT_STATUSES,
-  PAYMENT_STATUS_LABELS,
   PAYMENT_STATUS_SELECT_CLASS,
+  getPaymentStatusLabel,
   type PaymentStatus,
 } from "@/lib/payment-status";
 import type { InvoiceSummary } from "@/lib/types";
@@ -31,6 +32,7 @@ export function PaymentStatusSelect({
   showBadge = true,
 }: PaymentStatusSelectProps) {
   const toast = useToast();
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
 
   async function handleChange(next: PaymentStatus) {
@@ -39,7 +41,7 @@ export function PaymentStatusSelect({
     const previous = value;
     onUpdated(next);
 
-    const loadingId = toast.loading("Updating payment status…");
+    const loadingId = toast.loading(t("status.updating"));
     setSaving(true);
     try {
       await apiFetch<InvoiceSummary>(orgPath(`invoices/${invoiceId}`), {
@@ -47,11 +49,11 @@ export function PaymentStatusSelect({
         body: JSON.stringify({ payment_status: next }),
       });
       toast.dismiss(loadingId);
-      toast.success(`Status set to ${PAYMENT_STATUS_LABELS[next]}.`);
+      toast.success(t("status.updated", { status: getPaymentStatusLabel(t, next) }));
     } catch (err) {
       onUpdated(previous);
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, "Could not update payment status."));
+      toast.error(formatApiError(err, t("status.updateError")));
     } finally {
       setSaving(false);
     }
@@ -64,12 +66,12 @@ export function PaymentStatusSelect({
         value={value}
         disabled={disabled || saving}
         onChange={(e) => void handleChange(e.target.value as PaymentStatus)}
-        aria-label="Payment status"
+        aria-label={t("status.ariaLabel")}
         className={`w-full min-w-[7.5rem] rounded-lg border px-2 py-1.5 text-xs font-medium outline-none ring-slate-400 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${PAYMENT_STATUS_SELECT_CLASS[value]}`}
       >
         {PAYMENT_STATUSES.map((status) => (
           <option key={status} value={status}>
-            {PAYMENT_STATUS_LABELS[status]}
+            {getPaymentStatusLabel(t, status)}
           </option>
         ))}
       </select>

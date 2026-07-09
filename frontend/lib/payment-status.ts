@@ -1,3 +1,5 @@
+import type { TranslateFn } from "@/lib/i18n/useTranslation";
+
 export const PAYMENT_STATUSES = ["pending", "paid", "overdue"] as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
@@ -6,11 +8,13 @@ export function isPaymentStatus(value: string): value is PaymentStatus {
   return (PAYMENT_STATUSES as readonly string[]).includes(value);
 }
 
-export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
-  pending: "Pending",
-  paid: "Paid",
-  overdue: "Overdue",
-};
+/** Looks up the translated label for a payment status. Takes the caller's
+ * own t() (from useTranslation()) rather than calling the hook itself, so
+ * this stays a plain, hook-free utility module — the single source of truth
+ * for these labels lives in lib/i18n/translations.ts's status.* keys. */
+export function getPaymentStatusLabel(t: TranslateFn, status: PaymentStatus): string {
+  return t(`status.${status}`);
+}
 
 export const PAYMENT_STATUS_BADGE_CLASS: Record<PaymentStatus, string> = {
   pending: "bg-amber-100 text-amber-900 ring-amber-200/80",

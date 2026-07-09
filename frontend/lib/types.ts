@@ -66,6 +66,7 @@ export type OrganizationSummary = {
   id: string;
   name: string;
   currency_code: string;
+  language: string;
 };
 
 /** Response from POST /auth/login and POST /auth/register */

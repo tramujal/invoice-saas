@@ -1,7 +1,10 @@
+"use client";
+
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   PAYMENT_STATUSES,
   PAYMENT_STATUS_BADGE_CLASS,
-  PAYMENT_STATUS_LABELS,
+  getPaymentStatusLabel,
 } from "@/lib/payment-status";
 
 const BAR_COLOR_CLASS: Record<(typeof PAYMENT_STATUSES)[number], string> = {
@@ -23,6 +26,7 @@ export function PaymentStatusBreakdown({
   overdue,
   loading = false,
 }: PaymentStatusBreakdownProps) {
+  const { t } = useTranslation();
   const counts = { pending, paid, overdue };
   const total = pending + paid + overdue;
 
@@ -57,7 +61,7 @@ export function PaymentStatusBreakdown({
                   key={status}
                   className={BAR_COLOR_CLASS[status]}
                   style={{ width: `${share}%` }}
-                  title={`${PAYMENT_STATUS_LABELS[status]}: ${counts[status]}`}
+                  title={`${getPaymentStatusLabel(t, status)}: ${counts[status]}`}
                 />
               );
             })}
@@ -72,7 +76,7 @@ export function PaymentStatusBreakdown({
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${PAYMENT_STATUS_BADGE_CLASS[status]}`}
                 >
-                  {PAYMENT_STATUS_LABELS[status]}
+                  {getPaymentStatusLabel(t, status)}
                 </span>
                 <span className="font-medium text-slate-700">
                   {counts[status]}

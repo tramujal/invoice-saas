@@ -1,3 +1,7 @@
+"use client";
+
+import { useTranslation } from "@/lib/i18n/useTranslation";
+
 export type SortDirection = "asc" | "desc";
 
 export type SortOption = {
@@ -25,10 +29,12 @@ export function SortControl({
   onSortDirChange,
   disabled = false,
 }: SortControlProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="flex items-center gap-2">
       <label htmlFor="sort-by" className="sr-only">
-        Sort by
+        {t("sort.by")}
       </label>
       <select
         id="sort-by"
@@ -39,12 +45,12 @@ export function SortControl({
       >
         {fields.map((field) => (
           <option key={field.value} value={field.value}>
-            Sort: {field.label}
+            {t("sort.prefix")}: {field.label}
           </option>
         ))}
       </select>
       <label htmlFor="sort-dir" className="sr-only">
-        Sort direction
+        {t("sort.direction")}
       </label>
       <select
         id="sort-dir"
@@ -53,8 +59,8 @@ export function SortControl({
         disabled={disabled}
         className={selectClass}
       >
-        <option value="asc">Ascending</option>
-        <option value="desc">Descending</option>
+        <option value="asc">{t("sort.ascending")}</option>
+        <option value="desc">{t("sort.descending")}</option>
       </select>
     </div>
   );

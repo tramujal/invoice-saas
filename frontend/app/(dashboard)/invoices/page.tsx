@@ -9,9 +9,10 @@ import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   PAYMENT_STATUSES,
-  PAYMENT_STATUS_LABELS,
+  getPaymentStatusLabel,
   isPaymentStatus,
   type PaymentStatus,
 } from "@/lib/payment-status";
@@ -27,13 +28,6 @@ const pageSize = 10;
 type PaymentStatusFilter = PaymentStatus | "all";
 type DateRangePreset = "all" | "today" | "week" | "month" | "year";
 type InvoiceSortBy = "invoice_number" | "created_at" | "total" | "customer_name";
-
-const SORT_FIELDS: { value: InvoiceSortBy; label: string }[] = [
-  { value: "created_at", label: "Created date" },
-  { value: "invoice_number", label: "Invoice number" },
-  { value: "total", label: "Total amount" },
-  { value: "customer_name", label: "Customer name" },
-];
 
 const selectClass =
   "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-400 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-50";
@@ -76,6 +70,7 @@ function computeCreatedAfter(preset: DateRangePreset): string | null {
 
 export default function InvoicesPage() {
   const toast = useToast();
+  const { t } = useTranslation();
   const [data, setData] = useState<PaginatedInvoices | null>(null);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -98,6 +93,13 @@ export default function InvoicesPage() {
   const [maxTotal, setMaxTotal] = useState("");
   const [sortBy, setSortBy] = useState<InvoiceSortBy>("created_at");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
+
+  const sortFields: { value: InvoiceSortBy; label: string }[] = [
+    { value: "created_at", label: t("invoices.sortCreatedDate") },
+    { value: "invoice_number", label: t("invoices.sortInvoiceNumber") },
+    { value: "total", label: t("invoices.sortTotalAmount") },
+    { value: "customer_name", label: t("invoices.sortCustomerName") },
+  ];
 
   const hasActiveFilters =
     debouncedSearch.trim() !== "" ||
@@ -183,15 +185,15 @@ export default function InvoicesPage() {
   async function downloadInvoicePdf(invoiceId: string, invoiceNumber: string) {
     if (downloadingId) return;
     setDownloadingId(invoiceId);
-    const loadingId = toast.loading("Preparing PDF…");
+    const loadingId = toast.loading(t("invoices.toastPreparingPdf"));
     try {
       const blob = await apiFetchBlob(orgPath(`invoices/${invoiceId}/pdf`));
       downloadBlob(blob, `${invoiceNumber}.pdf`);
       toast.dismiss(loadingId);
-      toast.success("PDF downloaded.");
+      toast.success(t("invoices.toastPdfDownloaded"));
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, "Could not download PDF."));
+      toast.error(formatApiError(err, t("invoices.toastPdfError")));
     } finally {
       setDownloadingId(null);
     }
@@ -200,17 +202,19 @@ export default function InvoicesPage() {
   async function sendInvoiceEmail(invoiceId: string, invoiceNumber: string) {
     if (sendingId) return;
     setSendingId(invoiceId);
-    const loadingId = toast.loading("Sending email…");
+    const loadingId = toast.loading(t("invoices.toastSendingEmail"));
     try {
       const result = await apiFetch<SendInvoiceEmailResponse>(
         orgPath(`invoices/${invoiceId}/send-email`),
         { method: "POST" }
       );
       toast.dismiss(loadingId);
-      toast.success(`Invoice ${invoiceNumber} emailed to ${result.sent_to}.`);
+      toast.success(
+        t("invoices.toastEmailSent", { number: invoiceNumber, email: result.sent_to })
+      );
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, "Could not send invoice email."));
+      toast.error(formatApiError(err, t("invoices.toastEmailError")));
     } finally {
       setSendingId(null);
     }
@@ -225,17 +229,15 @@ export default function InvoicesPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Invoices
+            {t("invoices.title")}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Newest first. Update payment status inline.
-          </p>
+          <p className="mt-1 text-sm text-slate-500">{t("invoices.subtitle")}</p>
         </div>
         <Link
           href="/invoices/new"
           className="inline-flex shrink-0 items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 sm:mt-0"
         >
-          New invoice
+          {t("invoices.newInvoice")}
         </Link>
       </header>
 
@@ -243,14 +245,14 @@ export default function InvoicesPage() {
         <div className="space-y-4">
           <div>
             <label htmlFor="invoice-search" className="sr-only">
-              Search invoices
+              {t("invoices.searchAriaLabel")}
             </label>
             <input
               id="invoice-search"
               type="search"
               value={search}
               onChange={(e) => resetToFirstPage(setSearch)(e.target.value)}
-              placeholder="Search by invoice number or customer name…"
+              placeholder={t("invoices.searchPlaceholder")}
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2"
             />
           </div>
@@ -264,12 +266,12 @@ export default function InvoicesPage() {
                 )
               }
               className={selectClass}
-              aria-label="Filter by payment status"
+              aria-label={t("invoices.filterStatusAriaLabel")}
             >
-              <option value="all">All statuses</option>
+              <option value="all">{t("invoices.allStatuses")}</option>
               {PAYMENT_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {PAYMENT_STATUS_LABELS[status]}
+                  {getPaymentStatusLabel(t, status)}
                 </option>
               ))}
             </select>
@@ -280,13 +282,13 @@ export default function InvoicesPage() {
                 resetToFirstPage(setDateRange)(e.target.value as DateRangePreset)
               }
               className={selectClass}
-              aria-label="Filter by date range"
+              aria-label={t("invoices.filterDateAriaLabel")}
             >
-              <option value="all">All time</option>
-              <option value="today">Today</option>
-              <option value="week">This week</option>
-              <option value="month">This month</option>
-              <option value="year">This year</option>
+              <option value="all">{t("invoices.dateAll")}</option>
+              <option value="today">{t("invoices.dateToday")}</option>
+              <option value="week">{t("invoices.dateWeek")}</option>
+              <option value="month">{t("invoices.dateMonth")}</option>
+              <option value="year">{t("invoices.dateYear")}</option>
             </select>
 
             <input
@@ -296,8 +298,8 @@ export default function InvoicesPage() {
               step="0.01"
               value={minTotal}
               onChange={(e) => resetToFirstPage(setMinTotal)(e.target.value)}
-              placeholder="Min total"
-              aria-label="Minimum total"
+              placeholder={t("invoices.minTotalPlaceholder")}
+              aria-label={t("invoices.minTotalAriaLabel")}
               className={numberInputClass}
             />
             <input
@@ -307,13 +309,13 @@ export default function InvoicesPage() {
               step="0.01"
               value={maxTotal}
               onChange={(e) => resetToFirstPage(setMaxTotal)(e.target.value)}
-              placeholder="Max total"
-              aria-label="Maximum total"
+              placeholder={t("invoices.maxTotalPlaceholder")}
+              aria-label={t("invoices.maxTotalAriaLabel")}
               className={numberInputClass}
             />
 
             <SortControl
-              fields={SORT_FIELDS}
+              fields={sortFields}
               sortBy={sortBy}
               sortDir={sortDir}
               onSortByChange={resetToFirstPage((v: string) =>
@@ -328,7 +330,7 @@ export default function InvoicesPage() {
               disabled={isDefaultState}
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Reset filters
+              {t("invoices.resetFilters")}
             </button>
           </div>
         </div>
@@ -348,15 +350,21 @@ export default function InvoicesPage() {
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-4 py-3 sm:px-6">Invoice</th>
-                <th className="hidden px-4 py-3 sm:table-cell sm:px-6">Customer</th>
-                <th className="px-4 py-3 sm:px-6">Status</th>
-                <th className="px-4 py-3 sm:px-6">Subtotal</th>
-                <th className="hidden px-4 py-3 md:table-cell md:px-6">Tax</th>
-                <th className="px-4 py-3 sm:px-6">Total</th>
-                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">Created</th>
+                <th className="px-4 py-3 sm:px-6">{t("invoices.colInvoice")}</th>
+                <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
+                  {t("invoices.colCustomer")}
+                </th>
+                <th className="px-4 py-3 sm:px-6">{t("invoices.colStatus")}</th>
+                <th className="px-4 py-3 sm:px-6">{t("invoices.colSubtotal")}</th>
+                <th className="hidden px-4 py-3 md:table-cell md:px-6">
+                  {t("invoices.colTax")}
+                </th>
+                <th className="px-4 py-3 sm:px-6">{t("invoices.colTotal")}</th>
+                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                  {t("invoices.colCreated")}
+                </th>
                 <th className="px-4 py-3 sm:px-6">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t("invoices.colActions")}</span>
                 </th>
               </tr>
             </thead>
@@ -367,7 +375,7 @@ export default function InvoicesPage() {
                     colSpan={8}
                     className="px-4 py-8 text-center text-slate-500 sm:px-6"
                   >
-                    Loading…
+                    {t("invoices.loading")}
                   </td>
                 </tr>
               ) : showEmpty ? (
@@ -378,17 +386,17 @@ export default function InvoicesPage() {
                   >
                     {hasActiveFilters ? (
                       <div className="space-y-2">
-                        <p>No invoices match your filters.</p>
+                        <p>{t("invoices.noMatch")}</p>
                         <button
                           type="button"
                           onClick={resetFilters}
                           className="font-medium text-slate-700 underline hover:text-slate-900"
                         >
-                          Reset filters
+                          {t("invoices.resetFilters")}
                         </button>
                       </div>
                     ) : (
-                      "No invoices yet."
+                      t("invoices.noneYet")
                     )}
                   </td>
                 </tr>
@@ -441,7 +449,9 @@ export default function InvoicesPage() {
                             }
                             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {downloadingId === row.id ? "Preparing…" : "Download PDF"}
+                            {downloadingId === row.id
+                              ? t("invoices.preparing")
+                              : t("invoices.downloadPdf")}
                           </button>
                           <button
                             type="button"
@@ -453,7 +463,9 @@ export default function InvoicesPage() {
                             }
                             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {sendingId === row.id ? "Sending…" : "Send Email"}
+                            {sendingId === row.id
+                              ? t("invoices.sending")
+                              : t("invoices.sendEmail")}
                           </button>
                         </div>
                       </td>
@@ -467,7 +479,11 @@ export default function InvoicesPage() {
         {data && data.total > pageSize ? (
           <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <span>
-              Page {currentPage} of {totalPages} · {data.total} total
+              {t("invoices.pagination", {
+                page: currentPage,
+                totalPages,
+                total: data.total,
+              })}
             </span>
             <div className="flex gap-2">
               <button
@@ -476,7 +492,7 @@ export default function InvoicesPage() {
                 onClick={() => setOffset((o) => Math.max(0, o - pageSize))}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Previous
+                {t("invoices.previous")}
               </button>
               <button
                 type="button"
@@ -484,7 +500,7 @@ export default function InvoicesPage() {
                 onClick={() => setOffset((o) => o + pageSize)}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Next
+                {t("invoices.next")}
               </button>
             </div>
           </div>

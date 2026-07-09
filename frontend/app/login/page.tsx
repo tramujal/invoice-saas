@@ -23,6 +23,7 @@ function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
     organizationId: organization.id,
     organizationName: organization.name,
     organizationCurrency: organization.currency_code,
+    organizationLanguage: organization.language,
     userEmail: auth.user.email,
   });
   return true;
