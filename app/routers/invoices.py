@@ -2,12 +2,13 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_user, require_org_member
+from app.invoice_numbering import format_invoice_number
 from app.invoice_pdf import render_invoice_pdf
-from app.models import Customer, Invoice, InvoiceLineItem, User
+from app.models import Customer, Invoice, InvoiceLineItem, Organization, User
 from app.schemas import (
     InvoiceCreateRequest,
     InvoicePaymentStatusUpdate,
@@ -54,6 +55,7 @@ def list_organization_invoices(
 
     rows = db.scalars(
         select(Invoice)
+        .options(selectinload(Invoice.customer))
         .where(org_filter)
         .order_by(Invoice.created_at.desc())
         .limit(limit)
@@ -73,12 +75,11 @@ def download_invoice_pdf(
     require_org_member(current_user, organization_id, db)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
     pdf_bytes = render_invoice_pdf(invoice)
+    filename = f"{format_invoice_number(invoice.invoice_number)}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="invoice-{invoice.id}.pdf"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -143,8 +144,18 @@ def create_invoice(
     tax_amount = _quantize_money(subtotal * body.tax_rate)
     total = _quantize_money(subtotal + tax_amount)
 
+    # Locks the organization row so two concurrent invoice creations can't be
+    # handed the same next_invoice_number (a real row lock on Postgres; a
+    # harmless no-op on SQLite, which serializes writers itself).
+    organization = db.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one()
+    invoice_number = organization.next_invoice_number
+    organization.next_invoice_number = invoice_number + 1
+
     invoice = Invoice(
         organization_id=organization_id,
+        invoice_number=invoice_number,
         created_by_user_id=current_user.id,
         customer_id=customer_id,
         subtotal=subtotal,

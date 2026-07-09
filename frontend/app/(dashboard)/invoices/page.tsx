@@ -67,13 +67,13 @@ export default function InvoicesPage() {
     });
   }
 
-  async function downloadInvoicePdf(invoiceId: string) {
+  async function downloadInvoicePdf(invoiceId: string, invoiceNumber: string) {
     if (downloadingId) return;
     setDownloadingId(invoiceId);
     const loadingId = toast.loading("Preparing PDF…");
     try {
       const blob = await apiFetchBlob(orgPath(`invoices/${invoiceId}/pdf`));
-      downloadBlob(blob, `invoice-${invoiceId}.pdf`);
+      downloadBlob(blob, `${invoiceNumber}.pdf`);
       toast.dismiss(loadingId);
       toast.success("PDF downloaded.");
     } catch (err) {
@@ -160,14 +160,10 @@ export default function InvoicesPage() {
                   return (
                     <tr key={row.id} className="hover:bg-slate-50/80">
                       <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">
-                        {row.id.slice(0, 8)}…
+                        {row.invoice_number}
                       </td>
                       <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
-                        {row.customer_id ? (
-                          <span className="font-mono text-xs">
-                            {row.customer_id.slice(0, 8)}…
-                          </span>
-                        ) : (
+                        {row.customer_name ?? (
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
@@ -195,7 +191,9 @@ export default function InvoicesPage() {
                       <td className="px-4 py-3 sm:px-6">
                         <button
                           type="button"
-                          onClick={() => void downloadInvoicePdf(row.id)}
+                          onClick={() =>
+                            void downloadInvoicePdf(row.id, row.invoice_number)
+                          }
                           disabled={downloadingId === row.id}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >

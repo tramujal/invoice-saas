@@ -20,7 +20,10 @@
       "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' -X POST http://127.0.0.1:8000/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"demo@example.com\",\"password\":\"supersecret1\",\"organization_name\":\"Dup\"}')",
       "Bash(curl -s -X POST http://127.0.0.1:8000/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"weak@example.com\",\"password\":\"short\",\"organization_name\":\"Weak\"}')",
       "Bash(python -m pip install \"psycopg[binary]>=3.1.0\")",
-      "Bash(DATABASE_URL=postgres://user:pass@localhost:5432/invoices python -c ' *)"
+      "Bash(DATABASE_URL=postgres://user:pass@localhost:5432/invoices python -c ' *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python -c ' *)",
+      "Bash(python -m pip install pypdf --quiet)"
     ]
   }
 }

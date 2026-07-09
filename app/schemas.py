@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
 
 
@@ -11,6 +12,12 @@ def _normalize_email(value: str) -> str:
     if "@" not in value or value.startswith("@") or value.endswith("@"):
         raise ValueError("Invalid email address")
     return value
+
+
+def _format_invoice_number(value: int | str) -> str:
+    if isinstance(value, str):
+        return value
+    return format_invoice_number(value)
 
 
 class RegisterRequest(BaseModel):
@@ -91,26 +98,40 @@ class InvoiceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    invoice_number: str
     organization_id: str
     created_by_user_id: str | None
     customer_id: str | None
+    customer_name: str | None
     subtotal: Decimal
     tax_amount: Decimal
     total: Decimal
     payment_status: PaymentStatus
     line_items: list[InvoiceLineItemResponse]
 
+    @field_validator("invoice_number", mode="before")
+    @classmethod
+    def _format_number(cls, value: int | str) -> str:
+        return _format_invoice_number(value)
+
 
 class InvoiceSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    invoice_number: str
     customer_id: str | None
+    customer_name: str | None
     subtotal: Decimal
     tax_amount: Decimal
     total: Decimal
     payment_status: PaymentStatus
     created_at: datetime
+
+    @field_validator("invoice_number", mode="before")
+    @classmethod
+    def _format_number(cls, value: int | str) -> str:
+        return _format_invoice_number(value)
 
 
 class InvoicePaymentStatusUpdate(BaseModel):

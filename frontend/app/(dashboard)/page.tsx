@@ -202,14 +202,10 @@ export default function DashboardPage() {
                         return (
                           <tr key={row.id} className="hover:bg-slate-50/80">
                             <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">
-                              {row.id.slice(0, 8)}…
+                              {row.invoice_number}
                             </td>
                             <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
-                              {row.customer_id ? (
-                                <span className="font-mono text-xs">
-                                  {row.customer_id.slice(0, 8)}…
-                                </span>
-                              ) : (
+                              {row.customer_name ?? (
                                 <span className="text-slate-400">—</span>
                               )}
                             </td>

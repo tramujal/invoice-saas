@@ -16,6 +16,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
+from app.invoice_numbering import format_invoice_number
 from app.models import Invoice
 from app.payment_status import PaymentStatus
 
@@ -36,6 +37,8 @@ def _format_quantity(value) -> str:
 
 
 def render_invoice_pdf(invoice: Invoice) -> bytes:
+    invoice_number = format_invoice_number(invoice.invoice_number)
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -44,7 +47,7 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
         bottomMargin=0.75 * inch,
         leftMargin=0.75 * inch,
         rightMargin=0.75 * inch,
-        title=f"Invoice {invoice.id}",
+        title=f"Invoice {invoice_number}",
     )
 
     styles = getSampleStyleSheet()
@@ -70,8 +73,8 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     )
     meta_table = Table(
         [
-            ["Invoice ID", invoice.id],
-            ["Created", invoice.created_at.strftime("%Y-%m-%d %H:%M")],
+            ["Invoice No.", invoice_number],
+            ["Created", invoice.created_at.strftime("%B %d, %Y")],
             ["Payment status", status_label],
         ],
         colWidths=[1.4 * inch, 4.6 * inch],

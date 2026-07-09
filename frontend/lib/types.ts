@@ -2,7 +2,9 @@ import type { PaymentStatus } from "@/lib/payment-status";
 
 export type InvoiceSummary = {
   id: string;
+  invoice_number: string;
   customer_id: string | null;
+  customer_name: string | null;
   subtotal: string;
   tax_amount: string;
   total: string;
@@ -37,9 +39,11 @@ export type InvoiceLineItemResponse = {
 /** Response from POST /organizations/{org}/invoices */
 export type InvoiceCreatedResponse = {
   id: string;
+  invoice_number: string;
   organization_id: string;
   created_by_user_id: string | null;
   customer_id: string | null;
+  customer_name: string | null;
   subtotal: string;
   tax_amount: string;
   total: string;

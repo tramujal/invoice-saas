@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_user, require_org_member
@@ -106,6 +106,7 @@ def get_dashboard(
 
     recent_invoices = db.scalars(
         select(Invoice)
+        .options(selectinload(Invoice.customer))
         .where(org_filter)
         .order_by(Invoice.created_at.desc())
         .limit(RECENT_INVOICES_LIMIT)

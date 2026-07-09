@@ -6,6 +6,7 @@ from sqlalchemy import (
     CHAR,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -15,6 +16,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.database import engine
 from app.payment_status import PaymentStatus
+from app.schema_migrations import run_startup_migrations
 
 
 class Base(DeclarativeBase):
@@ -28,6 +30,9 @@ class Organization(Base):
         CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    next_invoice_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
 
     members: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="organization"
@@ -97,6 +102,7 @@ class Customer(Base):
 
 class Invoice(Base):
     __tablename__ = "invoices"
+    __table_args__ = (UniqueConstraint("organization_id", "invoice_number"),)
 
     id: Mapped[str] = mapped_column(
         CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -104,6 +110,7 @@ class Invoice(Base):
     organization_id: Mapped[str] = mapped_column(
         CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
+    invoice_number: Mapped[int] = mapped_column(Integer, nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(
         CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -129,6 +136,10 @@ class Invoice(Base):
         back_populates="invoice", cascade="all, delete-orphan"
     )
 
+    @property
+    def customer_name(self) -> str | None:
+        return self.customer.name if self.customer is not None else None
+
 
 class InvoiceLineItem(Base):
     __tablename__ = "invoice_line_items"
@@ -149,3 +160,4 @@ class InvoiceLineItem(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    run_startup_migrations(engine)
