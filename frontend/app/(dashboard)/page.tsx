@@ -4,13 +4,17 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
+import { InvoiceVolumeChart } from "@/components/dashboard/InvoiceVolumeChart";
 import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBreakdown";
+import { PaymentStatusChart } from "@/components/dashboard/PaymentStatusChart";
 import { RevenueTrendCard } from "@/components/dashboard/RevenueTrendCard";
+import { RevenueTrendLineChart } from "@/components/dashboard/RevenueTrendLineChart";
+import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
 import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { isPaymentStatus } from "@/lib/payment-status";
-import type { DashboardData } from "@/lib/types";
+import type { DashboardAnalytics, DashboardData } from "@/lib/types";
 
 function RecentInvoicesSkeletonRows() {
   return (
@@ -40,6 +44,7 @@ function RecentInvoicesSkeletonRows() {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,10 +52,15 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const json = await apiFetch<DashboardData>(orgPath("dashboard"));
-      setData(json);
+      const [dashboardJson, analyticsJson] = await Promise.all([
+        apiFetch<DashboardData>(orgPath("dashboard")),
+        apiFetch<DashboardAnalytics>(orgPath("dashboard/analytics")),
+      ]);
+      setData(dashboardJson);
+      setAnalytics(analyticsJson);
     } catch (e) {
       setData(null);
+      setAnalytics(null);
       setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
@@ -145,6 +155,28 @@ export default function DashboardPage() {
               overdue={data?.overdue_invoices ?? 0}
               loading={loading}
             />
+          </section>
+
+          <section aria-label="Analytics" className="space-y-4">
+            <h2 className="text-lg font-semibold text-slate-900">Analytics</h2>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <RevenueTrendLineChart
+                data={analytics?.monthly_summary ?? []}
+                loading={loading}
+              />
+              <InvoiceVolumeChart
+                data={analytics?.monthly_summary ?? []}
+                loading={loading}
+              />
+              <PaymentStatusChart
+                data={analytics?.invoice_count_by_status ?? []}
+                loading={loading}
+              />
+              <TopCustomersChart
+                data={analytics?.top_customers ?? []}
+                loading={loading}
+              />
+            </div>
           </section>
 
           <section className="space-y-4">

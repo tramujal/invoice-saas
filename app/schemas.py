@@ -233,6 +233,29 @@ class DashboardResponse(BaseModel):
     recent_invoices: list[InvoiceSummaryResponse]
 
 
+class MonthlySummaryPoint(BaseModel):
+    month: str
+    revenue: Decimal
+    invoice_count: int
+
+
+class PaymentStatusCountPoint(BaseModel):
+    status: PaymentStatus
+    count: int
+
+
+class TopCustomerRevenue(BaseModel):
+    customer_id: str
+    customer_name: str
+    revenue: Decimal
+
+
+class DashboardAnalyticsResponse(BaseModel):
+    monthly_summary: list[MonthlySummaryPoint]
+    invoice_count_by_status: list[PaymentStatusCountPoint]
+    top_customers: list[TopCustomerRevenue]
+
+
 class CustomerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -23,3 +23,11 @@ export const PAYMENT_STATUS_SELECT_CLASS: Record<PaymentStatus, string> = {
   paid: "border-emerald-200 bg-emerald-50 text-emerald-900",
   overdue: "border-red-200 bg-red-50 text-red-900",
 };
+
+/** Hex equivalents of the badge color families, for chart fills (SVG can't
+ * consume Tailwind classes directly). */
+export const PAYMENT_STATUS_CHART_COLOR: Record<PaymentStatus, string> = {
+  pending: "#fbbf24", // amber-400
+  paid: "#10b981", // emerald-500
+  overdue: "#f87171", // red-400
+};

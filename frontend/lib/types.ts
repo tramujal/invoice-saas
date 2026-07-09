@@ -100,3 +100,27 @@ export type DashboardData = {
   revenue_growth_percent: string | null;
   recent_invoices: InvoiceSummary[];
 };
+
+export type MonthlySummaryPoint = {
+  month: string;
+  revenue: string;
+  invoice_count: number;
+};
+
+export type PaymentStatusCountPoint = {
+  status: PaymentStatus;
+  count: number;
+};
+
+export type TopCustomerRevenue = {
+  customer_id: string;
+  customer_name: string;
+  revenue: string;
+};
+
+/** Response from GET /organizations/{org}/dashboard/analytics */
+export type DashboardAnalytics = {
+  monthly_summary: MonthlySummaryPoint[];
+  invoice_count_by_status: PaymentStatusCountPoint[];
+  top_customers: TopCustomerRevenue[];
+};
