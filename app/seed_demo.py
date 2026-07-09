@@ -7,17 +7,25 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import Organization, OrganizationMember, User, init_db
+from app.security import hash_password
 
 DEMO_USER_ID = "11111111-1111-1111-1111-111111111111"
 DEMO_ORG_ID = "22222222-2222-2222-2222-222222222222"
 DEMO_USER_EMAIL = "demo@example.com"
+DEMO_USER_PASSWORD = "demo12345"
 DEMO_ORG_NAME = "Demo Organization"
 
 
 def seed(session: Session) -> None:
     user = session.get(User, DEMO_USER_ID)
     if user is None:
-        session.add(User(id=DEMO_USER_ID, email=DEMO_USER_EMAIL))
+        session.add(
+            User(
+                id=DEMO_USER_ID,
+                email=DEMO_USER_EMAIL,
+                hashed_password=hash_password(DEMO_USER_PASSWORD),
+            )
+        )
 
     org = session.get(Organization, DEMO_ORG_ID)
     if org is None:
@@ -52,7 +60,7 @@ def main() -> None:
         raise
     finally:
         db.close()
-    print(f"Seed OK. user_id={DEMO_USER_ID} org_id={DEMO_ORG_ID}")
+    print(f"Seed OK. email={DEMO_USER_EMAIL} password={DEMO_USER_PASSWORD}")
 
 
 if __name__ == "__main__":

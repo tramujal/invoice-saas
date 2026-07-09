@@ -99,6 +99,39 @@ export async function apiFetchBlob(
   return res.blob();
 }
 
+/**
+ * Unauthenticated POST request used by the login/register flows, before a
+ * token exists. Reuses the same ApiError shape as apiFetch so callers can
+ * share error-formatting logic.
+ */
+export async function authRequest<T>(
+  apiBaseUrl: string,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const base = apiBaseUrl.trim().replace(/\/$/, "");
+  if (!base) throw new ApiError("API base URL is not configured", 0);
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+
+  const res = await fetch(`${base}${normalized}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    let responseBody: unknown;
+    try {
+      responseBody = await res.json();
+    } catch {
+      responseBody = await res.text();
+    }
+    throw new ApiError(`Request failed (${res.status})`, res.status, responseBody);
+  }
+
+  return (await res.json()) as T;
+}
+
 export function orgPath(segment: string): string {
   const orgId = getOrganizationId();
   if (!orgId) throw new ApiError("Organization is not configured", 0);

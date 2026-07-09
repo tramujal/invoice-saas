@@ -36,6 +36,7 @@ class User(Base):
         CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
     memberships: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="user"

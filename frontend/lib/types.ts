@@ -47,6 +47,24 @@ export type InvoiceCreatedResponse = {
   line_items: InvoiceLineItemResponse[];
 };
 
+export type AuthUser = {
+  id: string;
+  email: string;
+};
+
+export type OrganizationSummary = {
+  id: string;
+  name: string;
+};
+
+/** Response from POST /auth/login and POST /auth/register */
+export type AuthResponse = {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+  organizations: OrganizationSummary[];
+};
+
 /** Response from GET /organizations/{org}/dashboard */
 export type DashboardData = {
   total_revenue: string;

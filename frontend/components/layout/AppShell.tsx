@@ -2,9 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { clearAuthSession, isAuthenticated } from "@/lib/auth-storage";
+import { apiFetch, ApiError } from "@/lib/api";
+import {
+  clearAuthSession,
+  getOrganizationName,
+  getUserEmail,
+  isAuthenticated,
+} from "@/lib/auth-storage";
 
 const links = [
   { href: "/", label: "Dashboard" },
@@ -20,9 +26,27 @@ function isNavActive(pathname: string, href: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [organizationName, setOrganizationName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) router.replace("/login");
+    if (!isAuthenticated()) {
+      router.replace("/login");
+      return;
+    }
+
+    setOrganizationName(getOrganizationName());
+    setUserEmail(getUserEmail());
+
+    let cancelled = false;
+    apiFetch("/auth/me").catch((err) => {
+      if (!cancelled && err instanceof ApiError && err.status === 401) {
+        router.replace("/login");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   function logout() {
@@ -45,6 +69,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             Log out
           </button>
         </div>
+        {organizationName || userEmail ? (
+          <div className="hidden border-b border-slate-100 px-6 py-3 md:block">
+            {organizationName ? (
+              <p className="truncate text-sm font-medium text-slate-800">
+                {organizationName}
+              </p>
+            ) : null}
+            {userEmail ? (
+              <p className="truncate text-xs text-slate-500">{userEmail}</p>
+            ) : null}
+          </div>
+        ) : null}
         <nav className="flex gap-1 overflow-x-auto px-2 pb-3 md:flex-col md:px-2 md:pb-6">
           {links.map((item) => {
             const active = isNavActive(pathname, item.href);

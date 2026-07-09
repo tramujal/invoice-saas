@@ -10,7 +10,15 @@
       "Bash(taskkill //F //IM python.exe //FI \"WINDOWTITLE eq *\")",
       "Bash(netstat -ano)",
       "Bash(taskkill //F //PID 23764)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(python -m pip install bcrypt pyjwt)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"demo@example.com\",\"password\":\"demo12345\"}')",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' -X POST http://127.0.0.1:8000/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"demo@example.com\",\"password\":\"wrongpass\"}')",
+      "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' -X POST http://127.0.0.1:8000/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"nobody@example.com\",\"password\":\"whatever\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"newco@example.com\",\"password\":\"supersecret1\",\"organization_name\":\"New Co\"}')",
+      "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' -X POST http://127.0.0.1:8000/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"demo@example.com\",\"password\":\"supersecret1\",\"organization_name\":\"Dup\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/auth/register -H 'Content-Type: application/json' -d '{\"email\":\"weak@example.com\",\"password\":\"short\",\"organization_name\":\"Weak\"}')"
     ]
   }
 }
