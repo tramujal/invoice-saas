@@ -3,9 +3,11 @@
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { ApiError, authRequest } from "@/lib/api";
 import { formatApiError } from "@/lib/format-api-error";
 import { isAuthenticated, setAuthSession } from "@/lib/auth-storage";
+import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import type { AuthResponse } from "@/lib/types";
 
 const defaultApi =
@@ -32,6 +34,7 @@ function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t, language, setLanguage } = useMarketingTranslation();
   const [mode, setMode] = useState<Mode>(
     searchParams.get("mode") === "register" ? "register" : "login"
   );
@@ -56,15 +59,15 @@ function LoginForm() {
     setError(null);
 
     if (!apiBaseUrl.trim() || !email.trim() || !password) {
-      setError("Please fill in all fields.");
+      setError(t("auth.errorFillAllFields"));
       return;
     }
     if (mode === "register" && !organizationName.trim()) {
-      setError("Please enter an organization name.");
+      setError(t("auth.errorOrganizationNameRequired"));
       return;
     }
     if (mode === "register" && password.length < 8) {
-      setError("Password must be at least 8 characters.");
+      setError(t("auth.errorPasswordLength"));
       return;
     }
 
@@ -83,7 +86,7 @@ function LoginForm() {
             });
 
       if (!applyAuthResponse(auth, apiBaseUrl)) {
-        setError("No organization found for this account.");
+        setError(t("auth.errorNoOrganization"));
         return;
       }
       router.replace("/dashboard");
@@ -92,9 +95,9 @@ function LoginForm() {
         err instanceof ApiError
           ? formatApiError(
               err,
-              mode === "login" ? "Could not sign in." : "Could not create account."
+              mode === "login" ? t("auth.errorSignInFailed") : t("auth.errorRegisterFailed")
             )
-          : "Something went wrong. Please try again."
+          : t("auth.errorGeneric")
       );
     } finally {
       setIsSubmitting(false);
@@ -104,7 +107,11 @@ function LoginForm() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-        <div className="flex gap-1 rounded-lg bg-slate-100 p-1 text-sm font-medium">
+        <div className="flex justify-end">
+          <LanguageSwitcher language={language} setLanguage={setLanguage} t={t} />
+        </div>
+
+        <div className="mt-4 flex gap-1 rounded-lg bg-slate-100 p-1 text-sm font-medium">
           <button
             type="button"
             onClick={() => switchMode("login")}
@@ -114,7 +121,7 @@ function LoginForm() {
                 : "text-slate-500 hover:text-slate-700"
             }`}
           >
-            Sign in
+            {t("auth.signIn")}
           </button>
           <button
             type="button"
@@ -125,17 +132,15 @@ function LoginForm() {
                 : "text-slate-500 hover:text-slate-700"
             }`}
           >
-            Create account
+            {t("auth.createAccount")}
           </button>
         </div>
 
         <h1 className="mt-6 text-xl font-semibold tracking-tight text-slate-900">
-          {mode === "login" ? "Sign in" : "Create your organization"}
+          {mode === "login" ? t("auth.signIn") : t("auth.headingRegister")}
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          {mode === "login"
-            ? "Sign in with your email and password."
-            : "This creates your account and a new organization."}
+          {mode === "login" ? t("auth.subtitleSignIn") : t("auth.subtitleRegister")}
         </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -144,7 +149,7 @@ function LoginForm() {
               className="block text-xs font-medium text-slate-700"
               htmlFor="email"
             >
-              Email
+              {t("auth.emailLabel")}
             </label>
             <input
               id="email"
@@ -153,7 +158,7 @@ function LoginForm() {
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder={t("auth.emailPlaceholder")}
               disabled={isSubmitting}
             />
           </div>
@@ -162,7 +167,7 @@ function LoginForm() {
               className="block text-xs font-medium text-slate-700"
               htmlFor="password"
             >
-              Password
+              {t("auth.passwordLabel")}
             </label>
             <input
               id="password"
@@ -171,7 +176,7 @@ function LoginForm() {
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === "register" ? "At least 8 characters" : "••••••••"}
+              placeholder={mode === "register" ? t("auth.passwordPlaceholderRegister") : "••••••••"}
               disabled={isSubmitting}
             />
           </div>
@@ -182,7 +187,7 @@ function LoginForm() {
                 className="block text-xs font-medium text-slate-700"
                 htmlFor="organizationName"
               >
-                Organization name
+                {t("auth.organizationNameLabel")}
               </label>
               <input
                 id="organizationName"
@@ -191,7 +196,7 @@ function LoginForm() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
                 value={organizationName}
                 onChange={(e) => setOrganizationName(e.target.value)}
-                placeholder="Acme Inc."
+                placeholder={t("auth.organizationNamePlaceholder")}
                 disabled={isSubmitting}
               />
             </div>
@@ -199,7 +204,7 @@ function LoginForm() {
 
           <details className="group text-xs text-slate-500">
             <summary className="cursor-pointer select-none font-medium text-slate-600 hover:text-slate-800">
-              Advanced: API base URL
+              {t("auth.advancedSummary")}
             </summary>
             <input
               type="url"
@@ -225,11 +230,11 @@ function LoginForm() {
           >
             {isSubmitting
               ? mode === "login"
-                ? "Signing in…"
-                : "Creating account…"
+                ? t("auth.signingIn")
+                : t("auth.creatingAccount")
               : mode === "login"
-                ? "Sign in"
-                : "Create account"}
+                ? t("auth.signIn")
+                : t("auth.createAccount")}
           </button>
         </form>
       </div>
