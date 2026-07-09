@@ -132,9 +132,9 @@ export async function authRequest<T>(
   return (await res.json()) as T;
 }
 
-export function orgPath(segment: string): string {
+export function orgPath(segment: string = ""): string {
   const orgId = getOrganizationId();
   if (!orgId) throw new ApiError("Organization is not configured", 0);
   const s = segment.startsWith("/") ? segment.slice(1) : segment;
-  return `/organizations/${orgId}/${s}`;
+  return s ? `/organizations/${orgId}/${s}` : `/organizations/${orgId}`;
 }

@@ -20,6 +20,12 @@ def _format_invoice_number(value: int | str) -> str:
     return format_invoice_number(value)
 
 
+def _blank_to_none(value: str | None) -> str | None:
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
 class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=72)
@@ -65,6 +71,37 @@ class AuthResponse(BaseModel):
 class MeResponse(BaseModel):
     user: UserResponse
     organizations: list[OrganizationSummary]
+
+
+class OrganizationProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    business_name: str | None
+    tax_id: str | None
+    address: str | None
+    phone: str | None
+    email: str | None
+    logo_url: str | None
+
+
+class OrganizationUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    business_name: str | None = Field(default=None, max_length=255)
+    tax_id: str | None = Field(default=None, max_length=64)
+    address: str | None = Field(default=None, max_length=512)
+    phone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
+    logo_url: str | None = Field(default=None, max_length=1024)
+
+    @field_validator(
+        "business_name", "tax_id", "address", "phone", "email", "logo_url",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_blank(cls, value: str | None) -> str | None:
+        return _blank_to_none(value)
 
 
 class InvoiceLineItemCreate(BaseModel):

@@ -14,6 +14,7 @@ from sqlalchemy.engine import Engine
 
 def run_startup_migrations(engine: Engine) -> None:
     _add_invoice_numbering(engine)
+    _add_organization_profile_fields(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -52,6 +53,34 @@ def _add_invoice_numbering(engine: Engine) -> None:
                     "ON invoices (organization_id, invoice_number)"
                 )
             )
+
+
+def _add_organization_profile_fields(engine: Engine) -> None:
+    """Adds the optional business-profile columns to organizations.
+
+    All nullable, so existing rows (and the invoices that reference them)
+    stay valid with no backfill.
+    """
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+
+    columns = {c["name"] for c in inspector.get_columns("organizations")}
+    new_columns = {
+        "business_name": "VARCHAR(255)",
+        "tax_id": "VARCHAR(64)",
+        "address": "VARCHAR(512)",
+        "phone": "VARCHAR(64)",
+        "email": "VARCHAR(255)",
+        "logo_url": "VARCHAR(1024)",
+    }
+    missing = {name: t for name, t in new_columns.items() if name not in columns}
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for name, coltype in missing.items():
+            conn.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} {coltype}"))
 
 
 def _backfill_invoice_numbers(conn) -> None:

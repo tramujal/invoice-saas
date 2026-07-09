@@ -50,6 +50,11 @@ export function getOrganizationName(): string | null {
   return window.localStorage.getItem(ORG_NAME_KEY);
 }
 
+export function updateOrganizationName(name: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ORG_NAME_KEY, name);
+}
+
 export function getUserEmail(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(USER_EMAIL_KEY);

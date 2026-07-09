@@ -16,6 +16,7 @@ const links = [
   { href: "/", label: "Dashboard" },
   { href: "/invoices", label: "Invoices" },
   { href: "/customers", label: "Customers" },
+  { href: "/settings", label: "Settings" },
 ] as const;
 
 function isNavActive(pathname: string, href: string): boolean {
@@ -35,9 +36,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    setOrganizationName(getOrganizationName());
-    setUserEmail(getUserEmail());
-
     let cancelled = false;
     apiFetch("/auth/me").catch((err) => {
       if (!cancelled && err instanceof ApiError && err.status === 401) {
@@ -48,6 +46,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    // Cheap, synchronous re-read on every navigation so a rename saved on
+    // /settings shows up in the sidebar without requiring a re-login.
+    setOrganizationName(getOrganizationName());
+    setUserEmail(getUserEmail());
+  }, [pathname]);
 
   function logout() {
     clearAuthSession();

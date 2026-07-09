@@ -69,6 +69,18 @@ export type AuthResponse = {
   organizations: OrganizationSummary[];
 };
 
+/** Response from GET/PATCH /organizations/{org} */
+export type OrganizationProfile = {
+  id: string;
+  name: string;
+  business_name: string | null;
+  tax_id: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  logo_url: string | null;
+};
+
 /** Response from GET /organizations/{org}/dashboard */
 export type DashboardData = {
   total_revenue: string;

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.models import init_db
-from app.routers import auth, customers, dashboard, invoices
+from app.routers import auth, customers, dashboard, invoices, organizations
 
 _DEFAULT_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
@@ -47,3 +47,4 @@ app.include_router(auth.router)
 app.include_router(invoices.router)
 app.include_router(customers.router)
 app.include_router(dashboard.router)
+app.include_router(organizations.router)

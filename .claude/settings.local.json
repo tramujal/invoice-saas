@@ -23,7 +23,8 @@
       "Bash(DATABASE_URL=postgres://user:pass@localhost:5432/invoices python -c ' *)",
       "Bash(python3 -c ' *)",
       "Bash(python -c ' *)",
-      "Bash(python -m pip install pypdf --quiet)"
+      "Bash(python -m pip install pypdf --quiet)",
+      "Bash(python -m pip uninstall -y pypdf --quiet)"
     ]
   }
 }
