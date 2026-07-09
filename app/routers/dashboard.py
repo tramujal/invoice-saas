@@ -23,9 +23,14 @@ def _quantize_money(value: Decimal) -> Decimal:
 
 
 def _month_bounds(now: datetime) -> tuple[datetime, datetime]:
-    """Returns (start of last month, start of this month), both naive UTC."""
+    """Returns (start of last month, start of this month), both UTC-aware.
+
+    Kept timezone-aware (rather than stripped to naive) so comparisons against
+    Invoice.created_at are unambiguous on Postgres, where DateTime(timezone=True)
+    columns are genuinely tz-aware; SQLite ignores tzinfo harmlessly either way.
+    """
     this_month_start = now.replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+        day=1, hour=0, minute=0, second=0, microsecond=0
     )
     if this_month_start.month == 1:
         last_month_start = this_month_start.replace(
