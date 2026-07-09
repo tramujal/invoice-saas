@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import reportlab\")",
+      "Bash(python -m pip show reportlab)",
+      "Bash(python -m pip install reportlab)",
+      "Bash(python -m uvicorn app.main:app --port 8000)",
+      "Read(//tmp/**)",
+      "Bash(python -m app.seed_demo)",
+      "Bash(taskkill //F //IM python.exe //FI \"WINDOWTITLE eq *\")",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 23764)"
+    ]
+  }
+}

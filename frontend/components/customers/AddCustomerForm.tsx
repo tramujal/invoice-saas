@@ -1,0 +1,273 @@
+"use client";
+
+import { FormEvent, useState } from "react";
+
+import { useToast } from "@/components/ui/toast";
+import { apiFetch, orgPath } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
+import type { Customer } from "@/lib/types";
+
+const LIMITS = {
+  name: 255,
+  email: 255,
+  phone: 64,
+  address: 512,
+} as const;
+
+type FieldKey = keyof typeof LIMITS;
+type FieldErrors = Partial<Record<FieldKey, string>>;
+
+function simpleEmailValid(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function validate(params: {
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+}): FieldErrors | null {
+  const errors: FieldErrors = {};
+  const name = params.name.trim();
+  const email = params.email.trim();
+  const phone = params.phone.trim();
+  const address = params.address.trim();
+
+  if (!name) errors.name = "Name is required.";
+  else if (name.length > LIMITS.name)
+    errors.name = `Name must be at most ${LIMITS.name} characters.`;
+
+  if (!email) errors.email = "Email is required.";
+  else if (email.length > LIMITS.email)
+    errors.email = `Email must be at most ${LIMITS.email} characters.`;
+  else if (!simpleEmailValid(email))
+    errors.email = "Enter a valid email address.";
+
+  if (phone.length > LIMITS.phone)
+    errors.phone = `Phone must be at most ${LIMITS.phone} characters.`;
+
+  if (address.length > LIMITS.address)
+    errors.address = `Address must be at most ${LIMITS.address} characters.`;
+
+  return Object.keys(errors).length > 0 ? errors : null;
+}
+
+type AddCustomerFormProps = {
+  onCreated: () => void | Promise<void>;
+};
+
+export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+
+    const errs = validate({ name, email, phone, address });
+    if (errs) {
+      setFieldErrors(errs);
+      return;
+    }
+    setFieldErrors({});
+
+    const loadingId = toast.loading("Creating customer…");
+    setIsSubmitting(true);
+    try {
+      await apiFetch<Customer>(orgPath("customers"), {
+        method: "POST",
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
+        }),
+      });
+      toast.dismiss(loadingId);
+      toast.success("Customer created.");
+      setName("");
+      setEmail("");
+      setPhone("");
+      setAddress("");
+      await onCreated();
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(formatApiError(err, "Could not create customer."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const disabled = isSubmitting;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        Add customer
+      </h2>
+      <p className="mt-1 text-sm text-slate-500">
+        New customers are scoped to your current organization.
+      </p>
+
+      <form
+        onSubmit={(e) => void handleSubmit(e)}
+        className="mt-5 space-y-4"
+        noValidate
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label htmlFor="cust-name" className="text-sm font-medium text-slate-700">
+              Name <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="cust-name"
+              type="text"
+              name="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={disabled}
+              maxLength={LIMITS.name}
+              autoComplete="name"
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              aria-invalid={Boolean(fieldErrors.name)}
+              aria-describedby={fieldErrors.name ? "cust-name-err" : undefined}
+            />
+            {fieldErrors.name ? (
+              <p id="cust-name-err" className="mt-1 text-xs text-red-600" role="alert">
+                {fieldErrors.name}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="sm:col-span-2">
+            <label htmlFor="cust-email" className="text-sm font-medium text-slate-700">
+              Email <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="cust-email"
+              type="email"
+              name="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={disabled}
+              maxLength={LIMITS.email}
+              autoComplete="email"
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              aria-invalid={Boolean(fieldErrors.email)}
+              aria-describedby={fieldErrors.email ? "cust-email-err" : undefined}
+            />
+            {fieldErrors.email ? (
+              <p id="cust-email-err" className="mt-1 text-xs text-red-600" role="alert">
+                {fieldErrors.email}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:col-span-2 md:grid-cols-2">
+            <div>
+              <label htmlFor="cust-phone" className="text-sm font-medium text-slate-700">
+                Phone
+              </label>
+              <input
+                id="cust-phone"
+                type="tel"
+                name="phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                disabled={disabled}
+                maxLength={LIMITS.phone}
+                autoComplete="tel"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                aria-invalid={Boolean(fieldErrors.phone)}
+                aria-describedby={fieldErrors.phone ? "cust-phone-err" : undefined}
+              />
+              {fieldErrors.phone ? (
+                <p id="cust-phone-err" className="mt-1 text-xs text-red-600" role="alert">
+                  {fieldErrors.phone}
+                </p>
+              ) : null}
+            </div>
+
+            <div>
+              <label htmlFor="cust-address" className="text-sm font-medium text-slate-700">
+                Address
+              </label>
+              <textarea
+                id="cust-address"
+                name="address"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                disabled={disabled}
+                maxLength={LIMITS.address}
+                rows={3}
+                className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                aria-invalid={Boolean(fieldErrors.address)}
+                aria-describedby={fieldErrors.address ? "cust-address-err" : undefined}
+              />
+              {fieldErrors.address ? (
+                <p id="cust-address-err" className="mt-1 text-xs text-red-600" role="alert">
+                  {fieldErrors.address}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setName("");
+              setEmail("");
+              setPhone("");
+              setAddress("");
+              setFieldErrors({});
+            }}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Clear
+          </button>
+          <button
+            type="submit"
+            disabled={disabled}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isSubmitting ? (
+              <>
+                <svg
+                  className="h-4 w-4 shrink-0 animate-spin"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                Saving…
+              </>
+            ) : (
+              "Create customer"
+            )}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
