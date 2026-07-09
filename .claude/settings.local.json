@@ -30,7 +30,9 @@
       "Bash(curl -s __TRACKED_VAR__?created_after=2030-01-01T00:00:00Z -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
       "Bash(python -c \"import app.routers.invoices; print\\('imports OK'\\)\")",
       "Bash(python -c \"import app.email.templates; print\\('imports OK'\\)\")",
-      "Bash(python -c \"import app.main; print\\('imports OK'\\)\")"
+      "Bash(python -c \"import app.main; print\\('imports OK'\\)\")",
+      "Bash(grep -rn 'href=\"/\"' app components)",
+      "Bash(grep -rn 'replace\\(\"/\"\\)\\\\|push\\(\"/\"\\)\\\\|router\\\\.replace\\(\"/\"\\)' app components)"
     ]
   }
 }

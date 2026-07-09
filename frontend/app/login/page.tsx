@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { ApiError, authRequest } from "@/lib/api";
 import { formatApiError } from "@/lib/format-api-error";
@@ -29,9 +29,12 @@ function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
   return true;
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("login");
+  const searchParams = useSearchParams();
+  const [mode, setMode] = useState<Mode>(
+    searchParams.get("mode") === "register" ? "register" : "login"
+  );
   const [apiBaseUrl, setApiBaseUrl] = useState(defaultApi);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,7 +43,7 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated()) router.replace("/");
+    if (isAuthenticated()) router.replace("/dashboard");
   }, [router]);
 
   function switchMode(next: Mode) {
@@ -83,7 +86,7 @@ export default function LoginPage() {
         setError("No organization found for this account.");
         return;
       }
-      router.replace("/");
+      router.replace("/dashboard");
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -231,5 +234,13 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -14,14 +14,13 @@ import {
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
 const links = [
-  { href: "/", labelKey: "nav.dashboard" },
+  { href: "/dashboard", labelKey: "nav.dashboard" },
   { href: "/invoices", labelKey: "nav.invoices" },
   { href: "/customers", labelKey: "nav.customers" },
   { href: "/settings", labelKey: "nav.settings" },
 ] as const;
 
 function isNavActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -65,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-dvh flex-col bg-surface md:flex-row">
       <aside className="shrink-0 border-slate-200 bg-white md:w-56 md:border-r">
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 md:block md:border-b-0 md:px-6 md:pt-6">
-          <Link href="/" className="text-lg font-semibold text-slate-900">
+          <Link href="/dashboard" className="text-lg font-semibold text-slate-900">
             Invoicing
           </Link>
           <button
