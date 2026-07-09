@@ -17,6 +17,12 @@ export type PaginatedInvoices = {
   items: InvoiceSummary[];
 };
 
+/** Response from POST /organizations/{org}/invoices/{id}/send-email */
+export type SendInvoiceEmailResponse = {
+  sent: boolean;
+  sent_to: string;
+};
+
 export type Customer = {
   id: string;
   organization_id: string;

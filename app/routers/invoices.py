@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_user, require_org_member
+from app.email.base import EmailAttachment, EmailMessage, EmailSendError
+from app.email.factory import get_email_sender
+from app.email.templates import build_invoice_email
 from app.invoice_numbering import INVOICE_NUMBER_PREFIX, format_invoice_number
 from app.invoice_pdf import render_invoice_pdf
 from app.models import Customer, Invoice, InvoiceLineItem, Organization, User
@@ -18,6 +21,7 @@ from app.schemas import (
     InvoiceSortField,
     InvoiceSummaryResponse,
     PaginatedInvoicesResponse,
+    SendInvoiceEmailResponse,
     SortDirection,
 )
 
@@ -156,6 +160,51 @@ def download_invoice_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/{invoice_id}/send-email", response_model=SendInvoiceEmailResponse)
+def send_invoice_email(
+    organization_id: str,
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SendInvoiceEmailResponse:
+    # Authorization/existence/validation checks happen before we even ask
+    # whether the email provider is configured, so a bad request (wrong org,
+    # missing invoice, no customer email) always reports its real 403/404/422
+    # rather than being masked by a 503 from get_email_sender().
+    require_org_member(current_user, organization_id, db)
+    invoice = _invoice_in_org(db, organization_id, invoice_id)
+
+    customer = invoice.customer
+    if customer is None or not customer.email:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This invoice has no customer email on file.",
+        )
+
+    email_sender = get_email_sender()
+
+    pdf_bytes = render_invoice_pdf(invoice)
+    filename = f"{format_invoice_number(invoice.invoice_number)}.pdf"
+    subject, body = build_invoice_email(invoice, customer)
+
+    message = EmailMessage(
+        to=customer.email,
+        subject=subject,
+        text_body=body,
+        attachments=[EmailAttachment(filename=filename, content=pdf_bytes)],
+    )
+
+    try:
+        email_sender.send(message)
+    except EmailSendError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to send invoice email: {exc}",
+        ) from exc
+
+    return SendInvoiceEmailResponse(sent=True, sent_to=customer.email)
 
 
 @router.patch("/{invoice_id}", response_model=InvoiceSummaryResponse)

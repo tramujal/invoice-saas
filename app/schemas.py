@@ -194,6 +194,11 @@ class InvoicePaymentStatusUpdate(BaseModel):
     payment_status: PaymentStatus
 
 
+class SendInvoiceEmailResponse(BaseModel):
+    sent: bool
+    sent_to: str
+
+
 class PaginatedInvoicesResponse(BaseModel):
     """Total number of invoices matching the org filter (all pages), plus one page of rows."""
 

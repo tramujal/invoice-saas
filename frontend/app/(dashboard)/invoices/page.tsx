@@ -14,7 +14,11 @@ import {
   isPaymentStatus,
   type PaymentStatus,
 } from "@/lib/payment-status";
-import type { InvoiceSummary, PaginatedInvoices } from "@/lib/types";
+import type {
+  InvoiceSummary,
+  PaginatedInvoices,
+  SendInvoiceEmailResponse,
+} from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 const pageSize = 10;
@@ -76,6 +80,7 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -181,6 +186,25 @@ export default function InvoicesPage() {
       toast.error(formatApiError(err, "Could not download PDF."));
     } finally {
       setDownloadingId(null);
+    }
+  }
+
+  async function sendInvoiceEmail(invoiceId: string, invoiceNumber: string) {
+    if (sendingId) return;
+    setSendingId(invoiceId);
+    const loadingId = toast.loading("Sending email…");
+    try {
+      const result = await apiFetch<SendInvoiceEmailResponse>(
+        orgPath(`invoices/${invoiceId}/send-email`),
+        { method: "POST" }
+      );
+      toast.dismiss(loadingId);
+      toast.success(`Invoice ${invoiceNumber} emailed to ${result.sent_to}.`);
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(formatApiError(err, "Could not send invoice email."));
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -398,16 +422,32 @@ export default function InvoicesPage() {
                         {new Date(row.created_at).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 sm:px-6">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void downloadInvoicePdf(row.id, row.invoice_number)
-                          }
-                          disabled={downloadingId === row.id}
-                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {downloadingId === row.id ? "Preparing…" : "Download PDF"}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void downloadInvoicePdf(row.id, row.invoice_number)
+                            }
+                            disabled={
+                              downloadingId === row.id || sendingId === row.id
+                            }
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {downloadingId === row.id ? "Preparing…" : "Download PDF"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void sendInvoiceEmail(row.id, row.invoice_number)
+                            }
+                            disabled={
+                              sendingId === row.id || downloadingId === row.id
+                            }
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {sendingId === row.id ? "Sending…" : "Send Email"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
