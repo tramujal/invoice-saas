@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.models import init_db
-from app.routers import customers, invoices
+from app.routers import customers, dashboard, invoices
 
 
 @asynccontextmanager
@@ -26,3 +26,4 @@ app.add_middleware(
 )
 app.include_router(invoices.router)
 app.include_router(customers.router)
+app.include_router(dashboard.router)

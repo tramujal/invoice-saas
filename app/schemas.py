@@ -84,6 +84,19 @@ class CustomerUpdateRequest(BaseModel):
     address: str | None = Field(default=None, max_length=512)
 
 
+class DashboardResponse(BaseModel):
+    total_revenue: Decimal
+    total_invoices: int
+    total_customers: int
+    pending_invoices: int
+    paid_invoices: int
+    overdue_invoices: int
+    revenue_this_month: Decimal
+    revenue_last_month: Decimal
+    revenue_growth_percent: Decimal | None
+    recent_invoices: list[InvoiceSummaryResponse]
+
+
 class CustomerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -9,7 +9,8 @@
       "Bash(python -m app.seed_demo)",
       "Bash(taskkill //F //IM python.exe //FI \"WINDOWTITLE eq *\")",
       "Bash(netstat -ano)",
-      "Bash(taskkill //F //PID 23764)"
+      "Bash(taskkill //F //PID 23764)",
+      "Bash(python3 -)"
     ]
   }
 }

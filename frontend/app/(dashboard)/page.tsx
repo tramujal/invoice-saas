@@ -4,42 +4,42 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
+import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBreakdown";
+import { RevenueTrendCard } from "@/components/dashboard/RevenueTrendCard";
+import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
-import { formatMoney, roundMoney } from "@/lib/money";
-import type { Customer, InvoiceSummary, PaginatedInvoices } from "@/lib/types";
+import { formatMoney } from "@/lib/money";
+import { isPaymentStatus } from "@/lib/payment-status";
+import type { DashboardData } from "@/lib/types";
 
-const RECENT_LIMIT = 5;
-const REVENUE_PAGE_SIZE = 100;
-
-type DashboardStats = {
-  invoiceCount: number;
-  revenue: number;
-  customerCount: number;
-};
-
-async function fetchTotalRevenue(invoiceCount: number): Promise<number> {
-  if (invoiceCount === 0) return 0;
-
-  let revenue = 0;
-  let offset = 0;
-
-  while (offset < invoiceCount) {
-    const page = await apiFetch<PaginatedInvoices>(
-      `${orgPath("invoices")}?limit=${REVENUE_PAGE_SIZE}&offset=${offset}`
-    );
-    for (const invoice of page.items) {
-      const amount = Number.parseFloat(invoice.total);
-      if (Number.isFinite(amount)) revenue += amount;
-    }
-    offset += REVENUE_PAGE_SIZE;
-  }
-
-  return roundMoney(revenue);
+function RecentInvoicesSkeletonRows() {
+  return (
+    <>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <tr key={i} className="border-t border-slate-100">
+          <td className="px-4 py-4 sm:px-6">
+            <div className="h-4 w-20 animate-pulse rounded bg-slate-200" />
+          </td>
+          <td className="hidden px-4 py-4 sm:table-cell sm:px-6">
+            <div className="h-4 w-24 animate-pulse rounded bg-slate-200" />
+          </td>
+          <td className="px-4 py-4 sm:px-6">
+            <div className="h-5 w-16 animate-pulse rounded-full bg-slate-200" />
+          </td>
+          <td className="px-4 py-4 sm:px-6">
+            <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
+          </td>
+          <td className="hidden px-4 py-4 sm:table-cell sm:px-6">
+            <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [recentInvoices, setRecentInvoices] = useState<InvoiceSummary[]>([]);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,24 +47,10 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [customers, recentPage] = await Promise.all([
-        apiFetch<Customer[]>(orgPath("customers")),
-        apiFetch<PaginatedInvoices>(
-          `${orgPath("invoices")}?limit=${RECENT_LIMIT}&offset=0`
-        ),
-      ]);
-
-      const revenue = await fetchTotalRevenue(recentPage.total);
-
-      setStats({
-        invoiceCount: recentPage.total,
-        revenue,
-        customerCount: customers.length,
-      });
-      setRecentInvoices(recentPage.items);
+      const json = await apiFetch<DashboardData>(orgPath("dashboard"));
+      setData(json);
     } catch (e) {
-      setStats(null);
-      setRecentInvoices([]);
+      setData(null);
       setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
@@ -75,8 +61,7 @@ export default function DashboardPage() {
     void load();
   }, [load]);
 
-  const showRecentEmpty =
-    !loading && !error && stats !== null && recentInvoices.length === 0;
+  const showEmpty = !loading && !error && data !== null && data.total_invoices === 0;
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">
@@ -103,147 +88,151 @@ export default function DashboardPage() {
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         <DashboardCard
+          title="Total revenue"
+          value={data ? formatMoney(Number.parseFloat(data.total_revenue)) : "—"}
+          description="Sum of all invoice totals"
+          loading={loading}
+        />
+        <DashboardCard
           title="Total invoices"
-          value={stats ? String(stats.invoiceCount) : "—"}
+          value={data ? String(data.total_invoices) : "—"}
           description="All invoices in this organization"
           loading={loading}
         />
         <DashboardCard
-          title="Total revenue"
-          value={stats ? formatMoney(stats.revenue) : "—"}
-          description="Sum of invoice totals"
-          loading={loading}
-        />
-        <DashboardCard
           title="Total customers"
-          value={stats ? String(stats.customerCount) : "—"}
+          value={data ? String(data.total_customers) : "—"}
           description="Active customer records"
           loading={loading}
         />
       </section>
 
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">
-              Recent invoices
-            </h2>
-            <p className="text-sm text-slate-500">
-              Latest {RECENT_LIMIT} invoices, newest first.
-            </p>
-          </div>
+      {showEmpty ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">
+          <h3 className="text-base font-semibold text-slate-900">
+            No invoices yet
+          </h3>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-slate-600">
+            Create your first invoice to see revenue trends, status breakdowns,
+            and activity on this dashboard.
+          </p>
           <Link
-            href="/invoices"
-            className="text-sm font-medium text-slate-700 hover:text-slate-900"
+            href="/invoices/new"
+            className="mt-5 inline-flex rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
           >
-            View all →
+            Create invoice
           </Link>
         </div>
+      ) : (
+        <>
+          <section
+            aria-label="Revenue and status breakdown"
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+          >
+            <RevenueTrendCard
+              revenueThisMonth={data ? Number.parseFloat(data.revenue_this_month) : 0}
+              revenueLastMonth={data ? Number.parseFloat(data.revenue_last_month) : 0}
+              growthPercent={
+                data?.revenue_growth_percent != null
+                  ? Number.parseFloat(data.revenue_growth_percent)
+                  : null
+              }
+              loading={loading}
+            />
+            <PaymentStatusBreakdown
+              pending={data?.pending_invoices ?? 0}
+              paid={data?.paid_invoices ?? 0}
+              overdue={data?.overdue_invoices ?? 0}
+              loading={loading}
+            />
+          </section>
 
-        {loading ? (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  <tr>
-                    <th className="px-4 py-3 sm:px-6">Invoice</th>
-                    <th className="px-4 py-3 sm:px-6">Total</th>
-                    <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
-                      Created
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <tr key={i} className="border-t border-slate-100">
-                      <td className="px-4 py-4 sm:px-6">
-                        <div className="h-4 w-20 animate-pulse rounded bg-slate-200" />
-                      </td>
-                      <td className="px-4 py-4 sm:px-6">
-                        <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
-                      </td>
-                      <td className="hidden px-4 py-4 sm:table-cell sm:px-6">
-                        <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <section className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Recent invoices
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Latest 5 invoices, newest first.
+                </p>
+              </div>
+              <Link
+                href="/invoices"
+                className="text-sm font-medium text-slate-700 hover:text-slate-900"
+              >
+                View all →
+              </Link>
             </div>
-          </div>
-        ) : null}
 
-        {showRecentEmpty ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">
-            <h3 className="text-base font-semibold text-slate-900">
-              No invoices yet
-            </h3>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-slate-600">
-              Create your first invoice to see it here and track revenue on this
-              dashboard.
-            </p>
-            <Link
-              href="/invoices/new"
-              className="mt-5 inline-flex rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              Create invoice
-            </Link>
-          </div>
-        ) : null}
-
-        {!loading && recentInvoices.length > 0 ? (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  <tr>
-                    <th className="px-4 py-3 sm:px-6">Invoice</th>
-                    <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
-                      Customer
-                    </th>
-                    <th className="px-4 py-3 sm:px-6">Subtotal</th>
-                    <th className="hidden px-4 py-3 md:table-cell md:px-6">Tax</th>
-                    <th className="px-4 py-3 sm:px-6">Total</th>
-                    <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
-                      Created
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {recentInvoices.map((row) => (
-                    <tr key={row.id} className="hover:bg-slate-50/80">
-                      <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">
-                        {row.id.slice(0, 8)}…
-                      </td>
-                      <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
-                        {row.customer_id ? (
-                          <span className="font-mono text-xs">
-                            {row.customer_id.slice(0, 8)}…
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-slate-800 sm:px-6">
-                        {row.subtotal}
-                      </td>
-                      <td className="hidden px-4 py-3 text-slate-800 md:table-cell md:px-6">
-                        {row.tax_amount}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
-                        {row.total}
-                      </td>
-                      <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
-                        {new Date(row.created_at).toLocaleString()}
-                      </td>
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    <tr>
+                      <th className="px-4 py-3 sm:px-6">Invoice</th>
+                      <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
+                        Customer
+                      </th>
+                      <th className="px-4 py-3 sm:px-6">Status</th>
+                      <th className="px-4 py-3 sm:px-6">Total</th>
+                      <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
+                        Created
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {loading ? (
+                      <RecentInvoicesSkeletonRows />
+                    ) : data && data.recent_invoices.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-4 py-8 text-center text-slate-500 sm:px-6"
+                        >
+                          No invoices yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      data?.recent_invoices.map((row) => {
+                        const status = isPaymentStatus(row.payment_status)
+                          ? row.payment_status
+                          : "pending";
+
+                        return (
+                          <tr key={row.id} className="hover:bg-slate-50/80">
+                            <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">
+                              {row.id.slice(0, 8)}…
+                            </td>
+                            <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
+                              {row.customer_id ? (
+                                <span className="font-mono text-xs">
+                                  {row.customer_id.slice(0, 8)}…
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 sm:px-6">
+                              <PaymentStatusBadge status={status} />
+                            </td>
+                            <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
+                              {row.total}
+                            </td>
+                            <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
+                              {new Date(row.created_at).toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        ) : null}
-      </section>
+          </section>
+        </>
+      )}
     </div>
   );
 }

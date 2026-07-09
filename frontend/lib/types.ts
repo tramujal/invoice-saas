@@ -46,3 +46,17 @@ export type InvoiceCreatedResponse = {
   payment_status: PaymentStatus;
   line_items: InvoiceLineItemResponse[];
 };
+
+/** Response from GET /organizations/{org}/dashboard */
+export type DashboardData = {
+  total_revenue: string;
+  total_invoices: number;
+  total_customers: number;
+  pending_invoices: number;
+  paid_invoices: number;
+  overdue_invoices: number;
+  revenue_this_month: string;
+  revenue_last_month: string;
+  revenue_growth_percent: string | null;
+  recent_invoices: InvoiceSummary[];
+};
