@@ -1,10 +1,29 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
+
+
+class SortDirection(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+
+class InvoiceSortField(str, Enum):
+    invoice_number = "invoice_number"
+    created_at = "created_at"
+    total = "total"
+    customer_name = "customer_name"
+
+
+class CustomerSortField(str, Enum):
+    name = "name"
+    email = "email"
+    created_at = "created_at"
 
 
 def _normalize_email(value: str) -> str:

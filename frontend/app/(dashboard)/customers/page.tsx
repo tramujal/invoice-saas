@@ -3,10 +3,46 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AddCustomerForm } from "@/components/customers/AddCustomerForm";
+import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import type { Customer } from "@/lib/types";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 
-function CustomersEmptyState() {
+type CustomerSortBy = "name" | "email" | "created_at";
+
+const SORT_FIELDS: { value: CustomerSortBy; label: string }[] = [
+  { value: "created_at", label: "Created date" },
+  { value: "name", label: "Name" },
+  { value: "email", label: "Email" },
+];
+
+function CustomersEmptyState({
+  hasActiveFilters,
+  onReset,
+}: {
+  hasActiveFilters: boolean;
+  onReset: () => void;
+}) {
+  if (hasActiveFilters) {
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center sm:px-10">
+        <h2 className="text-lg font-semibold text-slate-900">
+          No customers match your search
+        </h2>
+        <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+          Try a different name, email, or phone number.
+        </p>
+        <button
+          type="button"
+          onClick={onReset}
+          className="mt-4 font-medium text-slate-700 underline hover:text-slate-900"
+        >
+          Reset filters
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center sm:px-10">
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200/80 text-slate-600">
@@ -42,6 +78,15 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const [sortBy, setSortBy] = useState<CustomerSortBy>("created_at");
+  const [sortDir, setSortDir] = useState<SortDirection>("desc");
+
+  const hasActiveFilters = debouncedSearch.trim() !== "";
+  const isDefaultState =
+    !hasActiveFilters && sortBy === "created_at" && sortDir === "desc";
+
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent);
     if (!silent) {
@@ -49,7 +94,11 @@ export default function CustomersPage() {
       setError(null);
     }
     try {
-      const json = await apiFetch<Customer[]>(orgPath("customers"));
+      const q = new URLSearchParams({ sort_by: sortBy, sort_dir: sortDir });
+      if (debouncedSearch.trim()) q.set("search", debouncedSearch.trim());
+      const json = await apiFetch<Customer[]>(
+        `${orgPath("customers")}?${q.toString()}`
+      );
       setItems(json);
       if (!silent) setError(null);
     } catch (e) {
@@ -60,11 +109,17 @@ export default function CustomersPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [debouncedSearch, sortBy, sortDir]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  function resetFilters() {
+    setSearch("");
+    setSortBy("created_at");
+    setSortDir("desc");
+  }
 
   const showEmpty = !loading && items !== null && items.length === 0;
   const showTable = !loading && items !== null && items.length > 0;
@@ -92,6 +147,41 @@ export default function CustomersPage() {
 
       <AddCustomerForm onCreated={() => load({ silent: true })} />
 
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="sm:max-w-sm sm:flex-1">
+            <label htmlFor="customer-search" className="sr-only">
+              Search customers
+            </label>
+            <input
+              id="customer-search"
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, email, or phone…"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <SortControl
+              fields={SORT_FIELDS}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              onSortByChange={(v) => setSortBy(v as CustomerSortBy)}
+              onSortDirChange={setSortDir}
+            />
+            <button
+              type="button"
+              onClick={resetFilters}
+              disabled={isDefaultState}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Reset filters
+            </button>
+          </div>
+        </div>
+      </section>
+
       {error ? (
         <div
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
@@ -107,7 +197,9 @@ export default function CustomersPage() {
         </div>
       ) : null}
 
-      {showEmpty ? <CustomersEmptyState /> : null}
+      {showEmpty ? (
+        <CustomersEmptyState hasActiveFilters={hasActiveFilters} onReset={resetFilters} />
+      ) : null}
 
       {showTable ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">

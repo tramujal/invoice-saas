@@ -1,23 +1,79 @@
+from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_user, require_org_member
-from app.invoice_numbering import format_invoice_number
+from app.invoice_numbering import INVOICE_NUMBER_PREFIX, format_invoice_number
 from app.invoice_pdf import render_invoice_pdf
 from app.models import Customer, Invoice, InvoiceLineItem, Organization, User
+from app.payment_status import PaymentStatus
 from app.schemas import (
     InvoiceCreateRequest,
     InvoicePaymentStatusUpdate,
     InvoiceResponse,
+    InvoiceSortField,
     InvoiceSummaryResponse,
     PaginatedInvoicesResponse,
+    SortDirection,
 )
 
 router = APIRouter(prefix="/organizations/{organization_id}/invoices", tags=["invoices"])
+
+_SORT_COLUMNS: dict[InvoiceSortField, ColumnElement] = {
+    InvoiceSortField.invoice_number: Invoice.invoice_number,
+    InvoiceSortField.created_at: Invoice.created_at,
+    InvoiceSortField.total: Invoice.total,
+    InvoiceSortField.customer_name: Customer.name,
+}
+
+
+def _invoice_number_match(search_term: str) -> int | None:
+    """Extracts an exact invoice number from a search term like "5",
+    "000005", or "INV-000005". Returns None if, after stripping an optional
+    INV- prefix, the term isn't purely numeric (e.g. it's a name search)."""
+    term = search_term.strip()
+    if term.lower().startswith(INVOICE_NUMBER_PREFIX.lower()):
+        term = term[len(INVOICE_NUMBER_PREFIX):]
+    term = term.lstrip("0") or "0"
+    return int(term) if term.isdigit() else None
+
+
+def _build_invoice_query(
+    organization_id: str,
+    search: str | None,
+    payment_status: PaymentStatus | None,
+    created_after: datetime | None,
+    min_total: Decimal | None,
+    max_total: Decimal | None,
+):
+    query = (
+        select(Invoice)
+        .outerjoin(Customer, Invoice.customer_id == Customer.id)
+        .where(Invoice.organization_id == organization_id)
+    )
+
+    if search and search.strip():
+        term = search.strip()
+        conditions = [Customer.name.ilike(f"%{term}%")]
+        invoice_number = _invoice_number_match(term)
+        if invoice_number is not None:
+            conditions.append(Invoice.invoice_number == invoice_number)
+        query = query.where(or_(*conditions))
+
+    if payment_status is not None:
+        query = query.where(Invoice.payment_status == payment_status.value)
+    if created_after is not None:
+        query = query.where(Invoice.created_at >= created_after)
+    if min_total is not None:
+        query = query.where(Invoice.total >= min_total)
+    if max_total is not None:
+        query = query.where(Invoice.total <= max_total)
+
+    return query
 
 
 def _invoice_in_org(
@@ -44,20 +100,39 @@ def list_organization_invoices(
     current_user: User = Depends(get_current_user),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None, max_length=255),
+    payment_status: PaymentStatus | None = Query(default=None),
+    created_after: datetime | None = Query(default=None),
+    min_total: Decimal | None = Query(default=None, ge=0),
+    max_total: Decimal | None = Query(default=None, ge=0),
+    sort_by: InvoiceSortField = Query(default=InvoiceSortField.created_at),
+    sort_dir: SortDirection = Query(default=SortDirection.desc),
 ) -> PaginatedInvoicesResponse:
     require_org_member(current_user, organization_id, db)
 
-    org_filter = Invoice.organization_id == organization_id
+    base_query = _build_invoice_query(
+        organization_id, search, payment_status, created_after, min_total, max_total
+    )
 
-    total = db.scalar(select(func.count()).select_from(Invoice).where(org_filter))
+    total = db.scalar(
+        select(func.count()).select_from(base_query.subquery())
+    )
     if total is None:
         total = 0
 
+    sort_column = _SORT_COLUMNS[sort_by]
+    if sort_by == InvoiceSortField.customer_name:
+        order = (
+            sort_column.asc().nulls_last()
+            if sort_dir == SortDirection.asc
+            else sort_column.desc().nulls_last()
+        )
+    else:
+        order = sort_column.asc() if sort_dir == SortDirection.asc else sort_column.desc()
+
     rows = db.scalars(
-        select(Invoice)
-        .options(selectinload(Invoice.customer))
-        .where(org_filter)
-        .order_by(Invoice.created_at.desc())
+        base_query.options(selectinload(Invoice.customer))
+        .order_by(order)
         .limit(limit)
         .offset(offset)
     ).all()

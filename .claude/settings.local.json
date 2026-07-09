@@ -24,7 +24,10 @@
       "Bash(python3 -c ' *)",
       "Bash(python -c ' *)",
       "Bash(python -m pip install pypdf --quiet)",
-      "Bash(python -m pip uninstall -y pypdf --quiet)"
+      "Bash(python -m pip uninstall -y pypdf --quiet)",
+      "Bash(python -c \"import app.routers.invoices; import app.routers.customers; print\\('imports OK'\\)\")",
+      "Bash(curl -s __TRACKED_VAR__?search=acme -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(curl -s __TRACKED_VAR__?created_after=2030-01-01T00:00:00Z -H 'Authorization: Bearer __CMDSUB_OUTPUT__')"
     ]
   }
 }
