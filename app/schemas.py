@@ -26,6 +26,24 @@ class CustomerSortField(str, Enum):
     created_at = "created_at"
 
 
+class OrganizationLanguage(str, Enum):
+    en = "en"
+    es = "es"
+
+
+class CurrencyCode(str, Enum):
+    USD = "USD"
+    UYU = "UYU"
+    EUR = "EUR"
+
+
+class TaxLabelOption(str, Enum):
+    tax_id = "Tax ID"
+    rut = "RUT"
+    cuit = "CUIT"
+    nif = "NIF"
+
+
 def _normalize_email(value: str) -> str:
     value = value.strip().lower()
     if "@" not in value or value.startswith("@") or value.endswith("@"):
@@ -78,6 +96,7 @@ class OrganizationSummary(BaseModel):
 
     id: str
     name: str
+    currency_code: str
 
 
 class AuthResponse(BaseModel):
@@ -103,6 +122,9 @@ class OrganizationProfileResponse(BaseModel):
     phone: str | None
     email: str | None
     logo_url: str | None
+    language: str
+    currency_code: str
+    tax_label: str
 
 
 class OrganizationUpdateRequest(BaseModel):
@@ -113,6 +135,9 @@ class OrganizationUpdateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=255)
     logo_url: str | None = Field(default=None, max_length=1024)
+    language: OrganizationLanguage | None = None
+    currency_code: CurrencyCode | None = None
+    tax_label: TaxLabelOption | None = None
 
     @field_validator(
         "business_name", "tax_id", "address", "phone", "email", "logo_url",

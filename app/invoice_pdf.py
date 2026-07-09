@@ -16,18 +16,18 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
+from app.currency import format_amount, get_currency_code
 from app.invoice_numbering import format_invoice_number
+from app.localization import get_language, payment_status_label, t
 from app.models import Invoice
 from app.payment_status import PaymentStatus
 
-PAYMENT_STATUS_LABELS = {
-    PaymentStatus.pending: "Pending",
-    PaymentStatus.paid: "Paid",
-    PaymentStatus.overdue: "Overdue",
-}
-
 
 def _money(value) -> str:
+    """Bare, unprefixed amount for the line-items table — its columns are
+    narrow (1.1in), and repeating the currency code on every row there risks
+    wrapping. The totals table (more room, and the figures that matter most)
+    gets the currency-prefixed format instead."""
     return f"{value:,.2f}"
 
 
@@ -37,6 +37,9 @@ def _format_quantity(value) -> str:
 
 
 def render_invoice_pdf(invoice: Invoice) -> bytes:
+    organization = invoice.organization
+    language = get_language(organization)
+    currency_code = get_currency_code(organization)
     invoice_number = format_invoice_number(invoice.invoice_number)
 
     buffer = io.BytesIO()
@@ -47,7 +50,7 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
         bottomMargin=0.75 * inch,
         leftMargin=0.75 * inch,
         rightMargin=0.75 * inch,
-        title=f"Invoice {invoice_number}",
+        title=f"{t(language, 'invoice_title')} {invoice_number}",
     )
 
     styles = getSampleStyleSheet()
@@ -65,17 +68,15 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
 
     elements: list = []
 
-    elements.append(Paragraph("Invoice", title_style))
+    elements.append(Paragraph(t(language, "invoice_title"), title_style))
     elements.append(Spacer(1, 4))
 
-    status_label = PAYMENT_STATUS_LABELS.get(
-        PaymentStatus(invoice.payment_status), invoice.payment_status
-    )
+    status_label = payment_status_label(language, PaymentStatus(invoice.payment_status))
     meta_table = Table(
         [
-            ["Invoice No.", invoice_number],
-            ["Created", invoice.created_at.strftime("%B %d, %Y")],
-            ["Payment status", status_label],
+            [t(language, "invoice_no_label"), invoice_number],
+            [t(language, "created_label"), invoice.created_at.strftime("%B %d, %Y")],
+            [t(language, "payment_status_label"), status_label],
         ],
         colWidths=[1.4 * inch, 4.6 * inch],
     )
@@ -93,11 +94,11 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     elements.append(meta_table)
     elements.append(Spacer(1, 16))
 
-    organization = invoice.organization
-    elements.append(Paragraph("FROM", heading_style))
+    elements.append(Paragraph(t(language, "from_label").upper(), heading_style))
     from_lines = [organization.business_name or organization.name]
     if organization.tax_id:
-        from_lines.append(f"Tax ID: {organization.tax_id}")
+        tax_label = organization.tax_label or "Tax ID"
+        from_lines.append(f"{tax_label}: {organization.tax_id}")
     if organization.address:
         from_lines.append(organization.address)
     if organization.phone:
@@ -108,7 +109,7 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
         elements.append(Paragraph(line, normal_style))
     elements.append(Spacer(1, 20))
 
-    elements.append(Paragraph("BILL TO", heading_style))
+    elements.append(Paragraph(t(language, "bill_to_label").upper(), heading_style))
     customer = invoice.customer
     if customer is not None:
         lines = [customer.name, customer.email]
@@ -119,9 +120,11 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
         for line in lines:
             elements.append(Paragraph(line, normal_style))
     else:
-        elements.append(Paragraph("No customer on file", normal_style))
+        elements.append(Paragraph(t(language, "no_customer"), normal_style))
     elements.append(Spacer(1, 20))
 
+    # Line-item table headers aren't part of the requested translated-label
+    # set, so they stay in English regardless of organization language.
     line_item_rows = [["Description", "Quantity", "Unit price", "Line total"]]
     for item in invoice.line_items:
         line_item_rows.append(
@@ -158,9 +161,9 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     elements.append(Spacer(1, 16))
 
     totals_rows = [
-        ["Subtotal", _money(invoice.subtotal)],
-        ["Tax", _money(invoice.tax_amount)],
-        ["Total", _money(invoice.total)],
+        [t(language, "subtotal_label"), format_amount(invoice.subtotal, currency_code)],
+        [t(language, "tax_amount_label"), format_amount(invoice.tax_amount, currency_code)],
+        [t(language, "total_label"), format_amount(invoice.total, currency_code)],
     ]
     totals_table = Table(totals_rows, colWidths=[4.9 * inch, 1.4 * inch])
     totals_table.setStyle(

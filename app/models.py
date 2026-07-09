@@ -39,6 +39,15 @@ class Organization(Base):
     next_invoice_number: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
+    language: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="en", server_default="en"
+    )
+    currency_code: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="USD", server_default="USD"
+    )
+    tax_label: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="Tax ID", server_default="Tax ID"
+    )
 
     members: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="organization"

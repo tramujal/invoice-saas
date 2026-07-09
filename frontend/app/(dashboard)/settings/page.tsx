@@ -4,8 +4,21 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
-import { updateOrganizationName } from "@/lib/auth-storage";
+import {
+  updateOrganizationCurrency,
+  updateOrganizationName,
+} from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
+import {
+  CURRENCY_CODES,
+  CURRENCY_LABELS,
+  LANGUAGES,
+  LANGUAGE_LABELS,
+  TAX_LABEL_OPTIONS,
+  type CurrencyCode,
+  type Language,
+  type TaxLabelOption,
+} from "@/lib/organization-settings";
 import type { OrganizationProfile } from "@/lib/types";
 
 const LIMITS = {
@@ -26,6 +39,9 @@ type FormState = {
   phone: string;
   email: string;
   logo_url: string;
+  language: Language;
+  currency_code: CurrencyCode;
+  tax_label: TaxLabelOption;
 };
 
 const EMPTY_FORM: FormState = {
@@ -36,6 +52,9 @@ const EMPTY_FORM: FormState = {
   phone: "",
   email: "",
   logo_url: "",
+  language: "en",
+  currency_code: "USD",
+  tax_label: "Tax ID",
 };
 
 function toFormState(profile: OrganizationProfile): FormState {
@@ -47,6 +66,15 @@ function toFormState(profile: OrganizationProfile): FormState {
     phone: profile.phone ?? "",
     email: profile.email ?? "",
     logo_url: profile.logo_url ?? "",
+    language: (LANGUAGES as readonly string[]).includes(profile.language)
+      ? (profile.language as Language)
+      : "en",
+    currency_code: (CURRENCY_CODES as readonly string[]).includes(profile.currency_code)
+      ? (profile.currency_code as CurrencyCode)
+      : "USD",
+    tax_label: (TAX_LABEL_OPTIONS as readonly string[]).includes(profile.tax_label)
+      ? (profile.tax_label as TaxLabelOption)
+      : "Tax ID",
   };
 }
 
@@ -102,10 +130,14 @@ export default function SettingsPage() {
           phone: form.phone.trim(),
           email: form.email.trim(),
           logo_url: form.logo_url.trim(),
+          language: form.language,
+          currency_code: form.currency_code,
+          tax_label: form.tax_label,
         }),
       });
       setForm(toFormState(updated));
       updateOrganizationName(updated.name);
+      updateOrganizationCurrency(updated.currency_code);
       toast.dismiss(loadingId);
       toast.success("Organization profile saved.");
     } catch (err) {
@@ -273,6 +305,77 @@ export default function SettingsPage() {
               />
               <p className="mt-1 text-xs text-slate-500">
                 Stored for future use. Not currently shown on invoice PDFs.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Localization
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Controls the language and currency used on invoice PDFs and emails.
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label htmlFor="org-language" className="text-sm font-medium text-slate-700">
+                Language
+              </label>
+              <select
+                id="org-language"
+                value={form.language}
+                onChange={(e) => update("language", e.target.value as Language)}
+                disabled={disabled}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              >
+                {LANGUAGES.map((code) => (
+                  <option key={code} value={code}>
+                    {LANGUAGE_LABELS[code]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="org-currency" className="text-sm font-medium text-slate-700">
+                Currency
+              </label>
+              <select
+                id="org-currency"
+                value={form.currency_code}
+                onChange={(e) => update("currency_code", e.target.value as CurrencyCode)}
+                disabled={disabled}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              >
+                {CURRENCY_CODES.map((code) => (
+                  <option key={code} value={code}>
+                    {CURRENCY_LABELS[code]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="org-tax-label" className="text-sm font-medium text-slate-700">
+                Tax ID label
+              </label>
+              <select
+                id="org-tax-label"
+                value={form.tax_label}
+                onChange={(e) => update("tax_label", e.target.value as TaxLabelOption)}
+                disabled={disabled}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              >
+                {TAX_LABEL_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">
+                Shown next to your Tax ID on invoice PDFs.
               </p>
             </div>
           </div>

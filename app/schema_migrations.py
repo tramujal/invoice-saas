@@ -15,6 +15,7 @@ from sqlalchemy.engine import Engine
 def run_startup_migrations(engine: Engine) -> None:
     _add_invoice_numbering(engine)
     _add_organization_profile_fields(engine)
+    _add_organization_localization_fields(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -81,6 +82,31 @@ def _add_organization_profile_fields(engine: Engine) -> None:
     with engine.begin() as conn:
         for name, coltype in missing.items():
             conn.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} {coltype}"))
+
+
+def _add_organization_localization_fields(engine: Engine) -> None:
+    """Adds language/currency_code/tax_label to organizations.
+
+    NOT NULL with DB-level defaults, so existing rows are immediately valid
+    with the documented safe fallbacks — no backfill needed.
+    """
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+
+    columns = {c["name"] for c in inspector.get_columns("organizations")}
+    new_columns = {
+        "language": "VARCHAR(8) NOT NULL DEFAULT 'en'",
+        "currency_code": "VARCHAR(8) NOT NULL DEFAULT 'USD'",
+        "tax_label": "VARCHAR(32) NOT NULL DEFAULT 'Tax ID'",
+    }
+    missing = {name: ddl for name, ddl in new_columns.items() if name not in columns}
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for name, ddl in missing.items():
+            conn.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} {ddl}"))
 
 
 def _backfill_invoice_numbers(conn) -> None:

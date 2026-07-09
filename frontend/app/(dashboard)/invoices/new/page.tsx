@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
+import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
 import {
   formatMoney,
@@ -37,6 +38,11 @@ export default function NewInvoicePage() {
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customerId, setCustomerId] = useState<string>("");
   const [taxPercent, setTaxPercent] = useState<string>("0");
+  // Read on the client only, after hydration — see invoices/page.tsx for why.
+  const [currencyCode, setCurrencyCode] = useState("USD");
+  useEffect(() => {
+    setCurrencyCode(getOrganizationCurrency() ?? "USD");
+  }, []);
   const [lines, setLines] = useState<LineDraft[]>([
     {
       id: newLineId(),
@@ -369,19 +375,19 @@ export default function NewInvoicePage() {
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-600">Subtotal</dt>
                 <dd className="font-medium text-slate-900">
-                  {subtotal === null ? "—" : formatMoney(subtotal)}
+                  {subtotal === null ? "—" : `${currencyCode} ${formatMoney(subtotal)}`}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-600">Tax</dt>
                 <dd className="font-medium text-slate-900">
-                  {taxAmount === null ? "—" : formatMoney(taxAmount)}
+                  {taxAmount === null ? "—" : `${currencyCode} ${formatMoney(taxAmount)}`}
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base">
                 <dt className="font-semibold text-slate-800">Total</dt>
                 <dd className="font-semibold text-slate-900">
-                  {total === null ? "—" : formatMoney(total)}
+                  {total === null ? "—" : `${currencyCode} ${formatMoney(total)}`}
                 </dd>
               </div>
             </dl>

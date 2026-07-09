@@ -38,7 +38,10 @@ def update_organization(
 ) -> Organization:
     require_org_member(current_user, organization_id, db)
     organization = _organization_or_404(db, organization_id)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    # mode="json" ensures enum fields (language/currency_code/tax_label) are
+    # written as their plain string .value rather than the Enum member
+    # itself, matching how every other field on this model is persisted.
+    for key, value in body.model_dump(exclude_unset=True, mode="json").items():
         setattr(organization, key, value)
     db.commit()
     db.refresh(organization)

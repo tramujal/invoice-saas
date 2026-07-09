@@ -65,6 +65,7 @@ export type AuthUser = {
 export type OrganizationSummary = {
   id: string;
   name: string;
+  currency_code: string;
 };
 
 /** Response from POST /auth/login and POST /auth/register */
@@ -85,6 +86,9 @@ export type OrganizationProfile = {
   phone: string | null;
   email: string | null;
   logo_url: string | null;
+  language: string;
+  currency_code: string;
+  tax_label: string;
 };
 
 /** Response from GET /organizations/{org}/dashboard */
