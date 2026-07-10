@@ -33,7 +33,7 @@ export function PaymentStatusBreakdown({
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Payment status
+        {t("dashboard.paymentStatusBreakdownTitle")}
       </h2>
 
       {loading ? (
@@ -48,7 +48,7 @@ export function PaymentStatusBreakdown({
         </div>
       ) : total === 0 ? (
         <p className="mt-5 text-sm text-slate-500">
-          No invoices yet. Status breakdown will appear here once you create one.
+          {t("dashboard.paymentStatusBreakdownEmpty")}
         </p>
       ) : (
         <>

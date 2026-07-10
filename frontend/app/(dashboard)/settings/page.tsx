@@ -10,9 +10,10 @@ import {
   updateOrganizationName,
 } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
+import { useTranslation } from "@/lib/i18n/useTranslation";
+import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import {
   CURRENCY_CODES,
-  CURRENCY_LABELS,
   LANGUAGES,
   LANGUAGE_LABELS,
   TAX_LABEL_OPTIONS,
@@ -21,6 +22,14 @@ import {
   type TaxLabelOption,
 } from "@/lib/organization-settings";
 import type { OrganizationProfile } from "@/lib/types";
+
+function currencyLabelKey(code: CurrencyCode): string {
+  return `settings.currency${code}`;
+}
+
+function getCurrencyLabel(t: TranslateFn, code: CurrencyCode): string {
+  return t(currencyLabelKey(code));
+}
 
 const LIMITS = {
   name: 255,
@@ -79,8 +88,14 @@ function toFormState(profile: OrganizationProfile): FormState {
   };
 }
 
+// Translated at render time, not inside the useCallback below, since
+// useTranslation()'s t is not identity-stable (see dashboard/customers
+// pages for the same pattern).
+const GENERIC_LOAD_ERROR = "__generic_load_error__";
+
 export default function SettingsPage() {
   const toast = useToast();
+  const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +109,7 @@ export default function SettingsPage() {
       const profile = await apiFetch<OrganizationProfile>(orgPath());
       setForm(toFormState(profile));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to load organization profile");
+      setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
       setLoading(false);
     }
@@ -113,12 +128,12 @@ export default function SettingsPage() {
 
     const name = form.name.trim();
     if (!name) {
-      setNameError("Organization name is required.");
+      setNameError(t("common.errorRequired", { field: t("auth.organizationNameLabel") }));
       return;
     }
     setNameError(null);
 
-    const loadingId = toast.loading("Saving profile…");
+    const loadingId = toast.loading(t("settings.toastSaving"));
     setIsSubmitting(true);
     try {
       const updated = await apiFetch<OrganizationProfile>(orgPath(), {
@@ -141,10 +156,10 @@ export default function SettingsPage() {
       updateOrganizationCurrency(updated.currency_code);
       updateOrganizationLanguage(updated.language);
       toast.dismiss(loadingId);
-      toast.success("Organization profile saved.");
+      toast.success(t("settings.toastSaved"));
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, "Could not save organization profile."));
+      toast.error(formatApiError(err, t("settings.toastSaveError")));
     } finally {
       setIsSubmitting(false);
     }
@@ -156,11 +171,9 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-          Settings
+          {t("settings.title")}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Your organization&rsquo;s profile. This information appears on invoice PDFs.
-        </p>
+        <p className="mt-1 text-sm text-slate-500">{t("settings.subtitle")}</p>
       </header>
 
       {error ? (
@@ -168,18 +181,18 @@ export default function SettingsPage() {
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
         >
-          {error}
+          {error === GENERIC_LOAD_ERROR ? t("settings.loadError") : error}
         </div>
       ) : null}
 
       <form onSubmit={(e) => void onSubmit(e)} className="space-y-6" aria-busy={loading}>
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Organization
+            {t("settings.organizationSectionTitle")}
           </h2>
           <div className="mt-4">
             <label htmlFor="org-name" className="text-sm font-medium text-slate-700">
-              Organization name <span className="text-red-600">*</span>
+              {t("auth.organizationNameLabel")} <span className="text-red-600">*</span>
             </label>
             <input
               id="org-name"
@@ -197,18 +210,16 @@ export default function SettingsPage() {
                 {nameError}
               </p>
             ) : null}
-            <p className="mt-1 text-xs text-slate-500">
-              Shown in the sidebar and used to identify your organization.
-            </p>
+            <p className="mt-1 text-xs text-slate-500">{t("settings.orgNameHelp")}</p>
           </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Business details
+            {t("settings.businessDetailsSectionTitle")}
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Shown on invoice PDFs. Leave blank to omit a field.
+            {t("settings.businessDetailsSubtitle")}
           </p>
 
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -217,7 +228,7 @@ export default function SettingsPage() {
                 htmlFor="business-name"
                 className="text-sm font-medium text-slate-700"
               >
-                Business name
+                {t("settings.businessNameLabel")}
               </label>
               <input
                 id="business-name"
@@ -226,14 +237,14 @@ export default function SettingsPage() {
                 onChange={(e) => update("business_name", e.target.value)}
                 disabled={disabled}
                 maxLength={LIMITS.business_name}
-                placeholder="Defaults to organization name"
+                placeholder={t("settings.businessNamePlaceholder")}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
               />
             </div>
 
             <div>
               <label htmlFor="tax-id" className="text-sm font-medium text-slate-700">
-                Tax ID
+                {t("settings.taxIdLabel")}
               </label>
               <input
                 id="tax-id"
@@ -248,7 +259,7 @@ export default function SettingsPage() {
 
             <div>
               <label htmlFor="org-phone" className="text-sm font-medium text-slate-700">
-                Phone
+                {t("common.phone")}
               </label>
               <input
                 id="org-phone"
@@ -263,7 +274,7 @@ export default function SettingsPage() {
 
             <div>
               <label htmlFor="org-email" className="text-sm font-medium text-slate-700">
-                Email
+                {t("common.email")}
               </label>
               <input
                 id="org-email"
@@ -278,7 +289,7 @@ export default function SettingsPage() {
 
             <div className="sm:col-span-2">
               <label htmlFor="org-address" className="text-sm font-medium text-slate-700">
-                Address
+                {t("common.address")}
               </label>
               <textarea
                 id="org-address"
@@ -293,7 +304,7 @@ export default function SettingsPage() {
 
             <div className="sm:col-span-2">
               <label htmlFor="logo-url" className="text-sm font-medium text-slate-700">
-                Logo URL
+                {t("settings.logoUrlLabel")}
               </label>
               <input
                 id="logo-url"
@@ -305,25 +316,23 @@ export default function SettingsPage() {
                 placeholder="https://…"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
               />
-              <p className="mt-1 text-xs text-slate-500">
-                Stored for future use. Not currently shown on invoice PDFs.
-              </p>
+              <p className="mt-1 text-xs text-slate-500">{t("settings.logoUrlHelp")}</p>
             </div>
           </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Localization
+            {t("settings.localizationSectionTitle")}
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Controls the language and currency used on invoice PDFs and emails.
+            {t("settings.localizationSubtitle")}
           </p>
 
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label htmlFor="org-language" className="text-sm font-medium text-slate-700">
-                Language
+                {t("settings.languageFieldLabel")}
               </label>
               <select
                 id="org-language"
@@ -342,7 +351,7 @@ export default function SettingsPage() {
 
             <div>
               <label htmlFor="org-currency" className="text-sm font-medium text-slate-700">
-                Currency
+                {t("settings.currencyFieldLabel")}
               </label>
               <select
                 id="org-currency"
@@ -353,7 +362,7 @@ export default function SettingsPage() {
               >
                 {CURRENCY_CODES.map((code) => (
                   <option key={code} value={code}>
-                    {CURRENCY_LABELS[code]}
+                    {getCurrencyLabel(t, code)}
                   </option>
                 ))}
               </select>
@@ -361,7 +370,7 @@ export default function SettingsPage() {
 
             <div>
               <label htmlFor="org-tax-label" className="text-sm font-medium text-slate-700">
-                Tax ID label
+                {t("settings.taxLabelFieldLabel")}
               </label>
               <select
                 id="org-tax-label"
@@ -376,9 +385,7 @@ export default function SettingsPage() {
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-slate-500">
-                Shown next to your Tax ID on invoice PDFs.
-              </p>
+              <p className="mt-1 text-xs text-slate-500">{t("settings.taxLabelHelp")}</p>
             </div>
           </div>
         </section>
@@ -389,7 +396,7 @@ export default function SettingsPage() {
             disabled={disabled}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {isSubmitting ? "Saving…" : "Save changes"}
+            {isSubmitting ? t("common.saving") : t("common.saveChanges")}
           </button>
         </div>
       </form>

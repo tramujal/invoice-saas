@@ -1,16 +1,16 @@
 /**
  * Centralized frontend translations. Namespaced by concern, not by page:
- * nav.* (main navigation), invoices.* (invoices page copy), sort.* (the
- * shared SortControl), status.* (payment status labels + the shared
- * PaymentStatusBadge/Select copy).
+ * common.* (shared actions/fields/validation reused across pages), nav.*
+ * (main navigation), sort.* / status.* (shared SortControl and payment
+ * status copy), invoices.* / dashboard.* / customers.* / settings.* (page
+ * chrome for each authenticated page), auth.* (login/register), landing.*
+ * (public landing page).
  *
- * sort.* and status.* are used by SortControl, PaymentStatusBadge,
- * PaymentStatusSelect, and the two dashboard payment-status components —
- * intentionally reusable across pages so the Customers page, Dashboard, and
- * future pages pick up the same strings instead of redeclaring them. Their
- * own page-specific headings/copy aren't translated yet — only these shared
- * pieces are, by design (see PR discussion): full consistency for the
- * pieces that are shared, incremental rollout for the rest.
+ * common.*, sort.*, and status.* are intentionally reused across pages
+ * (e.g. dashboard's recent-invoices table reuses invoices.col*, Customers'
+ * "Reset filters" reuses invoices.resetFilters, Settings' "Organization
+ * name" reuses auth.organizationNameLabel) instead of redeclaring
+ * identical strings per page.
  */
 
 export const SUPPORTED_LANGUAGES = ["en", "es"] as const;
@@ -116,6 +116,19 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "status.updateError": "Could not update payment status.",
 
     "common.languageAriaLabel": "Language",
+    "common.refresh": "Refresh",
+    "common.refreshing": "Refreshing…",
+    "common.saveChanges": "Save changes",
+    "common.saving": "Saving…",
+    "common.clear": "Clear",
+    "common.loadingLabel": "Loading {label}",
+    "common.name": "Name",
+    "common.email": "Email",
+    "common.phone": "Phone",
+    "common.address": "Address",
+    "common.errorRequired": "{field} is required.",
+    "common.errorMaxLength": "{field} must be at most {max} characters.",
+    "common.errorInvalidEmail": "Enter a valid email address.",
 
     "landing.nav.signIn": "Sign in",
     "landing.nav.getStarted": "Get started",
@@ -215,7 +228,6 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "auth.headingRegister": "Create your organization",
     "auth.subtitleSignIn": "Sign in with your email and password.",
     "auth.subtitleRegister": "This creates your account and a new organization.",
-    "auth.emailLabel": "Email",
     "auth.emailPlaceholder": "you@example.com",
     "auth.passwordLabel": "Password",
     "auth.passwordPlaceholderRegister": "At least 8 characters",
@@ -231,6 +243,85 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "auth.errorGeneric": "Something went wrong. Please try again.",
     "auth.signingIn": "Signing in…",
     "auth.creatingAccount": "Creating account…",
+
+    "dashboard.title": "Dashboard",
+    "dashboard.subtitle": "Overview of invoices, revenue, and customers for your organization.",
+    "dashboard.loadError": "Failed to load dashboard",
+    "dashboard.summaryAriaLabel": "Summary",
+    "dashboard.revenueLabel": "Revenue",
+    "dashboard.totalRevenueTitle": "Total revenue",
+    "dashboard.totalRevenueDescription": "Sum of all invoice totals",
+    "dashboard.totalInvoicesTitle": "Total invoices",
+    "dashboard.totalInvoicesDescription": "All invoices in this organization",
+    "dashboard.totalCustomersTitle": "Total customers",
+    "dashboard.totalCustomersDescription": "Active customer records",
+    "dashboard.emptyTitle": "No invoices yet",
+    "dashboard.emptyDescription":
+      "Create your first invoice to see revenue trends, status breakdowns, and activity on this dashboard.",
+    "dashboard.createInvoiceCta": "Create invoice",
+    "dashboard.revenueStatusAriaLabel": "Revenue and status breakdown",
+    "dashboard.analyticsHeading": "Analytics",
+    "dashboard.recentInvoicesHeading": "Recent invoices",
+    "dashboard.recentInvoicesSubtitle": "Latest 5 invoices, newest first.",
+    "dashboard.viewAll": "View all →",
+    "dashboard.revenueTrendTitle": "Revenue trend",
+    "dashboard.revenueTrendNoPriorData": "No prior data",
+    "dashboard.revenueTrendThisMonth": "This month",
+    "dashboard.revenueTrendLastMonth": "Last month",
+    "dashboard.revenueTrendChartTitle": "Revenue trend (6 months)",
+    "dashboard.chartEmptyNoRevenue": "No revenue yet. This chart fills in as invoices are created.",
+    "dashboard.invoiceVolumeTitle": "Invoice volume (6 months)",
+    "dashboard.chartEmptyNoInvoices": "No invoices yet. This chart fills in as invoices are created.",
+    "dashboard.paymentStatusChartTitle": "Invoices by status",
+    "dashboard.paymentStatusBreakdownTitle": "Payment status",
+    "dashboard.paymentStatusBreakdownEmpty":
+      "No invoices yet. Status breakdown will appear here once you create one.",
+    "dashboard.topCustomersTitle": "Top customers by revenue",
+    "dashboard.topCustomersEmpty":
+      "No customer revenue yet. Attach a customer to an invoice to see them here.",
+
+    "customers.title": "Customers",
+    "customers.subtitle": "Members of the selected organization.",
+    "customers.loadError": "Failed to load customers",
+    "customers.searchAriaLabel": "Search customers",
+    "customers.searchPlaceholder": "Search by name, email, or phone…",
+    "customers.loading": "Loading customers…",
+    "customers.emptyFilteredTitle": "No customers match your search",
+    "customers.emptyFilteredDescription": "Try a different name, email, or phone number.",
+    "customers.emptyTitle": "No customers yet",
+    "customers.emptyDescription":
+      "Add your first customer using the form above. They will appear in this list and can be selected when you create invoices.",
+    "customers.addTitle": "Add customer",
+    "customers.addSubtitle": "New customers are scoped to your current organization.",
+    "customers.createButton": "Create customer",
+    "customers.toastCreating": "Creating customer…",
+    "customers.toastCreated": "Customer created.",
+    "customers.toastCreateError": "Could not create customer.",
+
+    "settings.title": "Settings",
+    "settings.subtitle": "Your organization's profile. This information appears on invoice PDFs.",
+    "settings.loadError": "Failed to load organization profile",
+    "settings.organizationSectionTitle": "Organization",
+    "settings.orgNameHelp": "Shown in the sidebar and used to identify your organization.",
+    "settings.businessDetailsSectionTitle": "Business details",
+    "settings.businessDetailsSubtitle": "Shown on invoice PDFs. Leave blank to omit a field.",
+    "settings.businessNameLabel": "Business name",
+    "settings.businessNamePlaceholder": "Defaults to organization name",
+    "settings.taxIdLabel": "Tax ID",
+    "settings.logoUrlLabel": "Logo URL",
+    "settings.logoUrlHelp": "Stored for future use. Not currently shown on invoice PDFs.",
+    "settings.localizationSectionTitle": "Localization",
+    "settings.localizationSubtitle": "Controls the language and currency used on invoice PDFs and emails.",
+    "settings.languageFieldLabel": "Language",
+    "settings.currencyFieldLabel": "Currency",
+    "settings.currencyUSD": "USD — US Dollar",
+    "settings.currencyUYU": "UYU — Uruguayan Peso",
+    "settings.currencyEUR": "EUR — Euro",
+    "settings.taxLabelFieldLabel": "Tax ID label",
+    "settings.taxLabelHelp": "Shown next to your Tax ID on invoice PDFs.",
+    "settings.toastSaving": "Saving profile…",
+    "settings.toastSaved": "Organization profile saved.",
+    "settings.toastSaveError": "Could not save organization profile.",
   },
   es: {
     "nav.dashboard": "Panel",
@@ -301,6 +392,19 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "status.updateError": "No se pudo actualizar el estado de pago.",
 
     "common.languageAriaLabel": "Idioma",
+    "common.refresh": "Actualizar",
+    "common.refreshing": "Actualizando…",
+    "common.saveChanges": "Guardar cambios",
+    "common.saving": "Guardando…",
+    "common.clear": "Limpiar",
+    "common.loadingLabel": "Cargando {label}",
+    "common.name": "Nombre",
+    "common.email": "Correo electrónico",
+    "common.phone": "Teléfono",
+    "common.address": "Dirección",
+    "common.errorRequired": "{field} es obligatorio.",
+    "common.errorMaxLength": "{field} debe tener como máximo {max} caracteres.",
+    "common.errorInvalidEmail": "Ingresa un correo electrónico válido.",
 
     "landing.nav.signIn": "Iniciar sesión",
     "landing.nav.getStarted": "Comenzar",
@@ -401,7 +505,6 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "auth.headingRegister": "Crea tu empresa",
     "auth.subtitleSignIn": "Inicia sesión con tu correo y contraseña.",
     "auth.subtitleRegister": "Esto crea tu cuenta y una nueva empresa.",
-    "auth.emailLabel": "Correo electrónico",
     "auth.emailPlaceholder": "tucorreo@ejemplo.com",
     "auth.passwordLabel": "Contraseña",
     "auth.passwordPlaceholderRegister": "Al menos 8 caracteres",
@@ -417,5 +520,84 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "auth.errorGeneric": "Algo salió mal. Por favor intenta de nuevo.",
     "auth.signingIn": "Iniciando sesión…",
     "auth.creatingAccount": "Creando cuenta…",
+
+    "dashboard.title": "Panel",
+    "dashboard.subtitle": "Resumen de facturas, ingresos y clientes de tu empresa.",
+    "dashboard.loadError": "No se pudo cargar el panel",
+    "dashboard.summaryAriaLabel": "Resumen",
+    "dashboard.revenueLabel": "Ingresos",
+    "dashboard.totalRevenueTitle": "Ingresos totales",
+    "dashboard.totalRevenueDescription": "Suma de todos los totales de factura",
+    "dashboard.totalInvoicesTitle": "Facturas totales",
+    "dashboard.totalInvoicesDescription": "Todas las facturas de esta empresa",
+    "dashboard.totalCustomersTitle": "Clientes totales",
+    "dashboard.totalCustomersDescription": "Registros de clientes activos",
+    "dashboard.emptyTitle": "Aún no hay facturas",
+    "dashboard.emptyDescription":
+      "Crea tu primera factura para ver tendencias de ingresos, desgloses de estado y actividad en este panel.",
+    "dashboard.createInvoiceCta": "Crear factura",
+    "dashboard.revenueStatusAriaLabel": "Ingresos y desglose de estado",
+    "dashboard.analyticsHeading": "Análisis",
+    "dashboard.recentInvoicesHeading": "Facturas recientes",
+    "dashboard.recentInvoicesSubtitle": "Últimas 5 facturas, más recientes primero.",
+    "dashboard.viewAll": "Ver todas →",
+    "dashboard.revenueTrendTitle": "Tendencia de ingresos",
+    "dashboard.revenueTrendNoPriorData": "Sin datos previos",
+    "dashboard.revenueTrendThisMonth": "Este mes",
+    "dashboard.revenueTrendLastMonth": "Mes anterior",
+    "dashboard.revenueTrendChartTitle": "Tendencia de ingresos (6 meses)",
+    "dashboard.chartEmptyNoRevenue": "Aún no hay ingresos. Este gráfico se completa a medida que creas facturas.",
+    "dashboard.invoiceVolumeTitle": "Volumen de facturas (6 meses)",
+    "dashboard.chartEmptyNoInvoices": "Aún no hay facturas. Este gráfico se completa a medida que creas facturas.",
+    "dashboard.paymentStatusChartTitle": "Facturas por estado",
+    "dashboard.paymentStatusBreakdownTitle": "Estado de pago",
+    "dashboard.paymentStatusBreakdownEmpty":
+      "Aún no hay facturas. El desglose de estado aparecerá aquí cuando crees una.",
+    "dashboard.topCustomersTitle": "Mejores clientes por ingresos",
+    "dashboard.topCustomersEmpty":
+      "Aún no hay ingresos de clientes. Asocia un cliente a una factura para verlo aquí.",
+
+    "customers.title": "Clientes",
+    "customers.subtitle": "Miembros de la empresa seleccionada.",
+    "customers.loadError": "No se pudieron cargar los clientes",
+    "customers.searchAriaLabel": "Buscar clientes",
+    "customers.searchPlaceholder": "Buscar por nombre, correo o teléfono…",
+    "customers.loading": "Cargando clientes…",
+    "customers.emptyFilteredTitle": "Ningún cliente coincide con tu búsqueda",
+    "customers.emptyFilteredDescription": "Prueba con otro nombre, correo o número de teléfono.",
+    "customers.emptyTitle": "Aún no hay clientes",
+    "customers.emptyDescription":
+      "Agrega tu primer cliente con el formulario de arriba. Aparecerán en esta lista y podrás seleccionarlos al crear facturas.",
+    "customers.addTitle": "Agregar cliente",
+    "customers.addSubtitle": "Los clientes nuevos pertenecen a tu empresa actual.",
+    "customers.createButton": "Crear cliente",
+    "customers.toastCreating": "Creando cliente…",
+    "customers.toastCreated": "Cliente creado.",
+    "customers.toastCreateError": "No se pudo crear el cliente.",
+
+    "settings.title": "Configuración",
+    "settings.subtitle": "El perfil de tu empresa. Esta información aparece en los PDF de factura.",
+    "settings.loadError": "No se pudo cargar el perfil de la empresa",
+    "settings.organizationSectionTitle": "Empresa",
+    "settings.orgNameHelp": "Se muestra en la barra lateral y se usa para identificar tu empresa.",
+    "settings.businessDetailsSectionTitle": "Datos del negocio",
+    "settings.businessDetailsSubtitle": "Se muestran en los PDF de factura. Deja en blanco para omitir un campo.",
+    "settings.businessNameLabel": "Nombre del negocio",
+    "settings.businessNamePlaceholder": "Usa el nombre de la empresa por defecto",
+    "settings.taxIdLabel": "Identificación fiscal",
+    "settings.logoUrlLabel": "URL del logo",
+    "settings.logoUrlHelp": "Se guarda para uso futuro. Por ahora no se muestra en los PDF de factura.",
+    "settings.localizationSectionTitle": "Localización",
+    "settings.localizationSubtitle": "Controla el idioma y la moneda usados en los PDF de factura y los correos.",
+    "settings.languageFieldLabel": "Idioma",
+    "settings.currencyFieldLabel": "Moneda",
+    "settings.currencyUSD": "USD — Dólar estadounidense",
+    "settings.currencyUYU": "UYU — Peso uruguayo",
+    "settings.currencyEUR": "EUR — Euro",
+    "settings.taxLabelFieldLabel": "Etiqueta de identificación fiscal",
+    "settings.taxLabelHelp": "Se muestra junto a tu identificación fiscal en los PDF de factura.",
+    "settings.toastSaving": "Guardando perfil…",
+    "settings.toastSaved": "Perfil de la empresa guardado.",
+    "settings.toastSaveError": "No se pudo guardar el perfil de la empresa.",
   },
 };

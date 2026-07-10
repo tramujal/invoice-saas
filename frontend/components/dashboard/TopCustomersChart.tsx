@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Bar,
   BarChart,
@@ -9,6 +11,7 @@ import {
   type TooltipValueType,
 } from "recharts";
 
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
 import type { TopCustomerRevenue } from "@/lib/types";
 
@@ -18,6 +21,7 @@ type TopCustomersChartProps = {
 };
 
 export function TopCustomersChart({ data, loading = false }: TopCustomersChartProps) {
+  const { t } = useTranslation();
   const chartData = data.map((row) => ({
     name: row.customer_name,
     revenue: Number.parseFloat(row.revenue),
@@ -26,14 +30,14 @@ export function TopCustomersChart({ data, loading = false }: TopCustomersChartPr
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Top customers by revenue
+        {t("dashboard.topCustomersTitle")}
       </h2>
 
       {loading ? (
         <div className="mt-5 h-56 w-full animate-pulse rounded-lg bg-slate-100" />
       ) : chartData.length === 0 ? (
         <p className="mt-5 text-sm text-slate-500">
-          No customer revenue yet. Attach a customer to an invoice to see them here.
+          {t("dashboard.topCustomersEmpty")}
         </p>
       ) : (
         <div className="mt-4 h-56 w-full">
@@ -63,7 +67,13 @@ export function TopCustomersChart({ data, loading = false }: TopCustomersChartPr
                 formatter={(value: TooltipValueType | undefined) => formatMoney(Number(value))}
                 contentStyle={{ borderRadius: 8, borderColor: "#e2e8f0", fontSize: 12 }}
               />
-              <Bar dataKey="revenue" fill="#0f172a" radius={[0, 4, 4, 0]} maxBarSize={24} />
+              <Bar
+                dataKey="revenue"
+                name={t("dashboard.revenueLabel")}
+                fill="#0f172a"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={24}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>

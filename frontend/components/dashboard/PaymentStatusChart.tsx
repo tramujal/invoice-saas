@@ -32,14 +32,14 @@ export function PaymentStatusChart({
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Invoices by status
+        {t("dashboard.paymentStatusChartTitle")}
       </h2>
 
       {loading ? (
         <div className="mt-5 h-56 w-full animate-pulse rounded-lg bg-slate-100" />
       ) : total === 0 ? (
         <p className="mt-5 text-sm text-slate-500">
-          No invoices yet. This chart fills in as invoices are created.
+          {t("dashboard.chartEmptyNoInvoices")}
         </p>
       ) : (
         <div className="mt-2 h-56 w-full">

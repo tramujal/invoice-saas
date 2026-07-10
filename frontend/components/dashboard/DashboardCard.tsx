@@ -1,3 +1,7 @@
+"use client";
+
+import { useTranslation } from "@/lib/i18n/useTranslation";
+
 type DashboardCardProps = {
   title: string;
   value: string;
@@ -11,6 +15,8 @@ export function DashboardCard({
   description,
   loading = false,
 }: DashboardCardProps) {
+  const { t } = useTranslation();
+
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -34,7 +40,9 @@ export function DashboardCard({
         </>
       )}
       {loading ? (
-        <span className="sr-only">Loading {title.toLowerCase()}</span>
+        <span className="sr-only">
+          {t("common.loadingLabel", { label: title.toLowerCase() })}
+        </span>
       ) : null}
     </article>
   );

@@ -5,16 +5,14 @@ import { useCallback, useEffect, useState } from "react";
 import { AddCustomerForm } from "@/components/customers/AddCustomerForm";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { Customer } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 type CustomerSortBy = "name" | "email" | "created_at";
 
-const SORT_FIELDS: { value: CustomerSortBy; label: string }[] = [
-  { value: "created_at", label: "Created date" },
-  { value: "name", label: "Name" },
-  { value: "email", label: "Email" },
-];
+// Translated at render time (see GENERIC_LOAD_ERROR note below).
+const GENERIC_LOAD_ERROR = "__generic_load_error__";
 
 function CustomersEmptyState({
   hasActiveFilters,
@@ -23,21 +21,23 @@ function CustomersEmptyState({
   hasActiveFilters: boolean;
   onReset: () => void;
 }) {
+  const { t } = useTranslation();
+
   if (hasActiveFilters) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center sm:px-10">
         <h2 className="text-lg font-semibold text-slate-900">
-          No customers match your search
+          {t("customers.emptyFilteredTitle")}
         </h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-          Try a different name, email, or phone number.
+          {t("customers.emptyFilteredDescription")}
         </p>
         <button
           type="button"
           onClick={onReset}
           className="mt-4 font-medium text-slate-700 underline hover:text-slate-900"
         >
-          Reset filters
+          {t("invoices.resetFilters")}
         </button>
       </div>
     );
@@ -64,16 +64,18 @@ function CustomersEmptyState({
           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       </div>
-      <h2 className="mt-4 text-lg font-semibold text-slate-900">No customers yet</h2>
+      <h2 className="mt-4 text-lg font-semibold text-slate-900">
+        {t("customers.emptyTitle")}
+      </h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-        Add your first customer using the form above. They will appear in this list
-        and can be selected when you create invoices.
+        {t("customers.emptyDescription")}
       </p>
     </div>
   );
 }
 
 export default function CustomersPage() {
+  const { t } = useTranslation();
   const [items, setItems] = useState<Customer[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +84,12 @@ export default function CustomersPage() {
   const debouncedSearch = useDebouncedValue(search, 300);
   const [sortBy, setSortBy] = useState<CustomerSortBy>("created_at");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
+
+  const sortFields: { value: CustomerSortBy; label: string }[] = [
+    { value: "created_at", label: t("invoices.sortCreatedDate") },
+    { value: "name", label: t("common.name") },
+    { value: "email", label: t("common.email") },
+  ];
 
   const hasActiveFilters = debouncedSearch.trim() !== "";
   const isDefaultState =
@@ -104,7 +112,7 @@ export default function CustomersPage() {
     } catch (e) {
       if (!silent) {
         setItems(null);
-        setError(e instanceof ApiError ? e.message : "Failed to load customers");
+        setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
       }
     } finally {
       if (!silent) setLoading(false);
@@ -129,11 +137,9 @@ export default function CustomersPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Customers
+            {t("customers.title")}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Members of the selected organization.
-          </p>
+          <p className="mt-1 text-sm text-slate-500">{t("customers.subtitle")}</p>
         </div>
         <button
           type="button"
@@ -141,7 +147,7 @@ export default function CustomersPage() {
           disabled={loading}
           className="self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:self-auto"
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? t("common.refreshing") : t("common.refresh")}
         </button>
       </header>
 
@@ -151,20 +157,20 @@ export default function CustomersPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="sm:max-w-sm sm:flex-1">
             <label htmlFor="customer-search" className="sr-only">
-              Search customers
+              {t("customers.searchAriaLabel")}
             </label>
             <input
               id="customer-search"
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, email, or phone…"
+              placeholder={t("customers.searchPlaceholder")}
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2"
             />
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <SortControl
-              fields={SORT_FIELDS}
+              fields={sortFields}
               sortBy={sortBy}
               sortDir={sortDir}
               onSortByChange={(v) => setSortBy(v as CustomerSortBy)}
@@ -176,7 +182,7 @@ export default function CustomersPage() {
               disabled={isDefaultState}
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Reset filters
+              {t("invoices.resetFilters")}
             </button>
           </div>
         </div>
@@ -187,13 +193,13 @@ export default function CustomersPage() {
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
         >
-          {error}
+          {error === GENERIC_LOAD_ERROR ? t("customers.loadError") : error}
         </div>
       ) : null}
 
       {loading ? (
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-16 text-center text-sm text-slate-500 shadow-sm sm:px-6">
-          Loading customers…
+          {t("customers.loading")}
         </div>
       ) : null}
 
@@ -207,10 +213,14 @@ export default function CustomersPage() {
             <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
                 <tr>
-                  <th className="px-4 py-3 sm:px-6">Name</th>
-                  <th className="px-4 py-3 sm:px-6">Email</th>
-                  <th className="hidden px-4 py-3 md:table-cell md:px-6">Phone</th>
-                  <th className="hidden px-4 py-3 lg:table-cell lg:px-6">Address</th>
+                  <th className="px-4 py-3 sm:px-6">{t("common.name")}</th>
+                  <th className="px-4 py-3 sm:px-6">{t("common.email")}</th>
+                  <th className="hidden px-4 py-3 md:table-cell md:px-6">
+                    {t("common.phone")}
+                  </th>
+                  <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                    {t("common.address")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">

@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
 
 type RevenueTrendCardProps = {
@@ -7,11 +10,17 @@ type RevenueTrendCardProps = {
   loading?: boolean;
 };
 
-function GrowthBadge({ growthPercent }: { growthPercent: number | null }) {
+function GrowthBadge({
+  growthPercent,
+  noPriorDataLabel,
+}: {
+  growthPercent: number | null;
+  noPriorDataLabel: string;
+}) {
   if (growthPercent === null) {
     return (
       <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200/80">
-        No prior data
+        {noPriorDataLabel}
       </span>
     );
   }
@@ -36,6 +45,7 @@ export function RevenueTrendCard({
   growthPercent,
   loading = false,
 }: RevenueTrendCardProps) {
+  const { t } = useTranslation();
   const maxValue = Math.max(revenueThisMonth, revenueLastMonth, 1);
   const thisMonthWidth = Math.max(4, (revenueThisMonth / maxValue) * 100);
   const lastMonthWidth = Math.max(4, (revenueLastMonth / maxValue) * 100);
@@ -44,19 +54,24 @@ export function RevenueTrendCard({
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Revenue trend
+          {t("dashboard.revenueTrendTitle")}
         </h2>
         {loading ? (
           <div className="h-5 w-20 animate-pulse rounded-full bg-slate-200" />
         ) : (
-          <GrowthBadge growthPercent={growthPercent} />
+          <GrowthBadge
+            growthPercent={growthPercent}
+            noPriorDataLabel={t("dashboard.revenueTrendNoPriorData")}
+          />
         )}
       </div>
 
       <div className="mt-5 space-y-4">
         <div>
           <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-slate-700">This month</span>
+            <span className="font-medium text-slate-700">
+              {t("dashboard.revenueTrendThisMonth")}
+            </span>
             {loading ? (
               <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
             ) : (
@@ -75,7 +90,9 @@ export function RevenueTrendCard({
 
         <div>
           <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-slate-500">Last month</span>
+            <span className="font-medium text-slate-500">
+              {t("dashboard.revenueTrendLastMonth")}
+            </span>
             {loading ? (
               <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
             ) : (

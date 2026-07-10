@@ -5,6 +5,8 @@ import { FormEvent, useState } from "react";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { formatApiError } from "@/lib/format-api-error";
+import { useTranslation } from "@/lib/i18n/useTranslation";
+import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import type { Customer } from "@/lib/types";
 
 const LIMITS = {
@@ -21,33 +23,38 @@ function simpleEmailValid(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function validate(params: {
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-}): FieldErrors | null {
+function validate(
+  t: TranslateFn,
+  params: {
+    name: string;
+    email: string;
+    phone: string;
+    address: string;
+  }
+): FieldErrors | null {
   const errors: FieldErrors = {};
   const name = params.name.trim();
   const email = params.email.trim();
   const phone = params.phone.trim();
   const address = params.address.trim();
 
-  if (!name) errors.name = "Name is required.";
+  if (!name) errors.name = t("common.errorRequired", { field: t("common.name") });
   else if (name.length > LIMITS.name)
-    errors.name = `Name must be at most ${LIMITS.name} characters.`;
+    errors.name = t("common.errorMaxLength", { field: t("common.name"), max: LIMITS.name });
 
-  if (!email) errors.email = "Email is required.";
+  if (!email) errors.email = t("common.errorRequired", { field: t("common.email") });
   else if (email.length > LIMITS.email)
-    errors.email = `Email must be at most ${LIMITS.email} characters.`;
-  else if (!simpleEmailValid(email))
-    errors.email = "Enter a valid email address.";
+    errors.email = t("common.errorMaxLength", { field: t("common.email"), max: LIMITS.email });
+  else if (!simpleEmailValid(email)) errors.email = t("common.errorInvalidEmail");
 
   if (phone.length > LIMITS.phone)
-    errors.phone = `Phone must be at most ${LIMITS.phone} characters.`;
+    errors.phone = t("common.errorMaxLength", { field: t("common.phone"), max: LIMITS.phone });
 
   if (address.length > LIMITS.address)
-    errors.address = `Address must be at most ${LIMITS.address} characters.`;
+    errors.address = t("common.errorMaxLength", {
+      field: t("common.address"),
+      max: LIMITS.address,
+    });
 
   return Object.keys(errors).length > 0 ? errors : null;
 }
@@ -58,6 +65,7 @@ type AddCustomerFormProps = {
 
 export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
   const toast = useToast();
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -68,14 +76,14 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    const errs = validate({ name, email, phone, address });
+    const errs = validate(t, { name, email, phone, address });
     if (errs) {
       setFieldErrors(errs);
       return;
     }
     setFieldErrors({});
 
-    const loadingId = toast.loading("Creating customer…");
+    const loadingId = toast.loading(t("customers.toastCreating"));
     setIsSubmitting(true);
     try {
       await apiFetch<Customer>(orgPath("customers"), {
@@ -88,7 +96,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
         }),
       });
       toast.dismiss(loadingId);
-      toast.success("Customer created.");
+      toast.success(t("customers.toastCreated"));
       setName("");
       setEmail("");
       setPhone("");
@@ -96,7 +104,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
       await onCreated();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, "Could not create customer."));
+      toast.error(formatApiError(err, t("customers.toastCreateError")));
     } finally {
       setIsSubmitting(false);
     }
@@ -107,11 +115,9 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-        Add customer
+        {t("customers.addTitle")}
       </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        New customers are scoped to your current organization.
-      </p>
+      <p className="mt-1 text-sm text-slate-500">{t("customers.addSubtitle")}</p>
 
       <form
         onSubmit={(e) => void handleSubmit(e)}
@@ -121,7 +127,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label htmlFor="cust-name" className="text-sm font-medium text-slate-700">
-              Name <span className="text-red-600">*</span>
+              {t("common.name")} <span className="text-red-600">*</span>
             </label>
             <input
               id="cust-name"
@@ -145,7 +151,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
 
           <div className="sm:col-span-2">
             <label htmlFor="cust-email" className="text-sm font-medium text-slate-700">
-              Email <span className="text-red-600">*</span>
+              {t("common.email")} <span className="text-red-600">*</span>
             </label>
             <input
               id="cust-email"
@@ -170,7 +176,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
           <div className="grid grid-cols-1 gap-4 sm:col-span-2 md:grid-cols-2">
             <div>
               <label htmlFor="cust-phone" className="text-sm font-medium text-slate-700">
-                Phone
+                {t("common.phone")}
               </label>
               <input
                 id="cust-phone"
@@ -194,7 +200,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
 
             <div>
               <label htmlFor="cust-address" className="text-sm font-medium text-slate-700">
-                Address
+                {t("common.address")}
               </label>
               <textarea
                 id="cust-address"
@@ -230,7 +236,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
             }}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Clear
+            {t("common.clear")}
           </button>
           <button
             type="submit"
@@ -260,10 +266,10 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   />
                 </svg>
-                Saving…
+                {t("common.saving")}
               </>
             ) : (
-              "Create customer"
+              t("customers.createButton")
             )}
           </button>
         </div>

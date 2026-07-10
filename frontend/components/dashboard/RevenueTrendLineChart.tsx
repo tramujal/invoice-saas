@@ -1,3 +1,5 @@
+"use client";
+
 import {
   CartesianGrid,
   Line,
@@ -10,6 +12,7 @@ import {
 } from "recharts";
 
 import { formatMonthLabel } from "@/lib/chart-format";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
 import type { MonthlySummaryPoint } from "@/lib/types";
 
@@ -22,6 +25,7 @@ export function RevenueTrendLineChart({
   data,
   loading = false,
 }: RevenueTrendLineChartProps) {
+  const { t } = useTranslation();
   const hasData = data.some((point) => Number.parseFloat(point.revenue) > 0);
 
   const chartData = data.map((point) => ({
@@ -32,14 +36,14 @@ export function RevenueTrendLineChart({
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Revenue trend (6 months)
+        {t("dashboard.revenueTrendChartTitle")}
       </h2>
 
       {loading ? (
         <div className="mt-5 h-56 w-full animate-pulse rounded-lg bg-slate-100" />
       ) : !hasData ? (
         <p className="mt-5 text-sm text-slate-500">
-          No revenue yet. This chart fills in as invoices are created.
+          {t("dashboard.chartEmptyNoRevenue")}
         </p>
       ) : (
         <div className="mt-4 h-56 w-full">
@@ -70,6 +74,7 @@ export function RevenueTrendLineChart({
               <Line
                 type="monotone"
                 dataKey="revenue"
+                name={t("dashboard.revenueLabel")}
                 stroke="#0f172a"
                 strokeWidth={2}
                 dot={{ r: 3, fill: "#0f172a" }}

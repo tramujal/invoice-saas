@@ -12,6 +12,7 @@ import { RevenueTrendLineChart } from "@/components/dashboard/RevenueTrendLineCh
 import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
 import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
 import { isPaymentStatus } from "@/lib/payment-status";
 import type { DashboardAnalytics, DashboardData } from "@/lib/types";
@@ -42,7 +43,15 @@ function RecentInvoicesSkeletonRows() {
   );
 }
 
+// Sentinel for the non-ApiError catch branch: translated at render time
+// (fresh t() every render) rather than inside the callback, since
+// useTranslation()'s t is not identity-stable and depending on it from
+// useCallback would either go stale or re-trigger the fetch on every
+// render.
+const GENERIC_LOAD_ERROR = "__generic_load_error__";
+
 export default function DashboardPage() {
+  const { t } = useTranslation();
   const [data, setData] = useState<DashboardData | null>(null);
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,7 +70,7 @@ export default function DashboardPage() {
     } catch (e) {
       setData(null);
       setAnalytics(null);
-      setError(e instanceof ApiError ? e.message : "Failed to load dashboard");
+      setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
       setLoading(false);
     }
@@ -77,11 +86,9 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-6xl space-y-8">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-          Dashboard
+          {t("dashboard.title")}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Overview of invoices, revenue, and customers for your organization.
-        </p>
+        <p className="mt-1 text-sm text-slate-500">{t("dashboard.subtitle")}</p>
       </header>
 
       {error ? (
@@ -89,30 +96,30 @@ export default function DashboardPage() {
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
         >
-          {error}
+          {error === GENERIC_LOAD_ERROR ? t("dashboard.loadError") : error}
         </div>
       ) : null}
 
       <section
-        aria-label="Summary"
+        aria-label={t("dashboard.summaryAriaLabel")}
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         <DashboardCard
-          title="Total revenue"
+          title={t("dashboard.totalRevenueTitle")}
           value={data ? formatMoney(Number.parseFloat(data.total_revenue)) : "—"}
-          description="Sum of all invoice totals"
+          description={t("dashboard.totalRevenueDescription")}
           loading={loading}
         />
         <DashboardCard
-          title="Total invoices"
+          title={t("dashboard.totalInvoicesTitle")}
           value={data ? String(data.total_invoices) : "—"}
-          description="All invoices in this organization"
+          description={t("dashboard.totalInvoicesDescription")}
           loading={loading}
         />
         <DashboardCard
-          title="Total customers"
+          title={t("dashboard.totalCustomersTitle")}
           value={data ? String(data.total_customers) : "—"}
-          description="Active customer records"
+          description={t("dashboard.totalCustomersDescription")}
           loading={loading}
         />
       </section>
@@ -120,23 +127,22 @@ export default function DashboardPage() {
       {showEmpty ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">
           <h3 className="text-base font-semibold text-slate-900">
-            No invoices yet
+            {t("dashboard.emptyTitle")}
           </h3>
           <p className="mx-auto mt-2 max-w-sm text-sm text-slate-600">
-            Create your first invoice to see revenue trends, status breakdowns,
-            and activity on this dashboard.
+            {t("dashboard.emptyDescription")}
           </p>
           <Link
             href="/invoices/new"
             className="mt-5 inline-flex rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
           >
-            Create invoice
+            {t("dashboard.createInvoiceCta")}
           </Link>
         </div>
       ) : (
         <>
           <section
-            aria-label="Revenue and status breakdown"
+            aria-label={t("dashboard.revenueStatusAriaLabel")}
             className="grid grid-cols-1 gap-4 lg:grid-cols-2"
           >
             <RevenueTrendCard
@@ -157,8 +163,10 @@ export default function DashboardPage() {
             />
           </section>
 
-          <section aria-label="Analytics" className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-900">Analytics</h2>
+          <section aria-label={t("dashboard.analyticsHeading")} className="space-y-4">
+            <h2 className="text-lg font-semibold text-slate-900">
+              {t("dashboard.analyticsHeading")}
+            </h2>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <RevenueTrendLineChart
                 data={analytics?.monthly_summary ?? []}
@@ -183,17 +191,17 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Recent invoices
+                  {t("dashboard.recentInvoicesHeading")}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  Latest 5 invoices, newest first.
+                  {t("dashboard.recentInvoicesSubtitle")}
                 </p>
               </div>
               <Link
                 href="/invoices"
                 className="text-sm font-medium text-slate-700 hover:text-slate-900"
               >
-                View all →
+                {t("dashboard.viewAll")}
               </Link>
             </div>
 
@@ -202,14 +210,14 @@ export default function DashboardPage() {
                 <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
                     <tr>
-                      <th className="px-4 py-3 sm:px-6">Invoice</th>
+                      <th className="px-4 py-3 sm:px-6">{t("invoices.colInvoice")}</th>
                       <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
-                        Customer
+                        {t("invoices.colCustomer")}
                       </th>
-                      <th className="px-4 py-3 sm:px-6">Status</th>
-                      <th className="px-4 py-3 sm:px-6">Total</th>
+                      <th className="px-4 py-3 sm:px-6">{t("invoices.colStatus")}</th>
+                      <th className="px-4 py-3 sm:px-6">{t("invoices.colTotal")}</th>
                       <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
-                        Created
+                        {t("invoices.colCreated")}
                       </th>
                     </tr>
                   </thead>
@@ -222,7 +230,7 @@ export default function DashboardPage() {
                           colSpan={5}
                           className="px-4 py-8 text-center text-slate-500 sm:px-6"
                         >
-                          No invoices yet.
+                          {t("invoices.noneYet")}
                         </td>
                       </tr>
                     ) : (

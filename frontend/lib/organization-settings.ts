@@ -9,11 +9,5 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 export const CURRENCY_CODES = ["USD", "UYU", "EUR"] as const;
 export type CurrencyCode = (typeof CURRENCY_CODES)[number];
 
-export const CURRENCY_LABELS: Record<CurrencyCode, string> = {
-  USD: "USD — US Dollar",
-  UYU: "UYU — Uruguayan Peso",
-  EUR: "EUR — Euro",
-};
-
 export const TAX_LABEL_OPTIONS = ["Tax ID", "RUT", "CUIT", "NIF"] as const;
 export type TaxLabelOption = (typeof TAX_LABEL_OPTIONS)[number];

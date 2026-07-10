@@ -149,7 +149,7 @@ function LoginForm() {
               className="block text-xs font-medium text-slate-700"
               htmlFor="email"
             >
-              {t("auth.emailLabel")}
+              {t("common.email")}
             </label>
             <input
               id="email"
