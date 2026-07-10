@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -24,6 +25,8 @@ from app.schemas import (
     SendInvoiceEmailResponse,
     SortDirection,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/organizations/{organization_id}/invoices", tags=["invoices"])
 
@@ -196,13 +199,46 @@ def send_invoice_email(
         attachments=[EmailAttachment(filename=filename, content=pdf_bytes)],
     )
 
+    logger.info(
+        "send_invoice_email: sending invoice email organization_id=%s "
+        "invoice_id=%s recipient=%s",
+        organization_id,
+        invoice_id,
+        customer.email,
+    )
+
     try:
         email_sender.send(message)
     except EmailSendError as exc:
+        # Full exception detail (type, message, and — from resend_provider's
+        # own logger.exception call — a traceback plus the raw Resend
+        # status/body if one was received) is already logged at the source.
+        # This line adds the business context (which org/invoice/recipient)
+        # so the two log lines can be correlated. The client only ever gets
+        # a fixed, generic message — never str(exc), which previously
+        # leaked Resend's raw error text to the frontend.
+        logger.error(
+            "send_invoice_email: failed to send invoice email "
+            "organization_id=%s invoice_id=%s recipient=%s "
+            "exception_type=%s exception_message=%s",
+            organization_id,
+            invoice_id,
+            customer.email,
+            type(exc).__name__,
+            str(exc),
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to send invoice email: {exc}",
+            detail="Failed to send invoice email. Please try again later.",
         ) from exc
+
+    logger.info(
+        "send_invoice_email: invoice email sent successfully "
+        "organization_id=%s invoice_id=%s recipient=%s",
+        organization_id,
+        invoice_id,
+        customer.email,
+    )
 
     return SendInvoiceEmailResponse(sent=True, sent_to=customer.email)
 

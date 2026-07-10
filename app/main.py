@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -6,6 +7,18 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.models import init_db
 from app.routers import auth, customers, dashboard, invoices, organizations
+
+# Without this, the root logger has no handler at all: WARNING+ messages
+# only reach the console via Python's undocumented `logging.lastResort`
+# fallback, and INFO messages are silently dropped everywhere in the app.
+# This is the actual reason application-level logging (e.g. around the
+# Resend API call) wasn't showing up in Render's log stream — configuring
+# it here makes every `logging.getLogger(__name__)` call in the codebase
+# actually emit to stdout/stderr, which Render captures.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 _DEFAULT_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
