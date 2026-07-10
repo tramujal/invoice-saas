@@ -43,7 +43,14 @@
       "Bash(echo \"PID=$!\")",
       "Bash(curl -s http://127.0.0.1:8001/health)",
       "Bash(kill 2095)",
-      "Bash(rm -f /tmp/uvicorn_test.log)"
+      "Bash(rm -f /tmp/uvicorn_test.log)",
+      "Bash(python -c \"import resend; print\\('resend', resend.__version__ if hasattr\\(resend,'__version__'\\) else 'installed, no version attr'\\)\")",
+      "Bash(python -c \"import requests; print\\('requests', requests.__version__\\)\")",
+      "Bash(pip install *)",
+      "Bash(RESEND_API_KEY=\"re_fake_test_key_do_not_log_me_ABC123XYZ\" EMAIL_FROM=\"invoices@example.com\" python -m uvicorn app.main:app --port 8002)",
+      "Bash(curl -s http://127.0.0.1:8002/health)",
+      "Bash(kill 2149)",
+      "Bash(rm -f /tmp/uvicorn_test2.log)"
     ]
   }
 }
