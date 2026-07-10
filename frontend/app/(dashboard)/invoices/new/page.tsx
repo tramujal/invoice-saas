@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
+import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   formatMoney,
   parseQuantity,
@@ -33,6 +34,7 @@ function newLineId(): string {
 export default function NewInvoicePage() {
   const router = useRouter();
   const toast = useToast();
+  const { t } = useTranslation();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customersLoading, setCustomersLoading] = useState(true);
@@ -138,15 +140,15 @@ export default function NewInvoicePage() {
 
     for (const row of parsedLines) {
       if (!row.description) {
-        setSubmitError("Each line item needs a description.");
+        setSubmitError(t("invoiceForm.errorDescriptionRequired"));
         return;
       }
       if (row.quantity === null) {
-        setSubmitError("Quantity must be a number greater than zero.");
+        setSubmitError(t("invoiceForm.errorQuantityInvalid"));
         return;
       }
       if (row.unit_price === null) {
-        setSubmitError("Unit price must be zero or greater.");
+        setSubmitError(t("invoiceForm.errorUnitPriceInvalid"));
         return;
       }
     }
@@ -163,7 +165,7 @@ export default function NewInvoicePage() {
       payload.customer_id = customerId;
     }
 
-    const loadingId = toast.loading("Creating invoice…");
+    const loadingId = toast.loading(t("invoiceForm.toastCreating"));
     setIsSubmitting(true);
     try {
       await apiFetch<InvoiceCreatedResponse>(orgPath("invoices"), {
@@ -171,12 +173,12 @@ export default function NewInvoicePage() {
         body: JSON.stringify(payload),
       });
       toast.dismiss(loadingId);
-      toast.success("Invoice created.");
+      toast.success(t("invoiceForm.toastCreated"));
       router.push("/invoices");
       router.refresh();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, "Could not create invoice."));
+      toast.error(formatApiError(err, t("invoiceForm.toastCreateError")));
     } finally {
       setIsSubmitting(false);
     }
@@ -192,15 +194,12 @@ export default function NewInvoicePage() {
             href="/invoices"
             className="text-sm font-medium text-slate-600 hover:text-slate-900"
           >
-            ← Back to invoices
+            {t("invoiceForm.backToInvoices")}
           </Link>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
-            New invoice
+            {t("invoices.newInvoice")}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Subtotal and total update as you edit lines. Tax uses the percentage
-            below (sent to the API as a fraction).
-          </p>
+          <p className="mt-1 text-sm text-slate-500">{t("invoiceForm.subtitle")}</p>
         </div>
       </div>
 
@@ -211,11 +210,11 @@ export default function NewInvoicePage() {
       >
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Customer
+            {t("invoiceForm.customerSectionTitle")}
           </h2>
           <div className="mt-4 max-w-xl">
             <label htmlFor="customer" className="text-sm font-medium text-slate-700">
-              Bill to
+              {t("invoiceForm.billToLabel")}
             </label>
             <select
               id="customer"
@@ -224,7 +223,7 @@ export default function NewInvoicePage() {
               disabled={disableCustomerSelect}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
             >
-              <option value="">No customer</option>
+              <option value="">{t("invoiceForm.noCustomerOption")}</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} — {c.email}
@@ -232,12 +231,12 @@ export default function NewInvoicePage() {
               ))}
             </select>
             {customersLoading ? (
-              <p className="mt-2 text-xs text-slate-500">Loading customers…</p>
+              <p className="mt-2 text-xs text-slate-500">{t("customers.loading")}</p>
             ) : customers.length === 0 ? (
               <p className="mt-2 text-xs text-amber-700">
-                No customers yet.{" "}
+                {t("invoiceForm.noCustomersMessage")}{" "}
                 <Link href="/customers" className="font-medium underline">
-                  Create one first
+                  {t("invoiceForm.createOneFirst")}
                 </Link>
                 .
               </p>
@@ -248,7 +247,7 @@ export default function NewInvoicePage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-              Line items
+              {t("invoiceForm.lineItemsSectionTitle")}
             </h2>
             <button
               type="button"
@@ -256,7 +255,7 @@ export default function NewInvoicePage() {
               disabled={isSubmitting}
               className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed"
             >
-              + Add line
+              {t("invoiceForm.addLine")}
             </button>
           </div>
 
@@ -268,7 +267,7 @@ export default function NewInvoicePage() {
               >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Line {index + 1}
+                    {t("invoiceForm.lineLabel", { number: index + 1 })}
                   </span>
                   <button
                     type="button"
@@ -276,13 +275,13 @@ export default function NewInvoicePage() {
                     disabled={isSubmitting || lines.length <= 1}
                     className="text-xs font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Remove
+                    {t("common.remove")}
                   </button>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:gap-4">
                   <div className="sm:col-span-5">
                     <label className="text-xs font-medium text-slate-600">
-                      Description
+                      {t("invoiceForm.descriptionLabel")}
                     </label>
                     <input
                       type="text"
@@ -292,14 +291,14 @@ export default function NewInvoicePage() {
                       }
                       disabled={isSubmitting}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
-                      placeholder="Service or product"
+                      placeholder={t("invoiceForm.descriptionPlaceholder")}
                       autoComplete="off"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:col-span-4 sm:grid-cols-2">
                     <div>
                       <label className="text-xs font-medium text-slate-600">
-                        Qty
+                        {t("invoiceForm.qtyLabel")}
                       </label>
                       <input
                         type="number"
@@ -316,7 +315,7 @@ export default function NewInvoicePage() {
                     </div>
                     <div>
                       <label className="text-xs font-medium text-slate-600">
-                        Unit price
+                        {t("invoiceForm.unitPriceLabel")}
                       </label>
                       <input
                         type="number"
@@ -334,7 +333,7 @@ export default function NewInvoicePage() {
                   </div>
                   <div className="sm:col-span-3">
                     <label className="text-xs font-medium text-slate-600">
-                      Line total
+                      {t("invoiceForm.lineTotalLabel")}
                     </label>
                     <div className="mt-1 flex h-[42px] items-center rounded-lg border border-dashed border-slate-200 bg-white px-3 text-sm font-medium text-slate-900">
                       {lineAmounts[index] === null
@@ -352,7 +351,7 @@ export default function NewInvoicePage() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div>
               <label htmlFor="tax" className="text-sm font-medium text-slate-700">
-                Tax rate (%)
+                {t("invoiceForm.taxRateLabel")}
               </label>
               <input
                 id="tax"
@@ -367,25 +366,26 @@ export default function NewInvoicePage() {
                 className="mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 sm:max-w-none"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Sent as <code className="rounded bg-slate-100 px-1">{taxRateFraction}</code>{" "}
-                (fraction of subtotal).
+                {t("invoiceForm.taxRateHelpPrefix")}{" "}
+                <code className="rounded bg-slate-100 px-1">{taxRateFraction}</code>{" "}
+                {t("invoiceForm.taxRateHelpSuffix")}
               </p>
             </div>
             <dl className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm sm:p-5">
               <div className="flex justify-between gap-4">
-                <dt className="text-slate-600">Subtotal</dt>
+                <dt className="text-slate-600">{t("invoices.colSubtotal")}</dt>
                 <dd className="font-medium text-slate-900">
                   {subtotal === null ? "—" : `${currencyCode} ${formatMoney(subtotal)}`}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="text-slate-600">Tax</dt>
+                <dt className="text-slate-600">{t("invoices.colTax")}</dt>
                 <dd className="font-medium text-slate-900">
                   {taxAmount === null ? "—" : `${currencyCode} ${formatMoney(taxAmount)}`}
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base">
-                <dt className="font-semibold text-slate-800">Total</dt>
+                <dt className="font-semibold text-slate-800">{t("invoices.colTotal")}</dt>
                 <dd className="font-semibold text-slate-900">
                   {total === null ? "—" : `${currencyCode} ${formatMoney(total)}`}
                 </dd>
@@ -408,7 +408,7 @@ export default function NewInvoicePage() {
             href="/invoices"
             className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-center text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
           >
-            Cancel
+            {t("common.cancel")}
           </Link>
           <button
             type="submit"
@@ -437,10 +437,10 @@ export default function NewInvoicePage() {
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   />
                 </svg>
-                Creating…
+                {t("invoiceForm.submitCreating")}
               </>
             ) : (
-              "Create invoice"
+              t("invoiceForm.submitCreate")
             )}
           </button>
         </div>

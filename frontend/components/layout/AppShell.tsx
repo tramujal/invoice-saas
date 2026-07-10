@@ -5,12 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
-import {
-  clearAuthSession,
-  getOrganizationName,
-  getUserEmail,
-  isAuthenticated,
-} from "@/lib/auth-storage";
+import { clearAuthSession, getOrganizationName, isAuthenticated } from "@/lib/auth-storage";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
 const links = [
@@ -29,7 +24,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { t } = useTranslation();
   const [organizationName, setOrganizationName] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -52,7 +46,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     // Cheap, synchronous re-read on every navigation so a rename saved on
     // /settings shows up in the sidebar without requiring a re-login.
     setOrganizationName(getOrganizationName());
-    setUserEmail(getUserEmail());
   }, [pathname]);
 
   function logout() {
@@ -62,30 +55,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface md:flex-row">
-      <aside className="shrink-0 border-slate-200 bg-white md:w-56 md:border-r">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 md:block md:border-b-0 md:px-6 md:pt-6">
+      <aside className="flex shrink-0 flex-col border-slate-200 bg-white md:w-56 md:border-r">
+        <div className="border-b border-slate-200 px-4 py-4 md:border-b-0 md:px-6 md:pt-6">
           <Link href="/dashboard" className="text-lg font-semibold text-slate-900">
             Invoicing
           </Link>
-          <button
-            type="button"
-            onClick={logout}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 md:mt-4 md:w-full"
-          >
-            {t("nav.logout")}
-          </button>
         </div>
-        {organizationName || userEmail ? (
-          <div className="hidden border-b border-slate-100 px-6 py-3 md:block">
-            {organizationName ? (
-              <p className="truncate text-sm font-medium text-slate-800">
-                {organizationName}
-              </p>
-            ) : null}
-            {userEmail ? (
-              <p className="truncate text-xs text-slate-500">{userEmail}</p>
-            ) : null}
-          </div>
+        {organizationName ? (
+          <Link
+            href="/settings"
+            className="hidden truncate border-b border-slate-100 px-6 py-3 text-sm font-semibold text-slate-800 hover:bg-surface-muted md:block"
+          >
+            {organizationName}
+          </Link>
         ) : null}
         <nav className="flex gap-1 overflow-x-auto px-2 pb-3 md:flex-col md:px-2 md:pb-6">
           {links.map((item) => {
@@ -105,6 +87,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
+        <div className="border-t border-slate-200 px-4 py-3 md:mt-auto md:px-6 md:pb-6">
+          <button
+            type="button"
+            onClick={logout}
+            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {t("nav.logout")}
+          </button>
+        </div>
       </aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 md:p-8">{children}</main>
     </div>

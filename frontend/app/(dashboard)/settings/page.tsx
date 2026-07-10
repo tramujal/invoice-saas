@@ -1,10 +1,12 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import {
+  getUserEmail,
   updateOrganizationCurrency,
   updateOrganizationLanguage,
   updateOrganizationName,
@@ -101,6 +103,11 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Hydration-safe: read only after mount, like organizationName elsewhere.
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  useEffect(() => {
+    setUserEmail(getUserEmail());
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,6 +191,26 @@ export default function SettingsPage() {
           {error === GENERIC_LOAD_ERROR ? t("settings.loadError") : error}
         </div>
       ) : null}
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          {t("settings.accountSectionTitle")}
+        </h2>
+        <div className="mt-4">
+          <p className="text-sm font-medium text-slate-700">{t("common.email")}</p>
+          <p className="mt-1 text-sm text-slate-900">{userEmail ?? "—"}</p>
+          <p className="mt-1 text-xs text-slate-500">{t("settings.accountEmailHelp")}</p>
+        </div>
+        <div className="mt-5">
+          <Link
+            href="/forgot-password"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+          >
+            {t("settings.changePasswordAction")}
+          </Link>
+          <p className="mt-1.5 text-xs text-slate-500">{t("settings.changePasswordHelp")}</p>
+        </div>
+      </section>
 
       <form onSubmit={(e) => void onSubmit(e)} className="space-y-6" aria-busy={loading}>
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">

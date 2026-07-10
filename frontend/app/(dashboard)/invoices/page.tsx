@@ -25,6 +25,11 @@ import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 const pageSize = 10;
 
+// Translated at render time, not inside the useCallback below, since
+// useTranslation()'s t is not identity-stable (see dashboard/customers/
+// settings pages for the same pattern).
+const GENERIC_LOAD_ERROR = "__generic_load_error__";
+
 type PaymentStatusFilter = PaymentStatus | "all";
 type DateRangePreset = "all" | "today" | "week" | "month" | "year";
 type InvoiceSortBy = "invoice_number" | "created_at" | "total" | "customer_name";
@@ -140,7 +145,7 @@ export default function InvoicesPage() {
       setData(json);
     } catch (e) {
       setData(null);
-      setError(e instanceof ApiError ? e.message : "Failed to load invoices");
+      setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
       setLoading(false);
     }
@@ -341,7 +346,7 @@ export default function InvoicesPage() {
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
         >
-          {error}
+          {error === GENERIC_LOAD_ERROR ? t("invoices.loadError") : error}
         </div>
       ) : null}
 

@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { useTranslation } from "@/lib/i18n/useTranslation";
+
 export type ToastType = "success" | "error" | "loading";
 
 export type ToastRecord = {
@@ -147,6 +149,7 @@ function ToastItem({
   onDismiss: (id: string) => void;
 }) {
   const dismissButtonRef = useRef<HTMLButtonElement>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (toast.type === "loading") return;
@@ -180,7 +183,7 @@ function ToastItem({
         type="button"
         onClick={() => onDismiss(toast.id)}
         className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-        aria-label="Dismiss notification"
+        aria-label={t("common.dismissNotification")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -203,9 +206,10 @@ function ToastItem({
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastRecord[]>([]);
+  const { t } = useTranslation();
 
   const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
   const dismissAll = useCallback(() => {
@@ -291,12 +295,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       >
         <ol
           className="flex list-none flex-col gap-2 p-0"
-          aria-label="Notifications"
+          aria-label={t("common.notifications")}
           aria-live="polite"
           aria-relevant="additions text"
         >
-          {toasts.map((t) => (
-            <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
+          {toasts.map((toast) => (
+            <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
           ))}
         </ol>
       </div>
