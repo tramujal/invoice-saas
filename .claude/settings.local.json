@@ -50,7 +50,10 @@
       "Bash(RESEND_API_KEY=\"re_fake_test_key_do_not_log_me_ABC123XYZ\" EMAIL_FROM=\"invoices@example.com\" python -m uvicorn app.main:app --port 8002)",
       "Bash(curl -s http://127.0.0.1:8002/health)",
       "Bash(kill 2149)",
-      "Bash(rm -f /tmp/uvicorn_test2.log)"
+      "Bash(rm -f /tmp/uvicorn_test2.log)",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_invoice_currency_language.py\")",
+      "Bash(python -c \"import app.currency; import app.routers.invoices; import app.invoice_pdf; import app.email.templates; print\\('OK'\\)\")",
+      "Bash(npx tsc *)"
     ]
   }
 }

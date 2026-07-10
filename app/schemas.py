@@ -210,6 +210,10 @@ class InvoiceCreateRequest(BaseModel):
         description="Tax rate as a fraction, e.g. 0.1 for 10%",
     )
     customer_id: str | None = None
+    # None => falls back to the organization's current currency_code at
+    # creation time (see create_invoice). Once set, permanent — see
+    # Invoice.currency_code.
+    currency_code: CurrencyCode | None = None
 
 
 class InvoiceLineItemResponse(BaseModel):
@@ -235,6 +239,8 @@ class InvoiceResponse(BaseModel):
     tax_amount: Decimal
     total: Decimal
     payment_status: PaymentStatus
+    currency_code: str
+    language: str
     line_items: list[InvoiceLineItemResponse]
 
     @field_validator("invoice_number", mode="before")
@@ -254,6 +260,8 @@ class InvoiceSummaryResponse(BaseModel):
     tax_amount: Decimal
     total: Decimal
     payment_status: PaymentStatus
+    currency_code: str
+    language: str
     created_at: datetime
 
     @field_validator("invoice_number", mode="before")
@@ -292,23 +300,46 @@ class CustomerUpdateRequest(BaseModel):
     address: str | None = Field(default=None, max_length=512)
 
 
-class DashboardResponse(BaseModel):
+class CurrencyRevenueSummary(BaseModel):
+    """Revenue figures for one currency, never combined with any other —
+    see the dashboard router for why summing across currencies never
+    happens here."""
+
+    currency_code: str
     total_revenue: Decimal
+    revenue_this_month: Decimal
+    revenue_last_month: Decimal
+    revenue_growth_percent: Decimal | None
+
+
+class DashboardResponse(BaseModel):
     total_invoices: int
     total_customers: int
     pending_invoices: int
     paid_invoices: int
     overdue_invoices: int
-    revenue_this_month: Decimal
-    revenue_last_month: Decimal
-    revenue_growth_percent: Decimal | None
+    # One entry per currency present among this organization's invoices —
+    # deliberately not a single flat total, since a total that mixed e.g.
+    # USD and UYU would be meaningless. Counts above stay flat: they're
+    # counts, not money, so combining them across currencies is fine.
+    revenue_by_currency: list[CurrencyRevenueSummary]
     recent_invoices: list[InvoiceSummaryResponse]
 
 
 class MonthlySummaryPoint(BaseModel):
+    """Invoice volume per month — currency-agnostic (a count, not money)."""
+
     month: str
-    revenue: Decimal
     invoice_count: int
+
+
+class MonthlyRevenuePoint(BaseModel):
+    """Revenue per month, per currency. Never aggregate across
+    currency_code values."""
+
+    month: str
+    currency_code: str
+    revenue: Decimal
 
 
 class PaymentStatusCountPoint(BaseModel):
@@ -319,12 +350,18 @@ class PaymentStatusCountPoint(BaseModel):
 class TopCustomerRevenue(BaseModel):
     customer_id: str
     customer_name: str
+    currency_code: str
     revenue: Decimal
 
 
 class DashboardAnalyticsResponse(BaseModel):
     monthly_summary: list[MonthlySummaryPoint]
+    monthly_revenue_by_currency: list[MonthlyRevenuePoint]
     invoice_count_by_status: list[PaymentStatusCountPoint]
+    # Top customers computed independently within each currency (a
+    # customer can be "top" in USD and unranked in UYU) — entries are
+    # tagged with currency_code so the frontend can filter to one
+    # currency at a time without ever summing revenue across currencies.
     top_customers: list[TopCustomerRevenue]
 
 

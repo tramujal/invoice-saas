@@ -13,9 +13,9 @@ import {
 } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import {
   CURRENCY_CODES,
+  getCurrencyLabel,
   LANGUAGES,
   LANGUAGE_LABELS,
   TAX_LABEL_OPTIONS,
@@ -24,14 +24,6 @@ import {
   type TaxLabelOption,
 } from "@/lib/organization-settings";
 import type { OrganizationProfile } from "@/lib/types";
-
-function currencyLabelKey(code: CurrencyCode): string {
-  return `settings.currency${code}`;
-}
-
-function getCurrencyLabel(t: TranslateFn, code: CurrencyCode): string {
-  return t(currencyLabelKey(code));
-}
 
 const LIMITS = {
   name: 255,

@@ -10,11 +10,18 @@ import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
+  formatCurrency,
   formatMoney,
   parseQuantity,
   parseUnitPrice,
   roundMoney,
 } from "@/lib/money";
+import {
+  CURRENCY_CODES,
+  getCurrencyLabel,
+  resolveDefaultInvoiceCurrency,
+  type CurrencyCode,
+} from "@/lib/organization-settings";
 import type { Customer, InvoiceCreatedResponse } from "@/lib/types";
 
 type LineDraft = {
@@ -40,11 +47,29 @@ export default function NewInvoicePage() {
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customerId, setCustomerId] = useState<string>("");
   const [taxPercent, setTaxPercent] = useState<string>("0");
+
   // Read on the client only, after hydration — see invoices/page.tsx for why.
-  const [currencyCode, setCurrencyCode] = useState("USD");
+  const [orgCurrency, setOrgCurrency] = useState<string | null>(null);
   useEffect(() => {
-    setCurrencyCode(getOrganizationCurrency() ?? "USD");
+    setOrgCurrency(getOrganizationCurrency());
   }, []);
+
+  const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
+
+  // Defaults to resolveDefaultInvoiceCurrency(selectedCustomer, orgCurrency)
+  // — today that's always just the org's currency (Customer has no
+  // preferred-currency field yet), but recomputing this whenever the
+  // selected customer changes, gated by currencyManuallySet, is exactly the
+  // wiring a future customer-preferred-currency needs: only
+  // resolveDefaultInvoiceCurrency's body would have to change. Once the
+  // user manually picks a currency, auto-defaulting stops so their choice
+  // always wins, per invoice, regardless of further customer changes.
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>("USD");
+  const [currencyManuallySet, setCurrencyManuallySet] = useState(false);
+  useEffect(() => {
+    if (currencyManuallySet) return;
+    setCurrencyCode(resolveDefaultInvoiceCurrency(selectedCustomer, orgCurrency));
+  }, [selectedCustomer, orgCurrency, currencyManuallySet]);
   const [lines, setLines] = useState<LineDraft[]>([
     {
       id: newLineId(),
@@ -160,6 +185,7 @@ export default function NewInvoicePage() {
         unit_price: r.unit_price,
       })),
       tax_rate: taxRateFraction,
+      currency_code: currencyCode,
     };
     if (customerId) {
       payload.customer_id = customerId;
@@ -241,6 +267,28 @@ export default function NewInvoicePage() {
                 .
               </p>
             ) : null}
+          </div>
+
+          <div className="mt-4 max-w-xs">
+            <label htmlFor="currency" className="text-sm font-medium text-slate-700">
+              {t("common.currencyLabel")}
+            </label>
+            <select
+              id="currency"
+              value={currencyCode}
+              onChange={(e) => {
+                setCurrencyCode(e.target.value as CurrencyCode);
+                setCurrencyManuallySet(true);
+              }}
+              disabled={isSubmitting}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+            >
+              {CURRENCY_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {getCurrencyLabel(t, code)}
+                </option>
+              ))}
+            </select>
           </div>
         </section>
 
@@ -375,19 +423,19 @@ export default function NewInvoicePage() {
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-600">{t("invoices.colSubtotal")}</dt>
                 <dd className="font-medium text-slate-900">
-                  {subtotal === null ? "—" : `${currencyCode} ${formatMoney(subtotal)}`}
+                  {subtotal === null ? "—" : formatCurrency(subtotal, currencyCode)}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-600">{t("invoices.colTax")}</dt>
                 <dd className="font-medium text-slate-900">
-                  {taxAmount === null ? "—" : `${currencyCode} ${formatMoney(taxAmount)}`}
+                  {taxAmount === null ? "—" : formatCurrency(taxAmount, currencyCode)}
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base">
                 <dt className="font-semibold text-slate-800">{t("invoices.colTotal")}</dt>
                 <dd className="font-semibold text-slate-900">
-                  {total === null ? "—" : `${currencyCode} ${formatMoney(total)}`}
+                  {total === null ? "—" : formatCurrency(total, currencyCode)}
                 </dd>
               </div>
             </dl>

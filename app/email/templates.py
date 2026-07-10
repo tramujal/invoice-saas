@@ -19,10 +19,14 @@ from app.payment_status import PaymentStatus
 
 
 def build_invoice_email(invoice: Invoice, customer: Customer) -> tuple[str, str]:
-    """Returns (subject, plain-text body) for an invoice email."""
-    organization = invoice.organization
-    language = get_language(organization)
-    currency_code = get_currency_code(organization)
+    """Returns (subject, plain-text body) for an invoice email.
+
+    language/currency_code come from the invoice itself (permanently
+    pinned at creation), not the organization's current settings — see
+    Invoice.currency_code / Invoice.language.
+    """
+    language = get_language(invoice)
+    currency_code = get_currency_code(invoice)
 
     invoice_number = format_invoice_number(invoice.invoice_number)
     status_label = payment_status_label(language, PaymentStatus(invoice.payment_status))

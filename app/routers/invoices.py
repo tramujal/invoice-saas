@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.currency import resolve_default_currency_code
 from app.database import get_db
 from app.deps import get_current_user, require_org_member
 from app.email.base import EmailAttachment, EmailMessage, EmailSendError
@@ -273,6 +274,7 @@ def create_invoice(
     require_org_member(current_user, organization_id, db)
 
     customer_id = body.customer_id
+    customer: Customer | None = None
     if customer_id is not None:
         customer = db.scalar(
             select(Customer).where(
@@ -313,6 +315,22 @@ def create_invoice(
     invoice_number = organization.next_invoice_number
     organization.next_invoice_number = invoice_number + 1
 
+    # Permanently pinned at creation time — an explicit currency_code
+    # overrides whatever resolve_default_currency_code() would have picked
+    # (today, always the organization's default; see that function's
+    # docstring for how a future customer preferred-currency plugs in here
+    # without touching this call site). Language has no override yet (per
+    # spec, "unless a future API explicitly overrides it"), so it always
+    # comes from the organization. Neither is ever re-derived from the
+    # organization later, so subsequent organization setting changes can't
+    # retroactively alter this invoice.
+    currency_code = (
+        body.currency_code.value
+        if body.currency_code
+        else resolve_default_currency_code(customer, organization)
+    )
+    language = organization.language
+
     invoice = Invoice(
         organization_id=organization_id,
         invoice_number=invoice_number,
@@ -321,6 +339,8 @@ def create_invoice(
         subtotal=subtotal,
         tax_amount=tax_amount,
         total=total,
+        currency_code=currency_code,
+        language=language,
         line_items=line_models,
     )
     db.add(invoice)

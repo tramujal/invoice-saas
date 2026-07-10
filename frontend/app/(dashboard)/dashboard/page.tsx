@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { CurrencySelector } from "@/components/dashboard/CurrencySelector";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { InvoiceVolumeChart } from "@/components/dashboard/InvoiceVolumeChart";
 import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBreakdown";
@@ -12,8 +13,9 @@ import { RevenueTrendLineChart } from "@/components/dashboard/RevenueTrendLineCh
 import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
 import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
+import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import { formatMoney } from "@/lib/money";
+import { formatCurrency } from "@/lib/money";
 import { isPaymentStatus } from "@/lib/payment-status";
 import type { DashboardAnalytics, DashboardData } from "@/lib/types";
 
@@ -57,6 +59,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Hydration-safe: default to null, resolve after mount (same pattern as
+  // organizationName elsewhere in this app).
+  const [orgCurrency, setOrgCurrency] = useState<string | null>(null);
+  const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
+  useEffect(() => {
+    const code = getOrganizationCurrency();
+    setOrgCurrency(code);
+    setSelectedCurrency((prev) => prev ?? code);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -82,13 +94,43 @@ export default function DashboardPage() {
 
   const showEmpty = !loading && !error && data !== null && data.total_invoices === 0;
 
+  // Every currency the organization's own default plus every currency
+  // that actually appears among its invoices — the org's currency is
+  // always offered even with zero invoices in it yet. Never a fixed list:
+  // adding a new supported currency elsewhere just means it can now show
+  // up here too, no code change needed.
+  const availableCurrencies = Array.from(
+    new Set([
+      ...(orgCurrency ? [orgCurrency] : []),
+      ...(data?.revenue_by_currency.map((r) => r.currency_code) ?? []),
+    ])
+  ).sort();
+  const effectiveCurrency =
+    selectedCurrency ?? orgCurrency ?? availableCurrencies[0] ?? "USD";
+  const selectedRevenue =
+    data?.revenue_by_currency.find((r) => r.currency_code === effectiveCurrency) ?? null;
+  const filteredMonthlyRevenue = (analytics?.monthly_revenue_by_currency ?? []).filter(
+    (point) => point.currency_code === effectiveCurrency
+  );
+  const filteredTopCustomers = (analytics?.top_customers ?? []).filter(
+    (row) => row.currency_code === effectiveCurrency
+  );
+
   return (
     <div className="mx-auto max-w-6xl space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-          {t("dashboard.title")}
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">{t("dashboard.subtitle")}</p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+            {t("dashboard.title")}
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">{t("dashboard.subtitle")}</p>
+        </div>
+        <CurrencySelector
+          currencies={availableCurrencies}
+          selected={effectiveCurrency}
+          onSelect={setSelectedCurrency}
+          t={t}
+        />
       </header>
 
       {error ? (
@@ -106,7 +148,14 @@ export default function DashboardPage() {
       >
         <DashboardCard
           title={t("dashboard.totalRevenueTitle")}
-          value={data ? formatMoney(Number.parseFloat(data.total_revenue)) : "—"}
+          value={
+            data
+              ? formatCurrency(
+                  selectedRevenue ? selectedRevenue.total_revenue : 0,
+                  effectiveCurrency
+                )
+              : "—"
+          }
           description={t("dashboard.totalRevenueDescription")}
           loading={loading}
         />
@@ -146,11 +195,15 @@ export default function DashboardPage() {
             className="grid grid-cols-1 gap-4 lg:grid-cols-2"
           >
             <RevenueTrendCard
-              revenueThisMonth={data ? Number.parseFloat(data.revenue_this_month) : 0}
-              revenueLastMonth={data ? Number.parseFloat(data.revenue_last_month) : 0}
+              revenueThisMonth={
+                selectedRevenue ? Number.parseFloat(selectedRevenue.revenue_this_month) : 0
+              }
+              revenueLastMonth={
+                selectedRevenue ? Number.parseFloat(selectedRevenue.revenue_last_month) : 0
+              }
               growthPercent={
-                data?.revenue_growth_percent != null
-                  ? Number.parseFloat(data.revenue_growth_percent)
+                selectedRevenue?.revenue_growth_percent != null
+                  ? Number.parseFloat(selectedRevenue.revenue_growth_percent)
                   : null
               }
               loading={loading}
@@ -169,7 +222,7 @@ export default function DashboardPage() {
             </h2>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <RevenueTrendLineChart
-                data={analytics?.monthly_summary ?? []}
+                data={filteredMonthlyRevenue}
                 loading={loading}
               />
               <InvoiceVolumeChart
@@ -181,7 +234,7 @@ export default function DashboardPage() {
                 loading={loading}
               />
               <TopCustomersChart
-                data={analytics?.top_customers ?? []}
+                data={filteredTopCustomers}
                 loading={loading}
               />
             </div>
@@ -253,7 +306,7 @@ export default function DashboardPage() {
                               <PaymentStatusBadge status={status} />
                             </td>
                             <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
-                              {row.total}
+                              {formatCurrency(row.total, row.currency_code)}
                             </td>
                             <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
                               {new Date(row.created_at).toLocaleString()}

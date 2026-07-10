@@ -7,9 +7,9 @@ import { PaymentStatusSelect } from "@/components/invoices/PaymentStatusSelect";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
-import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { formatApiError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { formatCurrency } from "@/lib/money";
 import {
   PAYMENT_STATUSES,
   getPaymentStatusLabel,
@@ -82,13 +82,6 @@ export default function InvoicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
-  // Read on the client only, after hydration — reading localStorage in the
-  // useState initializer would run during SSR too (where it's unavailable),
-  // producing a server/client text mismatch.
-  const [currencyCode, setCurrencyCode] = useState("USD");
-  useEffect(() => {
-    setCurrencyCode(getOrganizationCurrency() ?? "USD");
-  }, []);
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -431,13 +424,13 @@ export default function InvoicesPage() {
                         />
                       </td>
                       <td className="px-4 py-3 text-slate-800 sm:px-6">
-                        {currencyCode} {row.subtotal}
+                        {formatCurrency(row.subtotal, row.currency_code)}
                       </td>
                       <td className="hidden px-4 py-3 text-slate-800 md:table-cell md:px-6">
-                        {currencyCode} {row.tax_amount}
+                        {formatCurrency(row.tax_amount, row.currency_code)}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
-                        {currencyCode} {row.total}
+                        {formatCurrency(row.total, row.currency_code)}
                       </td>
                       <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
                         {new Date(row.created_at).toLocaleString()}

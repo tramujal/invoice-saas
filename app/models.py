@@ -158,6 +158,21 @@ class Invoice(Base):
         default=PaymentStatus.pending.value,
         server_default=PaymentStatus.pending.value,
     )
+    # Permanently pinned at creation time from the organization's
+    # currency/language at that moment (or an explicit override, for
+    # currency). Deliberately independent of Organization.currency_code /
+    # Organization.language, which are only defaults for *new* invoices —
+    # changing them must never alter a previously created invoice's PDF,
+    # email, or displayed currency. See app/currency.py / app/localization.py,
+    # whose get_currency_code()/get_language() helpers accept an Invoice
+    # here exactly as they accept an Organization elsewhere (both just need
+    # a .currency_code / .language attribute).
+    currency_code: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="USD", server_default="USD"
+    )
+    language: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="en", server_default="en"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

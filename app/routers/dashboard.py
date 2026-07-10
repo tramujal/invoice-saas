@@ -10,8 +10,10 @@ from app.deps import get_current_user, require_org_member
 from app.models import Customer, Invoice, User
 from app.payment_status import PaymentStatus
 from app.schemas import (
+    CurrencyRevenueSummary,
     DashboardAnalyticsResponse,
     DashboardResponse,
+    MonthlyRevenuePoint,
     MonthlySummaryPoint,
     PaymentStatusCountPoint,
     TopCustomerRevenue,
@@ -90,11 +92,6 @@ def get_dashboard(
         )
         or 0
     )
-    total_revenue = _quantize_money(
-        db.scalar(select(func.coalesce(func.sum(Invoice.total), 0)).where(org_filter))
-        or Decimal("0")
-    )
-
     status_counts = dict(
         db.execute(
             select(Invoice.payment_status, func.count())
@@ -105,30 +102,58 @@ def get_dashboard(
 
     last_month_start, this_month_start = _month_bounds(datetime.now(timezone.utc))
 
-    revenue_this_month = _quantize_money(
-        db.scalar(
-            select(func.coalesce(func.sum(Invoice.total), 0)).where(
-                org_filter, Invoice.created_at >= this_month_start
-            )
-        )
-        or Decimal("0")
+    # Revenue is grouped by currency_code at every step below — never
+    # summed across currencies, since e.g. "USD 100 + UYU 1000" isn't a
+    # meaningful number. Three separate grouped queries (total/this-month/
+    # last-month), matching this file's existing style of straightforward,
+    # portable queries over cleverer combined SQL.
+    total_by_currency = dict(
+        db.execute(
+            select(Invoice.currency_code, func.coalesce(func.sum(Invoice.total), 0))
+            .where(org_filter)
+            .group_by(Invoice.currency_code)
+        ).all()
     )
-    revenue_last_month = _quantize_money(
-        db.scalar(
-            select(func.coalesce(func.sum(Invoice.total), 0)).where(
+    this_month_by_currency = dict(
+        db.execute(
+            select(Invoice.currency_code, func.coalesce(func.sum(Invoice.total), 0))
+            .where(org_filter, Invoice.created_at >= this_month_start)
+            .group_by(Invoice.currency_code)
+        ).all()
+    )
+    last_month_by_currency = dict(
+        db.execute(
+            select(Invoice.currency_code, func.coalesce(func.sum(Invoice.total), 0))
+            .where(
                 org_filter,
                 Invoice.created_at >= last_month_start,
                 Invoice.created_at < this_month_start,
             )
-        )
-        or Decimal("0")
+            .group_by(Invoice.currency_code)
+        ).all()
     )
 
-    revenue_growth_percent: Decimal | None = None
-    if revenue_last_month > 0:
-        revenue_growth_percent = (
-            (revenue_this_month - revenue_last_month) / revenue_last_month * 100
-        ).quantize(Decimal("0.01"))
+    currency_codes = (
+        set(total_by_currency) | set(this_month_by_currency) | set(last_month_by_currency)
+    )
+    revenue_by_currency: list[CurrencyRevenueSummary] = []
+    for code in sorted(currency_codes):
+        this_month = _quantize_money(this_month_by_currency.get(code, Decimal("0")))
+        last_month = _quantize_money(last_month_by_currency.get(code, Decimal("0")))
+        growth_percent: Decimal | None = None
+        if last_month > 0:
+            growth_percent = ((this_month - last_month) / last_month * 100).quantize(
+                Decimal("0.01")
+            )
+        revenue_by_currency.append(
+            CurrencyRevenueSummary(
+                currency_code=code,
+                total_revenue=_quantize_money(total_by_currency.get(code, Decimal("0"))),
+                revenue_this_month=this_month,
+                revenue_last_month=last_month,
+                revenue_growth_percent=growth_percent,
+            )
+        )
 
     recent_invoices = db.scalars(
         select(Invoice)
@@ -139,15 +164,12 @@ def get_dashboard(
     ).all()
 
     return DashboardResponse(
-        total_revenue=total_revenue,
         total_invoices=total_invoices,
         total_customers=total_customers,
         pending_invoices=status_counts.get(PaymentStatus.pending.value, 0),
         paid_invoices=status_counts.get(PaymentStatus.paid.value, 0),
         overdue_invoices=status_counts.get(PaymentStatus.overdue.value, 0),
-        revenue_this_month=revenue_this_month,
-        revenue_last_month=revenue_last_month,
-        revenue_growth_percent=revenue_growth_percent,
+        revenue_by_currency=revenue_by_currency,
         recent_invoices=list(recent_invoices),
     )
 
@@ -162,38 +184,55 @@ def get_dashboard_analytics(
 
     org_filter = Invoice.organization_id == organization_id
 
-    # --- monthly revenue + invoice count, last N months ---
+    # --- monthly invoice volume + revenue, last N months ---
     # Bucketed in Python rather than SQL GROUP BY month: SQLite and Postgres
     # don't share a portable "truncate to month" function, and at this app's
     # scale (one org's invoices over a few months) fetching the bounded row
     # set and summing here is simple and correct on both backends.
+    #
+    # invoice_count is a plain count (currency-agnostic — combining it
+    # across currencies is fine, per the same reasoning as total_invoices
+    # elsewhere). revenue is bucketed by (month, currency_code) instead and
+    # never summed across currencies — see MonthlyRevenuePoint.
     month_starts = _last_n_month_starts(datetime.now(timezone.utc), MONTHLY_SUMMARY_MONTHS)
     range_start = month_starts[0]
 
     rows = db.execute(
-        select(Invoice.created_at, Invoice.total).where(
+        select(Invoice.created_at, Invoice.total, Invoice.currency_code).where(
             org_filter, Invoice.created_at >= range_start
         )
     ).all()
 
-    buckets: dict[str, dict[str, Decimal | int]] = {
-        _month_key(start): {"revenue": Decimal("0"), "invoice_count": 0}
+    invoice_counts: dict[str, int] = {_month_key(start): 0 for start in month_starts}
+
+    # Zero-filled for every (month, currency) pair up front, for every
+    # currency that appears anywhere in the window — so each currency gets
+    # a full, contiguous MONTHLY_SUMMARY_MONTHS-point series (matching the
+    # single-currency chart's previous guarantee) instead of gaps on
+    # months where that particular currency happened to have no invoices.
+    currencies_seen = {currency_code for _, _, currency_code in rows}
+    revenue_buckets: dict[tuple[str, str], Decimal] = {
+        (_month_key(start), currency_code): Decimal("0")
         for start in month_starts
+        for currency_code in currencies_seen
     }
-    for created_at, total in rows:
+    for created_at, total, currency_code in rows:
         key = _month_key(created_at)
-        bucket = buckets.get(key)
-        if bucket is not None:
-            bucket["revenue"] += total
-            bucket["invoice_count"] += 1
+        if key in invoice_counts:
+            invoice_counts[key] += 1
+        revenue_key = (key, currency_code)
+        if revenue_key in revenue_buckets:
+            revenue_buckets[revenue_key] += total
 
     monthly_summary = [
-        MonthlySummaryPoint(
-            month=key,
-            revenue=_quantize_money(buckets[key]["revenue"]),
-            invoice_count=buckets[key]["invoice_count"],
+        MonthlySummaryPoint(month=key, invoice_count=invoice_counts[key])
+        for key in sorted(invoice_counts)
+    ]
+    monthly_revenue_by_currency = [
+        MonthlyRevenuePoint(
+            month=month, currency_code=currency_code, revenue=_quantize_money(revenue)
         )
-        for key in sorted(buckets)
+        for (month, currency_code), revenue in sorted(revenue_buckets.items())
     ]
 
     # --- invoice count by payment status, all-time ---
@@ -211,28 +250,46 @@ def get_dashboard_analytics(
         for status in PaymentStatus
     ]
 
-    # --- top customers by revenue, all-time ---
+    # --- top customers by revenue, all-time, computed independently per
+    # currency (a customer can rank differently, or not at all, in each
+    # currency) ---
     top_customer_rows = db.execute(
         select(
-            Customer.id, Customer.name, func.sum(Invoice.total).label("revenue")
+            Customer.id,
+            Customer.name,
+            Invoice.currency_code,
+            func.sum(Invoice.total).label("revenue"),
         )
         .join(Invoice, Invoice.customer_id == Customer.id)
         .where(Invoice.organization_id == organization_id)
-        .group_by(Customer.id, Customer.name)
-        .order_by(func.sum(Invoice.total).desc())
-        .limit(TOP_CUSTOMERS_LIMIT)
+        .group_by(Customer.id, Customer.name, Invoice.currency_code)
     ).all()
-    top_customers = [
-        TopCustomerRevenue(
-            customer_id=row.id,
-            customer_name=row.name,
-            revenue=_quantize_money(row.revenue),
+
+    # Ranked and limited in Python rather than a SQL window function
+    # (ROW_NUMBER() OVER PARTITION BY), matching this function's existing
+    # preference for simple, portable queries over backend-specific SQL.
+    rows_by_currency: dict[str, list] = {}
+    for row in top_customer_rows:
+        rows_by_currency.setdefault(row.currency_code, []).append(row)
+
+    top_customers: list[TopCustomerRevenue] = []
+    for currency_code in sorted(rows_by_currency):
+        ranked = sorted(
+            rows_by_currency[currency_code], key=lambda r: r.revenue, reverse=True
         )
-        for row in top_customer_rows
-    ]
+        for row in ranked[:TOP_CUSTOMERS_LIMIT]:
+            top_customers.append(
+                TopCustomerRevenue(
+                    customer_id=row.id,
+                    customer_name=row.name,
+                    currency_code=currency_code,
+                    revenue=_quantize_money(row.revenue),
+                )
+            )
 
     return DashboardAnalyticsResponse(
         monthly_summary=monthly_summary,
+        monthly_revenue_by_currency=monthly_revenue_by_currency,
         invoice_count_by_status=invoice_count_by_status,
         top_customers=top_customers,
     )

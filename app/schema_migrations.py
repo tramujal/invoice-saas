@@ -17,6 +17,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_organization_profile_fields(engine)
     _add_organization_localization_fields(engine)
     _add_password_reset_tokens_table(engine)
+    _add_invoice_currency_and_language(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -137,6 +138,71 @@ def _add_password_reset_tokens_table(engine: Engine) -> None:
                 ")"
             )
         )
+
+
+def _add_invoice_currency_and_language(engine: Engine) -> None:
+    """Adds currency_code/language to invoices, backfilled from each
+    invoice's organization's CURRENT currency/language at migration time.
+
+    SQLite has no ALTER COLUMN ... SET NOT NULL, so (matching
+    _add_invoice_numbering's approach for invoice_number) each column is
+    added NOT NULL with a placeholder default and immediately backfilled
+    with real values in the same transaction — the column is never
+    nullable, but its initial values get corrected before any other code
+    can observe them.
+
+    From this migration onward, organization currency_code/language
+    changes only affect *new* invoices (set explicitly at creation, see
+    create_invoice) — every existing invoice keeps whatever it's
+    backfilled with here, permanently.
+    """
+    inspector = inspect(engine)
+    if "invoices" not in inspector.get_table_names():
+        return
+
+    columns = {c["name"] for c in inspector.get_columns("invoices")}
+    needs_currency = "currency_code" not in columns
+    needs_language = "language" not in columns
+    if not needs_currency and not needs_language:
+        return
+
+    with engine.begin() as conn:
+        if needs_currency:
+            conn.execute(
+                text(
+                    "ALTER TABLE invoices "
+                    "ADD COLUMN currency_code VARCHAR(8) NOT NULL DEFAULT 'USD'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE invoices SET currency_code = ("
+                    "SELECT currency_code FROM organizations "
+                    "WHERE organizations.id = invoices.organization_id"
+                    ") WHERE EXISTS ("
+                    "SELECT 1 FROM organizations "
+                    "WHERE organizations.id = invoices.organization_id"
+                    ")"
+                )
+            )
+        if needs_language:
+            conn.execute(
+                text(
+                    "ALTER TABLE invoices "
+                    "ADD COLUMN language VARCHAR(8) NOT NULL DEFAULT 'en'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE invoices SET language = ("
+                    "SELECT language FROM organizations "
+                    "WHERE organizations.id = invoices.organization_id"
+                    ") WHERE EXISTS ("
+                    "SELECT 1 FROM organizations "
+                    "WHERE organizations.id = invoices.organization_id"
+                    ")"
+                )
+            )
 
 
 def _backfill_invoice_numbers(conn) -> None:

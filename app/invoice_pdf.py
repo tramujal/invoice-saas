@@ -37,9 +37,13 @@ def _format_quantity(value) -> str:
 
 
 def render_invoice_pdf(invoice: Invoice) -> bytes:
+    # Permanently pinned on the invoice itself (see Invoice.currency_code /
+    # Invoice.language) — never re-derived from the organization's current
+    # settings, so this PDF looks the same today as it will years from now
+    # even if the organization's defaults change in the meantime.
     organization = invoice.organization
-    language = get_language(organization)
-    currency_code = get_currency_code(organization)
+    language = get_language(invoice)
+    currency_code = get_currency_code(invoice)
     invoice_number = format_invoice_number(invoice.invoice_number)
 
     buffer = io.BytesIO()
@@ -123,9 +127,14 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
         elements.append(Paragraph(t(language, "no_customer"), normal_style))
     elements.append(Spacer(1, 20))
 
-    # Line-item table headers aren't part of the requested translated-label
-    # set, so they stay in English regardless of organization language.
-    line_item_rows = [["Description", "Quantity", "Unit price", "Line total"]]
+    line_item_rows = [
+        [
+            t(language, "line_description_label"),
+            t(language, "line_quantity_label"),
+            t(language, "line_unit_price_label"),
+            t(language, "line_total_label"),
+        ]
+    ]
     for item in invoice.line_items:
         line_item_rows.append(
             [

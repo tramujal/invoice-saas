@@ -9,6 +9,12 @@ export type InvoiceSummary = {
   tax_amount: string;
   total: string;
   payment_status: PaymentStatus;
+  /** Permanently pinned at creation — never re-derived from the
+   * organization's current currency. */
+  currency_code: string;
+  /** Permanently pinned at creation — never re-derived from the
+   * organization's current language. */
+  language: string;
   created_at: string;
 };
 
@@ -54,6 +60,8 @@ export type InvoiceCreatedResponse = {
   tax_amount: string;
   total: string;
   payment_status: PaymentStatus;
+  currency_code: string;
+  language: string;
   line_items: InvoiceLineItemResponse[];
 };
 
@@ -92,24 +100,40 @@ export type OrganizationProfile = {
   tax_label: string;
 };
 
+/** Revenue figures for one currency — never combine across currencies
+ * (e.g. summing a USD total with a UYU total). One entry per currency
+ * present among the organization's invoices. */
+export type CurrencyRevenueSummary = {
+  currency_code: string;
+  total_revenue: string;
+  revenue_this_month: string;
+  revenue_last_month: string;
+  revenue_growth_percent: string | null;
+};
+
 /** Response from GET /organizations/{org}/dashboard */
 export type DashboardData = {
-  total_revenue: string;
   total_invoices: number;
   total_customers: number;
   pending_invoices: number;
   paid_invoices: number;
   overdue_invoices: number;
-  revenue_this_month: string;
-  revenue_last_month: string;
-  revenue_growth_percent: string | null;
+  revenue_by_currency: CurrencyRevenueSummary[];
   recent_invoices: InvoiceSummary[];
 };
 
+/** Invoice volume per month — currency-agnostic (a count, not money). */
 export type MonthlySummaryPoint = {
   month: string;
-  revenue: string;
   invoice_count: number;
+};
+
+/** Revenue per month, per currency. Never aggregate across
+ * currency_code values. */
+export type MonthlyRevenuePoint = {
+  month: string;
+  currency_code: string;
+  revenue: string;
 };
 
 export type PaymentStatusCountPoint = {
@@ -117,15 +141,19 @@ export type PaymentStatusCountPoint = {
   count: number;
 };
 
+/** Top customers are ranked independently within each currency — a
+ * customer can be "top" in USD and unranked in UYU. */
 export type TopCustomerRevenue = {
   customer_id: string;
   customer_name: string;
+  currency_code: string;
   revenue: string;
 };
 
 /** Response from GET /organizations/{org}/dashboard/analytics */
 export type DashboardAnalytics = {
   monthly_summary: MonthlySummaryPoint[];
+  monthly_revenue_by_currency: MonthlyRevenuePoint[];
   invoice_count_by_status: PaymentStatusCountPoint[];
   top_customers: TopCustomerRevenue[];
 };

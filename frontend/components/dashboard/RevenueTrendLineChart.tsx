@@ -14,10 +14,12 @@ import {
 import { formatMonthLabel } from "@/lib/chart-format";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
-import type { MonthlySummaryPoint } from "@/lib/types";
+import type { MonthlyRevenuePoint } from "@/lib/types";
 
 type RevenueTrendLineChartProps = {
-  data: MonthlySummaryPoint[];
+  /** Pre-filtered by the caller to a single currency — this component
+   * never sums or mixes currencies itself. */
+  data: MonthlyRevenuePoint[];
   loading?: boolean;
 };
 

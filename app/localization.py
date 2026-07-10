@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from app.payment_status import PaymentStatus
 
 if TYPE_CHECKING:
-    from app.models import Organization
+    from app.models import Invoice, Organization
 
 DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ("en", "es")
@@ -19,10 +19,15 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "invoice_title": "Invoice",
         "invoice_no_label": "Invoice No.",
-        "created_label": "Created",
+        "created_label": "Issue Date",
+        "due_date_label": "Due Date",
         "payment_status_label": "Payment Status",
         "from_label": "From",
         "bill_to_label": "Bill To",
+        "line_description_label": "Description",
+        "line_quantity_label": "Quantity",
+        "line_unit_price_label": "Unit Price",
+        "line_total_label": "Line Total",
         "subtotal_label": "Subtotal",
         "tax_amount_label": "Tax",
         "total_label": "Total",
@@ -49,10 +54,15 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     "es": {
         "invoice_title": "Factura",
         "invoice_no_label": "Nº de factura",
-        "created_label": "Fecha",
+        "created_label": "Fecha de emisión",
+        "due_date_label": "Fecha de vencimiento",
         "payment_status_label": "Estado",
         "from_label": "Emisor",
         "bill_to_label": "Cliente",
+        "line_description_label": "Descripción",
+        "line_quantity_label": "Cantidad",
+        "line_unit_price_label": "Precio unitario",
+        "line_total_label": "Total de línea",
         "subtotal_label": "Subtotal",
         "tax_amount_label": "Impuesto",
         "total_label": "Total",
@@ -79,9 +89,12 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
 }
 
 
-def get_language(organization: "Organization | None" = None) -> str:
-    """Returns the language code to use. Falls back to the safe default if
-    no organization is given, or its language is somehow unrecognized."""
+def get_language(organization: "Organization | Invoice | None" = None) -> str:
+    """Returns the language code to use. Accepts either an Organization
+    (its configured default) or an Invoice (its permanently-pinned
+    language) — both just need a .language attribute, so this one function
+    serves both without duplication. Falls back to the safe default if
+    nothing is given, or the value is somehow unrecognized."""
     language = getattr(organization, "language", None) if organization is not None else None
     return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
 
