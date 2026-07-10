@@ -6,6 +6,7 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipValueType,
 } from "recharts";
 
 import { formatMoney } from "@/lib/money";
@@ -59,7 +60,7 @@ export function TopCustomersChart({ data, loading = false }: TopCustomersChartPr
                 width={100}
               />
               <Tooltip
-                formatter={(value: number) => formatMoney(value)}
+                formatter={(value: TooltipValueType | undefined) => formatMoney(Number(value))}
                 contentStyle={{ borderRadius: 8, borderColor: "#e2e8f0", fontSize: 12 }}
               />
               <Bar dataKey="revenue" fill="#0f172a" radius={[0, 4, 4, 0]} maxBarSize={24} />

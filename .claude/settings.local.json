@@ -32,7 +32,8 @@
       "Bash(python -c \"import app.email.templates; print\\('imports OK'\\)\")",
       "Bash(python -c \"import app.main; print\\('imports OK'\\)\")",
       "Bash(grep -rn 'href=\"/\"' app components)",
-      "Bash(grep -rn 'replace\\(\"/\"\\)\\\\|push\\(\"/\"\\)\\\\|router\\\\.replace\\(\"/\"\\)' app components)"
+      "Bash(grep -rn 'replace\\(\"/\"\\)\\\\|push\\(\"/\"\\)\\\\|router\\\\.replace\\(\"/\"\\)' app components)",
+      "Bash(npm run *)"
     ]
   }
 }

@@ -6,6 +6,7 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipValueType,
 } from "recharts";
 
 import { formatMonthLabel } from "@/lib/chart-format";
@@ -59,7 +60,7 @@ export function RevenueTrendLineChart({
                 tickFormatter={(value: number) => formatMoney(value)}
               />
               <Tooltip
-                formatter={(value: number) => formatMoney(value)}
+                formatter={(value: TooltipValueType | undefined) => formatMoney(Number(value))}
                 contentStyle={{
                   borderRadius: 8,
                   borderColor: "#e2e8f0",
