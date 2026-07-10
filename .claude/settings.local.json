@@ -33,7 +33,11 @@
       "Bash(python -c \"import app.main; print\\('imports OK'\\)\")",
       "Bash(grep -rn 'href=\"/\"' app components)",
       "Bash(grep -rn 'replace\\(\"/\"\\)\\\\|push\\(\"/\"\\)\\\\|router\\\\.replace\\(\"/\"\\)' app components)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(python -c \"import app.main\")",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_password_reset.py\")",
+      "Bash(FRONTEND_BASE_URL=https://app.example.com python -c ' *)",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_password_policy.py\")"
     ]
   }
 }

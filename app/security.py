@@ -30,6 +30,24 @@ if JWT_SECRET_KEY == _INSECURE_DEV_SECRET:
     )
 
 
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_POLICY_MESSAGE = (
+    f"Password must be at least {PASSWORD_MIN_LENGTH} characters and include "
+    "at least one uppercase letter, one lowercase letter, and one number."
+)
+
+
+def password_meets_policy(password: str) -> bool:
+    """The single source of truth for password strength, used by both
+    registration and password reset. No special character is required."""
+    return (
+        len(password) >= PASSWORD_MIN_LENGTH
+        and any(c.isupper() for c in password)
+        and any(c.islower() for c in password)
+        and any(c.isdigit() for c in password)
+    )
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 

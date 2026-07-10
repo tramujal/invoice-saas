@@ -37,6 +37,14 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "email_total_label": "Total:",
         "email_payment_status_label": "Payment Status:",
         "email_thanks": "Thank you.",
+        "password_reset_subject": "Reset your password",
+        "password_reset_greeting": "Hello,",
+        "password_reset_instructions": "We received a request to reset your password.",
+        "password_reset_link_label": "Reset your password:",
+        "password_reset_expiry": "This link expires in 30 minutes.",
+        "password_reset_ignore": (
+            "If you did not request this, you can safely ignore this email."
+        ),
     },
     "es": {
         "invoice_title": "Factura",
@@ -59,6 +67,14 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "email_total_label": "Total:",
         "email_payment_status_label": "Estado de pago:",
         "email_thanks": "Gracias.",
+        "password_reset_subject": "Restablece tu contraseña",
+        "password_reset_greeting": "Hola,",
+        "password_reset_instructions": "Recibimos una solicitud para restablecer tu contraseña.",
+        "password_reset_link_label": "Restablece tu contraseña:",
+        "password_reset_expiry": "Este enlace expira en 30 minutos.",
+        "password_reset_ignore": (
+            "Si no solicitaste esto, puedes ignorar este correo de forma segura."
+        ),
     },
 }
 

@@ -7,7 +7,13 @@ out of sync with each other.
 
 from app.currency import format_amount, get_currency_code
 from app.invoice_numbering import format_invoice_number
-from app.localization import get_language, payment_status_label, t
+from app.localization import (
+    DEFAULT_LANGUAGE,
+    SUPPORTED_LANGUAGES,
+    get_language,
+    payment_status_label,
+    t,
+)
 from app.models import Customer, Invoice
 from app.payment_status import PaymentStatus
 
@@ -37,5 +43,36 @@ def build_invoice_email(invoice: Invoice, customer: Customer) -> tuple[str, str]
         f"{status_label}\n"
         "\n"
         f"{t(language, 'email_thanks')}"
+    )
+    return subject, body
+
+
+def build_password_reset_email(
+    reset_link: str, language: str = DEFAULT_LANGUAGE
+) -> tuple[str, str]:
+    """Returns (subject, plain-text body) for a password reset email.
+
+    Unlike build_invoice_email, there's no Organization to resolve a
+    language from — Users aren't members of an org yet at this point, and
+    even if they were, a password reset is a personal action, not an
+    organization one. Instead the caller passes the language the visitor
+    had selected on the public forgot-password page (see
+    ForgotPasswordRequest.language), and an unrecognized value falls back
+    to English.
+    """
+    if language not in SUPPORTED_LANGUAGES:
+        language = DEFAULT_LANGUAGE
+    subject = t(language, "password_reset_subject")
+    body = (
+        f"{t(language, 'password_reset_greeting')}\n"
+        "\n"
+        f"{t(language, 'password_reset_instructions')}\n"
+        "\n"
+        f"{t(language, 'password_reset_link_label')}\n"
+        f"{reset_link}\n"
+        "\n"
+        f"{t(language, 'password_reset_expiry')}\n"
+        "\n"
+        f"{t(language, 'password_reset_ignore')}"
     )
     return subject, body

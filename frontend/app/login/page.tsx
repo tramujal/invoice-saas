@@ -1,13 +1,16 @@
 "use client";
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequirementsChecklist";
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { ApiError, authRequest } from "@/lib/api";
 import { formatApiError } from "@/lib/format-api-error";
 import { isAuthenticated, setAuthSession } from "@/lib/auth-storage";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
+import { isPasswordValid } from "@/lib/password-policy";
 import type { AuthResponse } from "@/lib/types";
 
 const defaultApi =
@@ -66,8 +69,8 @@ function LoginForm() {
       setError(t("auth.errorOrganizationNameRequired"));
       return;
     }
-    if (mode === "register" && password.length < 8) {
-      setError(t("auth.errorPasswordLength"));
+    if (mode === "register" && !isPasswordValid(password)) {
+      setError(t("auth.errorPasswordPolicy"));
       return;
     }
 
@@ -179,6 +182,16 @@ function LoginForm() {
               placeholder={mode === "register" ? t("auth.passwordPlaceholderRegister") : "••••••••"}
               disabled={isSubmitting}
             />
+            {mode === "login" ? (
+              <Link
+                href="/forgot-password"
+                className="mt-1.5 inline-block text-xs font-medium text-slate-500 hover:text-slate-700"
+              >
+                {t("auth.forgotPasswordLink")}
+              </Link>
+            ) : (
+              <PasswordRequirementsChecklist password={password} t={t} />
+            )}
           </div>
 
           {mode === "register" ? (

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
+from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
 
 
 class SortDirection(str, Enum):
@@ -63,15 +64,29 @@ def _blank_to_none(value: str | None) -> str | None:
     return value
 
 
+def _validate_password(value: str) -> str:
+    """Shared by RegisterRequest and ResetPasswordRequest so the password
+    policy has exactly one implementation (app.security.password_meets_policy)
+    rather than being checked twice and risking drift."""
+    if not password_meets_policy(value):
+        raise ValueError(PASSWORD_POLICY_MESSAGE)
+    return value
+
+
 class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
-    password: str = Field(min_length=8, max_length=72)
+    password: str = Field(max_length=72)
     organization_name: str = Field(min_length=1, max_length=255)
 
     @field_validator("email")
     @classmethod
     def normalize_email(cls, value: str) -> str:
         return _normalize_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def check_password_policy(cls, value: str) -> str:
+        return _validate_password(value)
 
 
 class LoginRequest(BaseModel):
@@ -82,6 +97,37 @@ class LoginRequest(BaseModel):
     @classmethod
     def normalize_email(cls, value: str) -> str:
         return _normalize_email(value)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    # Public/marketing-page language the user was viewing when they
+    # submitted this form, used to localize the reset email. Defaults to
+    # English so older clients that don't send it still work.
+    language: OrganizationLanguage = OrganizationLanguage.en
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password_policy(cls, value: str) -> str:
+        return _validate_password(value)
+
+
+class ResetPasswordResponse(BaseModel):
+    message: str
 
 
 class UserResponse(BaseModel):

@@ -16,6 +16,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_invoice_numbering(engine)
     _add_organization_profile_fields(engine)
     _add_organization_localization_fields(engine)
+    _add_password_reset_tokens_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -107,6 +108,35 @@ def _add_organization_localization_fields(engine: Engine) -> None:
     with engine.begin() as conn:
         for name, ddl in missing.items():
             conn.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} {ddl}"))
+
+
+def _add_password_reset_tokens_table(engine: Engine) -> None:
+    """Creates password_reset_tokens if it's missing.
+
+    Base.metadata.create_all() (called before this function, from init_db())
+    already creates this table on any database that doesn't have it yet,
+    since PasswordResetToken is a declared model — this guarded step is an
+    explicit, idempotent safety net matching this file's established
+    pattern for every other schema change, in case create_all is ever
+    skipped for a given deployment path.
+    """
+    inspector = inspect(engine)
+    if "password_reset_tokens" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS password_reset_tokens ("
+                "id CHAR(36) PRIMARY KEY, "
+                "user_id CHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "token_hash VARCHAR(64) NOT NULL UNIQUE, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "used_at TIMESTAMP NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
 
 
 def _backfill_invoice_numbers(conn) -> None:
