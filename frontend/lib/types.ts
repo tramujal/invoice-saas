@@ -68,6 +68,7 @@ export type InvoiceCreatedResponse = {
 export type AuthUser = {
   id: string;
   email: string;
+  email_verified: boolean;
 };
 
 export type OrganizationSummary = {
@@ -83,6 +84,17 @@ export type AuthResponse = {
   token_type: string;
   user: AuthUser;
   organizations: OrganizationSummary[];
+};
+
+/** Response from GET /auth/me */
+export type MeResponse = {
+  user: AuthUser;
+  organizations: OrganizationSummary[];
+};
+
+/** Response from POST /auth/resend-verification and POST /auth/verify-email */
+export type MessageResponse = {
+  message: string;
 };
 
 /** Response from GET/PATCH /organizations/{org} */

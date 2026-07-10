@@ -9,9 +9,21 @@ from app.database import SessionLocal, get_db
 from app.deps import get_current_user
 from app.email.base import EmailMessage, EmailSendError
 from app.email.factory import get_email_sender
-from app.email.templates import build_password_reset_email
+from app.email.templates import build_password_reset_email, build_verification_email
+from app.email_verification import (
+    VERIFICATION_TOKEN_TTL_HOURS,
+    build_verification_link,
+    generate_verification_token,
+    hash_verification_token,
+)
 from app.localization import DEFAULT_LANGUAGE
-from app.models import Organization, OrganizationMember, PasswordResetToken, User
+from app.models import (
+    EmailVerificationToken,
+    Organization,
+    OrganizationMember,
+    PasswordResetToken,
+    User,
+)
 from app.password_reset import (
     RESET_TOKEN_TTL_MINUTES,
     build_reset_link,
@@ -27,9 +39,12 @@ from app.schemas import (
     MeResponse,
     OrganizationSummary,
     RegisterRequest,
+    ResendVerificationResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
     UserResponse,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
 )
 from app.security import create_access_token, hash_password, verify_password
 
@@ -49,6 +64,11 @@ RESET_PASSWORD_SUCCESS_MESSAGE = (
 )
 RESET_PASSWORD_ERROR_MESSAGE = "Invalid or expired reset token."
 
+VERIFICATION_SENT_MESSAGE = "A verification email has been sent to your address."
+ALREADY_VERIFIED_MESSAGE = "Your email address is already verified."
+VERIFY_EMAIL_SUCCESS_MESSAGE = "Your email address has been verified."
+VERIFY_EMAIL_ERROR_MESSAGE = "Invalid or expired verification token."
+
 
 def _user_organizations(db: Session, user_id: str) -> list[Organization]:
     return list(
@@ -67,7 +87,11 @@ def _user_organizations(db: Session, user_id: str) -> list[Organization]:
 @router.post(
     "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
 )
-def register(body: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
+def register(
+    body: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> AuthResponse:
     existing = db.scalar(select(User).where(User.email == body.email))
     if existing is not None:
         raise HTTPException(
@@ -86,6 +110,17 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)) -> AuthRespon
     db.add(OrganizationMember(user_id=user.id, organization_id=organization.id))
     db.commit()
     db.refresh(user)
+
+    # Registration always succeeds and issues the normal JWT regardless of
+    # whether the verification email can actually be sent — see
+    # issue_email_verification, which swallows send failures the same way
+    # issue_password_reset does. Only user.id and the submitted language
+    # (plain strings) cross into the background task; see
+    # _issue_email_verification_task for why the request's `db` session
+    # can't be reused there.
+    background_tasks.add_task(
+        _issue_email_verification_task, user.id, body.language.value
+    )
 
     return AuthResponse(
         access_token=create_access_token(user.id),
@@ -253,3 +288,126 @@ def reset_password(
     db.commit()
 
     return ResetPasswordResponse(message=RESET_PASSWORD_SUCCESS_MESSAGE)
+
+
+def issue_email_verification(
+    db: Session, user: User, language: str = DEFAULT_LANGUAGE
+) -> str:
+    """Invalidates the user's prior unused verification tokens, issues a new
+    one, and emails the verification link. Returns the raw token (mirrors
+    issue_password_reset's return-the-raw-token shape, useful for tests).
+
+    `language` is the public/marketing-page language the visitor had
+    selected when registering (see RegisterRequest.language) — or, for a
+    resend, the user's organization's current language — used only to
+    localize the email.
+    """
+    now = datetime.now(timezone.utc)
+    db.execute(
+        update(EmailVerificationToken)
+        .where(
+            EmailVerificationToken.user_id == user.id,
+            EmailVerificationToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+
+    raw_token = generate_verification_token()
+    db.add(
+        EmailVerificationToken(
+            user_id=user.id,
+            token_hash=hash_verification_token(raw_token),
+            expires_at=now + timedelta(hours=VERIFICATION_TOKEN_TTL_HOURS),
+        )
+    )
+    db.commit()
+
+    verification_link = build_verification_link(raw_token)
+    subject, body = build_verification_email(verification_link, language)
+    try:
+        email_sender = get_email_sender()
+        email_sender.send(
+            EmailMessage(to=user.email, subject=subject, text_body=body, attachments=[])
+        )
+    except (EmailSendError, HTTPException):
+        # Never surfaced to the caller, matching issue_password_reset: a
+        # delivery failure (including email simply not being configured in
+        # this environment) must never block registration or resend from
+        # completing normally. Never logs the raw token — only user.id.
+        logger.warning("Verification email could not be sent to user %s", user.id)
+
+    return raw_token
+
+
+def _issue_email_verification_task(user_id: str, language: str) -> None:
+    """Background-task entry point — same shape as
+    _issue_password_reset_task and for the same reason: opens its own
+    SessionLocal rather than reusing the request-scoped session, which
+    FastAPI closes once the response is sent."""
+    db = SessionLocal()
+    try:
+        user = db.scalar(select(User).where(User.id == user_id))
+        if user is not None:
+            issue_email_verification(db, user, language)
+    finally:
+        db.close()
+
+
+@router.post("/resend-verification", response_model=ResendVerificationResponse)
+def resend_verification(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResendVerificationResponse:
+    # Authenticated via the caller's own JWT rather than an email address in
+    # the request body — unlike forgot-password, there's no enumeration
+    # surface to protect here at all, since the caller has already proven
+    # ownership of this exact account just to reach this endpoint.
+    if current_user.email_verified_at is not None:
+        return ResendVerificationResponse(message=ALREADY_VERIFIED_MESSAGE)
+
+    organizations = _user_organizations(db, current_user.id)
+    language = organizations[0].language if organizations else DEFAULT_LANGUAGE
+    background_tasks.add_task(
+        _issue_email_verification_task, current_user.id, language
+    )
+    return ResendVerificationResponse(message=VERIFICATION_SENT_MESSAGE)
+
+
+@router.post("/verify-email", response_model=VerifyEmailResponse)
+def verify_email(
+    body: VerifyEmailRequest, db: Session = Depends(get_db)
+) -> VerifyEmailResponse:
+    token_hash = hash_verification_token(body.token)
+    now = datetime.now(timezone.utc)
+
+    # Same shape as reset_password(): expiry and used-at folded into the
+    # query itself so "token doesn't exist", "expired", and "already used"
+    # are indistinguishable to the caller.
+    verification_token = db.scalar(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.token_hash == token_hash,
+            EmailVerificationToken.used_at.is_(None),
+            EmailVerificationToken.expires_at > now,
+        )
+    )
+    if verification_token is None or not tokens_match(
+        body.token, verification_token.token_hash
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=VERIFY_EMAIL_ERROR_MESSAGE,
+        )
+
+    user = db.scalar(select(User).where(User.id == verification_token.user_id))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=VERIFY_EMAIL_ERROR_MESSAGE,
+        )
+
+    user.email_verified_at = now
+    verification_token.used_at = now
+    db.commit()
+
+    return VerifyEmailResponse(message=VERIFY_EMAIL_SUCCESS_MESSAGE)

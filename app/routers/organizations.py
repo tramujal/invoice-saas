@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member
+from app.deps import get_current_user, require_org_member, require_verified_email
 from app.models import Organization, User
 from app.schemas import OrganizationProfileResponse, OrganizationUpdateRequest
 
@@ -37,6 +37,7 @@ def update_organization(
     current_user: User = Depends(get_current_user),
 ) -> Organization:
     require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
     organization = _organization_or_404(db, organization_id)
     # mode="json" ensures enum fields (language/currency_code/tax_label) are
     # written as their plain string .value rather than the Enum member

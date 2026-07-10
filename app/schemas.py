@@ -77,6 +77,11 @@ class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(max_length=72)
     organization_name: str = Field(min_length=1, max_length=255)
+    # Public/marketing-page language the visitor was viewing when they
+    # registered, used only to localize the verification email — same role
+    # as ForgotPasswordRequest.language. Does not set Organization.language
+    # (that stays the real, changeable-in-Settings default).
+    language: OrganizationLanguage = OrganizationLanguage.en
 
     @field_validator("email")
     @classmethod
@@ -130,11 +135,24 @@ class ResetPasswordResponse(BaseModel):
     message: str
 
 
+class ResendVerificationResponse(BaseModel):
+    message: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     email: str
+    email_verified: bool
 
 
 class OrganizationSummary(BaseModel):

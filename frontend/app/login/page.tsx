@@ -30,6 +30,7 @@ function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
     organizationCurrency: organization.currency_code,
     organizationLanguage: organization.language,
     userEmail: auth.user.email,
+    emailVerified: auth.user.email_verified,
   });
   return true;
 }
@@ -86,6 +87,7 @@ function LoginForm() {
               email: email.trim(),
               password,
               organization_name: organizationName.trim(),
+              language,
             });
 
       if (!applyAuthResponse(auth, apiBaseUrl)) {

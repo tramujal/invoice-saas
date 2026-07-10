@@ -3,7 +3,7 @@ from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member
+from app.deps import get_current_user, require_org_member, require_verified_email
 from app.models import Customer, User
 from app.schemas import (
     CustomerCreateRequest,
@@ -47,6 +47,7 @@ def create_customer(
     current_user: User = Depends(get_current_user),
 ) -> Customer:
     require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
     customer = Customer(
         organization_id=organization_id,
         name=body.name,
@@ -98,6 +99,7 @@ def update_customer(
     current_user: User = Depends(get_current_user),
 ) -> Customer:
     require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
     customer = _customer_in_org(db, organization_id, customer_id)
     for key, value in body.model_dump(exclude_unset=True).items():
         if value is None:
@@ -116,6 +118,7 @@ def delete_customer(
     current_user: User = Depends(get_current_user),
 ) -> Response:
     require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
     customer = _customer_in_org(db, organization_id, customer_id)
     db.delete(customer)
     db.commit()

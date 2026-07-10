@@ -4,9 +4,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { useToast } from "@/components/ui/toast";
 import { apiFetch, ApiError } from "@/lib/api";
-import { clearAuthSession, getOrganizationName, isAuthenticated } from "@/lib/auth-storage";
+import {
+  clearAuthSession,
+  EMAIL_VERIFIED_STORAGE_KEY,
+  getEmailVerified,
+  getOrganizationName,
+  isAuthenticated,
+  setEmailVerified as cacheEmailVerified,
+} from "@/lib/auth-storage";
+import { formatApiError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import type { MeResponse, MessageResponse } from "@/lib/types";
 
 const links = [
   { href: "/dashboard", labelKey: "nav.dashboard" },
@@ -22,8 +32,14 @@ function isNavActive(pathname: string, href: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const toast = useToast();
   const { t } = useTranslation();
   const [organizationName, setOrganizationName] = useState<string | null>(null);
+  // Hydration-safe default (see getOrganizationName below for the same
+  // pattern): assume verified until the first /auth/me response actually
+  // says otherwise, so the banner never flashes on a verified account.
+  const [emailVerified, setEmailVerifiedState] = useState(true);
+  const [isResending, setIsResending] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -32,25 +48,62 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
 
     let cancelled = false;
-    apiFetch("/auth/me").catch((err) => {
-      if (!cancelled && err instanceof ApiError && err.status === 401) {
-        router.replace("/login");
-      }
-    });
+    apiFetch<MeResponse>("/auth/me")
+      .then((me) => {
+        if (cancelled) return;
+        setEmailVerifiedState(me.user.email_verified);
+        cacheEmailVerified(me.user.email_verified);
+      })
+      .catch((err) => {
+        if (!cancelled && err instanceof ApiError && err.status === 401) {
+          router.replace("/login");
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, pathname]);
 
   useEffect(() => {
     // Cheap, synchronous re-read on every navigation so a rename saved on
     // /settings shows up in the sidebar without requiring a re-login.
     setOrganizationName(getOrganizationName());
+    setEmailVerifiedState(getEmailVerified());
   }, [pathname]);
+
+  useEffect(() => {
+    // Cross-tab sync: if verification completes on /verify-email in a
+    // *different* tab of this same browser, that page writes the new value
+    // to localStorage, which fires this `storage` event here — so the
+    // banner disappears in this tab immediately, with no navigation or
+    // manual refresh needed in this tab at all.
+    function onStorage(e: StorageEvent) {
+      if (e.key === EMAIL_VERIFIED_STORAGE_KEY) {
+        setEmailVerifiedState(getEmailVerified());
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   function logout() {
     clearAuthSession();
     router.replace("/login");
+  }
+
+  async function resendVerification() {
+    if (isResending) return;
+    setIsResending(true);
+    try {
+      const result = await apiFetch<MessageResponse>("/auth/resend-verification", {
+        method: "POST",
+      });
+      toast.success(result.message || t("emailBanner.resendSuccess"));
+    } catch (err) {
+      toast.error(formatApiError(err, t("emailBanner.resendError")));
+    } finally {
+      setIsResending(false);
+    }
   }
 
   return (
@@ -97,7 +150,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className="min-w-0 flex-1 p-4 sm:p-6 md:p-8">{children}</main>
+      <main className="min-w-0 flex-1 p-4 sm:p-6 md:p-8">
+        {!emailVerified ? (
+          <div
+            role="status"
+            className="mb-4 flex flex-col items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <p>{t("emailBanner.message")}</p>
+            <button
+              type="button"
+              onClick={() => void resendVerification()}
+              disabled={isResending}
+              className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isResending ? t("emailBanner.resendSending") : t("emailBanner.resendAction")}
+            </button>
+          </div>
+        ) : null}
+        {children}
+      </main>
     </div>
   );
 }

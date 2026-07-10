@@ -66,3 +66,27 @@ def require_org_member(user: User, organization_id: str, db: Session) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not a member of this organization",
         )
+
+
+EMAIL_NOT_VERIFIED_MESSAGE = (
+    "Please verify your email address before performing this action."
+)
+
+
+def require_verified_email(user: User) -> None:
+    """Gates business-data writes (creating/updating/deleting customers,
+    creating invoices, sending invoice emails, updating organization
+    settings) behind a verified email. Read-only endpoints, the dashboard,
+    and invoice payment-status updates are deliberately left ungated — see
+    the call sites in customers.py/invoices.py/organizations.py.
+
+    `detail` is a structured object (not a plain string, unlike
+    require_org_member's 403) specifically so the frontend can recognize
+    this exact failure mode via `detail.code` and show a targeted "verify
+    your email" message instead of a generic error.
+    """
+    if user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "email_not_verified", "message": EMAIL_NOT_VERIFIED_MESSAGE},
+        )

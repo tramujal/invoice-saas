@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import type { Customer } from "@/lib/types";
@@ -104,7 +104,11 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
       await onCreated();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, t("customers.toastCreateError")));
+      toast.error(
+        isEmailNotVerifiedError(err)
+          ? t("errors.emailNotVerified")
+          : formatApiError(err, t("customers.toastCreateError"))
+      );
     } finally {
       setIsSubmitting(false);
     }

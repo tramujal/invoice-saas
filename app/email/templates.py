@@ -80,3 +80,32 @@ def build_password_reset_email(
         f"{t(language, 'password_reset_ignore')}"
     )
     return subject, body
+
+
+def build_verification_email(
+    verification_link: str, language: str = DEFAULT_LANGUAGE
+) -> tuple[str, str]:
+    """Returns (subject, plain-text body) for an email verification email.
+
+    Same shape as build_password_reset_email, for the same reason: there's
+    no Organization to resolve a language from at register time beyond what
+    the visitor selected on the public register form (see
+    RegisterRequest.language), and an unrecognized value falls back to
+    English.
+    """
+    if language not in SUPPORTED_LANGUAGES:
+        language = DEFAULT_LANGUAGE
+    subject = t(language, "verification_subject")
+    body = (
+        f"{t(language, 'verification_greeting')}\n"
+        "\n"
+        f"{t(language, 'verification_instructions')}\n"
+        "\n"
+        f"{t(language, 'verification_link_label')}\n"
+        f"{verification_link}\n"
+        "\n"
+        f"{t(language, 'verification_expiry')}\n"
+        "\n"
+        f"{t(language, 'verification_ignore')}"
+    )
+    return subject, body

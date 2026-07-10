@@ -50,6 +50,16 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "password_reset_ignore": (
             "If you did not request this, you can safely ignore this email."
         ),
+        "verification_subject": "Verify your email address",
+        "verification_greeting": "Hello,",
+        "verification_instructions": (
+            "Please confirm your email address to finish setting up your account."
+        ),
+        "verification_link_label": "Verify your email:",
+        "verification_expiry": "This link expires in 24 hours.",
+        "verification_ignore": (
+            "If you did not create an account, you can safely ignore this email."
+        ),
     },
     "es": {
         "invoice_title": "Factura",
@@ -84,6 +94,16 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "password_reset_expiry": "Este enlace expira en 30 minutos.",
         "password_reset_ignore": (
             "Si no solicitaste esto, puedes ignorar este correo de forma segura."
+        ),
+        "verification_subject": "Verifica tu dirección de correo",
+        "verification_greeting": "Hola,",
+        "verification_instructions": (
+            "Por favor confirma tu dirección de correo para terminar de configurar tu cuenta."
+        ),
+        "verification_link_label": "Verifica tu correo:",
+        "verification_expiry": "Este enlace expira en 24 horas.",
+        "verification_ignore": (
+            "Si no creaste una cuenta, puedes ignorar este correo de forma segura."
         ),
     },
 }

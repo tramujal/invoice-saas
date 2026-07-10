@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.currency import resolve_default_currency_code
 from app.database import get_db
-from app.deps import get_current_user, require_org_member
+from app.deps import get_current_user, require_org_member, require_verified_email
 from app.email.base import EmailAttachment, EmailMessage, EmailSendError
 from app.email.factory import get_email_sender
 from app.email.templates import build_invoice_email
@@ -178,6 +178,7 @@ def send_invoice_email(
     # missing invoice, no customer email) always reports its real 403/404/422
     # rather than being masked by a 503 from get_email_sender().
     require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
 
     customer = invoice.customer
@@ -272,6 +273,7 @@ def create_invoice(
     current_user: User = Depends(get_current_user),
 ) -> Invoice:
     require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
 
     customer_id = body.customer_id
     customer: Customer | None = None

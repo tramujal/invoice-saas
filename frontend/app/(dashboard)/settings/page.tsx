@@ -7,11 +7,12 @@ import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import {
   getUserEmail,
+  setEmailVerified as cacheEmailVerified,
   updateOrganizationCurrency,
   updateOrganizationLanguage,
   updateOrganizationName,
 } from "@/lib/auth-storage";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   CURRENCY_CODES,
@@ -23,7 +24,7 @@ import {
   type Language,
   type TaxLabelOption,
 } from "@/lib/organization-settings";
-import type { OrganizationProfile } from "@/lib/types";
+import type { MeResponse, OrganizationProfile } from "@/lib/types";
 
 const LIMITS = {
   name: 255,
@@ -101,6 +102,24 @@ export default function SettingsPage() {
     setUserEmail(getUserEmail());
   }, []);
 
+  // Fetched directly from /auth/me (rather than read from the cached
+  // localStorage flag AppShell also maintains) so this section always
+  // shows the true current status rather than a value that might not have
+  // been refreshed yet on this render.
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
+  useEffect(() => {
+    apiFetch<MeResponse>("/auth/me")
+      .then((me) => {
+        setEmailVerified(me.user.email_verified);
+        cacheEmailVerified(me.user.email_verified);
+      })
+      .catch(() => {
+        // Non-critical: the rest of the page still loads via its own
+        // load() below. Leaving emailVerified as null just hides this one
+        // status line rather than surfacing an error banner for it.
+      });
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -158,7 +177,11 @@ export default function SettingsPage() {
       toast.success(t("settings.toastSaved"));
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, t("settings.toastSaveError")));
+      toast.error(
+        isEmailNotVerifiedError(err)
+          ? t("errors.emailNotVerified")
+          : formatApiError(err, t("settings.toastSaveError"))
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -192,6 +215,25 @@ export default function SettingsPage() {
           <p className="text-sm font-medium text-slate-700">{t("common.email")}</p>
           <p className="mt-1 text-sm text-slate-900">{userEmail ?? "—"}</p>
           <p className="mt-1 text-xs text-slate-500">{t("settings.accountEmailHelp")}</p>
+          {emailVerified !== null ? (
+            <span
+              className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                emailVerified
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  emailVerified ? "bg-emerald-600" : "bg-amber-600"
+                }`}
+                aria-hidden
+              />
+              {emailVerified
+                ? t("settings.emailVerifiedLabel")
+                : t("settings.emailNotVerifiedLabel")}
+            </span>
+          ) : null}
         </div>
         <div className="mt-5">
           <Link

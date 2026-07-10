@@ -64,14 +64,44 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Null until the user completes /auth/verify-email. Deliberately a
+    # nullable timestamp rather than a bool: it doubles as a record of *when*
+    # verification happened, at no extra cost. Existing users (created
+    # before this feature existed) are backfilled to a non-null value by the
+    # migration — see _add_user_email_verified_at — so nobody already using
+    # the app is retroactively locked out.
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     memberships: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="user"
     )
 
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None
+
 
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_tokens"
 
     id: Mapped[str] = mapped_column(
         CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())

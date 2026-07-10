@@ -7,7 +7,7 @@ import { PaymentStatusSelect } from "@/components/invoices/PaymentStatusSelect";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatCurrency } from "@/lib/money";
 import {
@@ -212,7 +212,11 @@ export default function InvoicesPage() {
       );
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, t("invoices.toastEmailError")));
+      toast.error(
+        isEmailNotVerifiedError(err)
+          ? t("errors.emailNotVerified")
+          : formatApiError(err, t("invoices.toastEmailError"))
+      );
     } finally {
       setSendingId(null);
     }

@@ -18,6 +18,8 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_organization_localization_fields(engine)
     _add_password_reset_tokens_table(engine)
     _add_invoice_currency_and_language(engine)
+    _add_user_email_verified_at(engine)
+    _add_email_verification_tokens_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -203,6 +205,61 @@ def _add_invoice_currency_and_language(engine: Engine) -> None:
                     ")"
                 )
             )
+
+
+def _add_user_email_verified_at(engine: Engine) -> None:
+    """Adds users.email_verified_at (nullable — no backfill needed for the
+    column itself to be valid).
+
+    However every user row that already exists at migration time is
+    explicitly backfilled to "verified" (email_verified_at = now), rather
+    than left NULL: these accounts never went through this flow and have no
+    way to retroactively receive or click a verification link, so treating
+    them as unverified would instantly lock every current user (including
+    the seeded demo account, whose email address isn't real) out of
+    creating invoices/customers or sending email, with no self-serve way to
+    fix it. Only users created from this point forward go through real
+    verification.
+    """
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    columns = {c["name"] for c in inspector.get_columns("users")}
+    if "email_verified_at" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP NULL")
+        )
+        conn.execute(
+            text("UPDATE users SET email_verified_at = CURRENT_TIMESTAMP")
+        )
+
+
+def _add_email_verification_tokens_table(engine: Engine) -> None:
+    """Creates email_verification_tokens if it's missing — same idempotent
+    safety net as _add_password_reset_tokens_table, for the same reason
+    (Base.metadata.create_all() already creates this table on a fresh
+    database since EmailVerificationToken is a declared model)."""
+    inspector = inspect(engine)
+    if "email_verification_tokens" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS email_verification_tokens ("
+                "id CHAR(36) PRIMARY KEY, "
+                "user_id CHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "token_hash VARCHAR(64) NOT NULL UNIQUE, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "used_at TIMESTAMP NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
 
 
 def _backfill_invoice_numbers(conn) -> None:

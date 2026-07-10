@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   formatCurrency,
@@ -204,7 +204,11 @@ export default function NewInvoicePage() {
       router.refresh();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, t("invoiceForm.toastCreateError")));
+      toast.error(
+        isEmailNotVerifiedError(err)
+          ? t("errors.emailNotVerified")
+          : formatApiError(err, t("invoiceForm.toastCreateError"))
+      );
     } finally {
       setIsSubmitting(false);
     }
