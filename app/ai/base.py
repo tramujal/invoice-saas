@@ -1,9 +1,10 @@
 """Provider-agnostic AI assistant interface.
 
 Routers depend only on AIProvider / ChatMessage / AIProviderError /
-AIProviderTimeoutError. Swapping the underlying provider (Anthropic today)
-means writing a new class implementing stream_complete() and updating the
-single construction line in app/ai/factory.py — nothing else in the app
+AIProviderTimeoutError. Adding a new underlying provider (Anthropic and
+Gemini today, selected at runtime by the AI_PROVIDER env var) means
+writing a new class implementing stream_complete() and adding one branch
+in app/ai/factory.py's get_ai_provider() — nothing else in the app
 changes. Mirrors app/email/base.py's EmailSender abstraction exactly.
 """
 

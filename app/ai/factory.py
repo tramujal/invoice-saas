@@ -5,16 +5,34 @@ from fastapi import HTTPException, status
 
 from app.ai.anthropic_provider import AnthropicProvider
 from app.ai.base import AIProvider
+from app.ai.gemini_provider import GeminiProvider
 from app.ai.limits import AI_MAX_OUTPUT_TOKENS, AI_REQUEST_TIMEOUT_SECONDS
 from app.security import ENVIRONMENT
 
 logger = logging.getLogger(__name__)
 
-# Documented development-only fallback — see .env.example and README.md.
-# Never used when ENVIRONMENT=production: silently assuming one specific
-# model id stays valid forever is exactly what we were asked not to do, so
-# production always requires AI_MODEL to be set explicitly.
-_DEV_FALLBACK_MODEL = "claude-sonnet-5"
+# Which env var holds the API key for each supported AI_PROVIDER value.
+# Each provider only ever requires its own key -- switching AI_PROVIDER
+# from "anthropic" to "gemini" means setting GEMINI_API_KEY, not touching
+# ANTHROPIC_API_KEY at all (and vice versa).
+_PROVIDER_API_KEY_ENV_VARS = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+# Documented development-only fallback models -- see .env.example and
+# README.md. Never used when ENVIRONMENT=production: silently assuming one
+# specific model id stays valid forever is exactly what we were asked not
+# to do, so production always requires AI_MODEL to be set explicitly,
+# regardless of which provider is selected.
+_DEV_FALLBACK_MODEL = {
+    "anthropic": "claude-sonnet-5",
+    "gemini": "gemini-2.5-flash",
+}
+
+# Unset AI_PROVIDER keeps behaving exactly as before this provider was
+# added: Anthropic, driven by ANTHROPIC_API_KEY + AI_MODEL alone.
+_DEFAULT_PROVIDER = "anthropic"
 
 
 def get_ai_provider() -> AIProvider:
@@ -24,23 +42,45 @@ def get_ai_provider() -> AIProvider:
     verification, rate limiting) run first and this is only reached, and
     only pays the cost of an env lookup, once those have already passed.
 
-    AI is optional infrastructure, like email: missing configuration
-    doesn't stop the app from booting, it just makes this call raise a
-    clean 503 when actually invoked.
+    AI is optional infrastructure, like email: missing or invalid
+    configuration doesn't stop the app from booting, it just makes this
+    call raise a clean 503 when actually invoked.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    provider_name = (os.environ.get("AI_PROVIDER") or _DEFAULT_PROVIDER).strip().lower()
+
+    if provider_name not in _PROVIDER_API_KEY_ENV_VARS:
+        logger.error(
+            "get_ai_provider: unknown AI_PROVIDER=%r (expected one of: %s)",
+            provider_name,
+            ", ".join(sorted(_PROVIDER_API_KEY_ENV_VARS)),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "ai_not_configured",
+                "message": (
+                    f"Unknown AI_PROVIDER '{provider_name}'. Expected one of: "
+                    f"{', '.join(sorted(_PROVIDER_API_KEY_ENV_VARS))}."
+                ),
+            },
+        )
+
+    api_key_env_var = _PROVIDER_API_KEY_ENV_VARS[provider_name]
+    api_key = os.environ.get(api_key_env_var)
     model = os.environ.get("AI_MODEL")
 
     if not model and ENVIRONMENT != "production":
-        model = _DEV_FALLBACK_MODEL
+        model = _DEV_FALLBACK_MODEL[provider_name]
         logger.warning(
             "get_ai_provider: AI_MODEL not set; using development fallback "
-            "model=%s (never used when ENVIRONMENT=production)",
+            "provider=%s model=%s (never used when ENVIRONMENT=production)",
+            provider_name,
             model,
         )
 
     logger.info(
-        "get_ai_provider: anthropic_api_key_present=%s model=%s environment=%s",
+        "get_ai_provider: provider=%s api_key_present=%s model=%s environment=%s",
+        provider_name,
         bool(api_key),
         model,
         ENVIRONMENT,
@@ -49,7 +89,8 @@ def get_ai_provider() -> AIProvider:
     if not api_key or not model:
         logger.warning(
             "get_ai_provider: AI assistant NOT initialized "
-            "(api_key_present=%s model_present=%s environment=%s)",
+            "(provider=%s api_key_present=%s model_present=%s environment=%s)",
+            provider_name,
             bool(api_key),
             bool(model),
             ENVIRONMENT,
@@ -59,13 +100,26 @@ def get_ai_provider() -> AIProvider:
             detail={
                 "code": "ai_not_configured",
                 "message": (
-                    "The AI assistant is not configured. Set ANTHROPIC_API_KEY "
-                    "and AI_MODEL to enable it."
+                    "The AI assistant is not configured. Set "
+                    f"{api_key_env_var} and AI_MODEL to enable it."
                 ),
             },
         )
 
-    logger.info("get_ai_provider: AI provider initialized successfully (Anthropic) model=%s", model)
+    logger.info(
+        "get_ai_provider: AI provider initialized successfully provider=%s model=%s",
+        provider_name,
+        model,
+    )
+
+    if provider_name == "gemini":
+        return GeminiProvider(
+            api_key=api_key,
+            model=model,
+            max_output_tokens=AI_MAX_OUTPUT_TOKENS,
+            timeout_seconds=AI_REQUEST_TIMEOUT_SECONDS,
+        )
+
     return AnthropicProvider(
         api_key=api_key,
         model=model,

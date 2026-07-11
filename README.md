@@ -32,9 +32,33 @@ The API listens on `http://127.0.0.1:8000` by default; interactive docs are at
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` (24h)                                     | JWT access token lifetime.                                                                                                                      |
 | `ENVIRONMENT`                | `development`                                    | Set to `production` when deploying — this is what enforces `JWT_SECRET_KEY` above.                                                             |
 | `CORS_ALLOWED_ORIGINS`        | `http://localhost:3000,http://127.0.0.1:3000`    | Comma-separated list of frontend origins allowed to call the API. Set to your deployed frontend URL(s) in production.                          |
-| `ANTHROPIC_API_KEY`           | unset (assistant returns 503)                    | Enables `POST .../assistant/chat`. Optional — everything else in the app works without it.                                                     |
-| `AI_MODEL`                    | dev-only fallback (`claude-sonnet-5`); **required** if `ENVIRONMENT=production` | The model id to call. Never silently assumed in production — see `app/ai/factory.py`. |
-| `AI_MAX_OUTPUT_TOKENS`, `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_USER_MESSAGE_LENGTH`, `AI_MAX_HISTORY_MESSAGES`, `AI_MAX_HISTORY_MESSAGE_LENGTH`, `AI_MAX_HISTORY_TOTAL_CHARS`, `AI_MAX_CONTEXT_CHARS` | conservative defaults, see `.env.example` | Cost/abuse controls for the assistant. Rarely need changing. |
+| `AI_PROVIDER`                 | `anthropic`                                      | Which AI provider backs `POST .../assistant/chat` — `anthropic` or `gemini`. Unknown values return a clean 503. See [AI Business Assistant](#ai-business-assistant) below. |
+| `ANTHROPIC_API_KEY`           | unset (assistant returns 503)                    | Required only when `AI_PROVIDER=anthropic`. Optional — everything else in the app works without it.                                             |
+| `GEMINI_API_KEY`              | unset (assistant returns 503)                    | Required only when `AI_PROVIDER=gemini`. Optional — everything else in the app works without it.                                                |
+| `AI_MODEL`                    | dev-only fallback (`claude-sonnet-5` / `gemini-2.5-flash`, per provider); **required** if `ENVIRONMENT=production` | The model id to call, for whichever provider is selected. Never silently assumed in production — see `app/ai/factory.py`. |
+| `AI_MAX_OUTPUT_TOKENS`, `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_USER_MESSAGE_LENGTH`, `AI_MAX_HISTORY_MESSAGES`, `AI_MAX_HISTORY_MESSAGE_LENGTH`, `AI_MAX_HISTORY_TOTAL_CHARS`, `AI_MAX_CONTEXT_CHARS` | conservative defaults, see `.env.example` | Cost/abuse controls for the assistant. Provider-agnostic — apply the same regardless of `AI_PROVIDER`. Rarely need changing. |
+
+#### AI Business Assistant
+
+The assistant (`POST .../assistant/chat`, surfaced at `/assistant` in the
+frontend) is built behind a small provider abstraction
+(`app/ai/base.py`'s `AIProvider`) so the router, rate limiting, business
+context, and frontend never know or care which underlying AI API is
+actually being called:
+
+- `app/ai/anthropic_provider.py` — calls Anthropic's Messages API directly
+  over HTTP.
+- `app/ai/gemini_provider.py` — calls Google's Gemini API via the official
+  `google-genai` SDK, adapting its generator-based streaming to the same
+  `Iterator[str]` interface the router expects.
+- `app/ai/factory.py` — reads `AI_PROVIDER` and returns the matching
+  implementation, requiring only that provider's own API key.
+
+Switching providers is a config-only change: set `AI_PROVIDER=gemini` and
+`GEMINI_API_KEY` (leaving `ANTHROPIC_API_KEY` untouched, or vice versa) —
+no code, router, or frontend changes needed. An unset or unrecognized
+`AI_PROVIDER` value returns a clean 503 with a message naming the valid
+options, the same way a missing API key does.
 
 ### Production start commands
 
@@ -123,11 +147,14 @@ Either way, set these environment variables in the Render dashboard:
 Deploy, then note the Render URL (e.g. `https://invoicing-api.onrender.com`) —
 you'll need it for the frontend.
 
-Optionally, set `ANTHROPIC_API_KEY` and `AI_MODEL` to enable the AI Business
-Assistant (`/assistant` in the frontend). Both are left blank in
+Optionally, set `AI_PROVIDER` plus that provider's API key and `AI_MODEL` to
+enable the AI Business Assistant (`/assistant` in the frontend) — either
+`AI_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `AI_PROVIDER=gemini`
+with `GEMINI_API_KEY`. All of these are left blank in
 [`render.yaml`](render.yaml) for you to fill in from the dashboard; without
 them the assistant page just shows a "not configured" message and nothing
-else in the app is affected.
+else in the app is affected. See [AI Business Assistant](#ai-business-assistant)
+above for how the provider abstraction works.
 
 ### 3. Frontend — Vercel
 
