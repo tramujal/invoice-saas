@@ -100,6 +100,46 @@ export async function apiFetchBlob(
 }
 
 /**
+ * Like apiFetch, but for a streamed (chunked) response body — resolves to
+ * the raw Response as soon as headers arrive (status already checked and
+ * mapped to the same ApiError shape as every other helper here), leaving
+ * the caller to read `res.body` incrementally. Used by the assistant chat
+ * page for its streamed reply.
+ */
+export async function apiFetchStream(
+  path: string,
+  init?: RequestInit
+): Promise<Response> {
+  const headers = new Headers(init?.headers);
+
+  const token = getAuthToken();
+  if (!token) throw new ApiError("Not authenticated", 401);
+  headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Accept", "text/plain");
+  if (init?.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const res = await fetch(buildUrl(path), { ...init, headers });
+
+  if (res.status === 401) {
+    clearAuthSession();
+  }
+
+  if (!res.ok) {
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text();
+    }
+    throw new ApiError(`Request failed (${res.status})`, res.status, body);
+  }
+
+  return res;
+}
+
+/**
  * Unauthenticated POST request used by the login/register flows, before a
  * token exists. Reuses the same ApiError shape as apiFetch so callers can
  * share error-formatting logic.

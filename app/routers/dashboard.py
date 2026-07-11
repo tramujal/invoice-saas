@@ -71,14 +71,13 @@ def _month_key(dt: datetime) -> str:
     return dt.strftime("%Y-%m")
 
 
-@router.get("", response_model=DashboardResponse)
-def get_dashboard(
-    organization_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> DashboardResponse:
-    require_org_member(current_user, organization_id, db)
-
+def get_dashboard_summary(db: Session, organization_id: str) -> DashboardResponse:
+    """The actual dashboard computation, factored out of the route below so
+    app.assistant_context can reuse the exact same numbers the dashboard UI
+    shows — never a second, potentially-drifting computation of the same
+    thing. Callers are responsible for their own authorization check
+    (get_dashboard() below calls require_org_member(); the assistant
+    context builder relies on its caller having already done so)."""
     org_filter = Invoice.organization_id == organization_id
 
     total_invoices = (
@@ -174,14 +173,20 @@ def get_dashboard(
     )
 
 
-@router.get("/analytics", response_model=DashboardAnalyticsResponse)
-def get_dashboard_analytics(
+@router.get("", response_model=DashboardResponse)
+def get_dashboard(
     organization_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> DashboardAnalyticsResponse:
+) -> DashboardResponse:
     require_org_member(current_user, organization_id, db)
+    return get_dashboard_summary(db, organization_id)
 
+
+def get_dashboard_analytics_data(db: Session, organization_id: str) -> DashboardAnalyticsResponse:
+    """Same extraction as get_dashboard_summary above, for the analytics
+    endpoint — reused by app.assistant_context so the assistant's monthly
+    figures and top-customers list are identical to the dashboard UI's."""
     org_filter = Invoice.organization_id == organization_id
 
     # --- monthly invoice volume + revenue, last N months ---
@@ -293,3 +298,13 @@ def get_dashboard_analytics(
         invoice_count_by_status=invoice_count_by_status,
         top_customers=top_customers,
     )
+
+
+@router.get("/analytics", response_model=DashboardAnalyticsResponse)
+def get_dashboard_analytics(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DashboardAnalyticsResponse:
+    require_org_member(current_user, organization_id, db)
+    return get_dashboard_analytics_data(db, organization_id)

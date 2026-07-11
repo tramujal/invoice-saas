@@ -71,7 +71,11 @@
       "Bash(env -u TRUSTED_PROXY_HOPS python -m uvicorn app.main:app --port 8001 --forwarded-allow-ips=)",
       "Bash(pkill -f \"uvicorn app.main:app --port 8001\")",
       "Bash(jobs -l)",
-      "Bash(echo \"grep exit: $?\")"
+      "Bash(echo \"grep exit: $?\")",
+      "Bash(npm install *)",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_context.py\")",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_provider.py\")",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_live.py\")"
     ]
   }
 }

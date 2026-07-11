@@ -41,3 +41,13 @@ services:
       # this isn't explicitly set, e.g. local dev — see app/rate_limit.py.
       - key: TRUSTED_PROXY_HOPS
         value: "1"
+      # AI Business Assistant — optional. Without ANTHROPIC_API_KEY set, the
+      # POST .../assistant/chat endpoint returns a clean 503 and nothing
+      # else in the app is affected. AI_MODEL has NO fallback in production
+      # (ENVIRONMENT=production, set above) — it must be set explicitly
+      # here once you're ready to enable the assistant. See app/ai/factory.py
+      # and .env.example for the full list of tunable AI_* limits.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_MODEL
+        sync: false

@@ -1,9 +1,16 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.ai.limits import (
+    AI_MAX_HISTORY_MESSAGE_LENGTH,
+    AI_MAX_HISTORY_MESSAGES,
+    AI_MAX_HISTORY_TOTAL_CHARS,
+    AI_MAX_USER_MESSAGE_LENGTH,
+)
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
 from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
@@ -394,3 +401,38 @@ class CustomerResponse(BaseModel):
     address: str
     created_at: datetime
     updated_at: datetime
+
+
+class AssistantHistoryMessage(BaseModel):
+    """One turn of client-supplied conversation history — untrusted input.
+
+    `role` is restricted to user/assistant at the schema level: pydantic
+    itself rejects any other value (in particular "system") with a 422
+    before this ever reaches application code, so there is no path by
+    which a client can inject a fake system-role message into the prompt.
+    """
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=0, max_length=AI_MAX_HISTORY_MESSAGE_LENGTH)
+
+
+class AssistantChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=AI_MAX_USER_MESSAGE_LENGTH)
+    # Optional and defaults to empty — the literal wire contract is just
+    # {"message": "..."}; history is an additive extension so multi-turn
+    # follow-ups ("what about last month?") actually have context, without
+    # the backend storing any conversation state itself (the client resends
+    # its own history every call).
+    history: list[AssistantHistoryMessage] = Field(
+        default_factory=list, max_length=AI_MAX_HISTORY_MESSAGES
+    )
+
+    @field_validator("history")
+    @classmethod
+    def _check_total_history_size(
+        cls, value: list[AssistantHistoryMessage]
+    ) -> list[AssistantHistoryMessage]:
+        total_chars = sum(len(m.content) for m in value)
+        if total_chars > AI_MAX_HISTORY_TOTAL_CHARS:
+            raise ValueError("Conversation history is too large.")
+        return value

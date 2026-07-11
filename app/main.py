@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.models import init_db
-from app.routers import auth, customers, dashboard, invoices, organizations
+from app.routers import assistant, auth, customers, dashboard, invoices, organizations
 
 # Without this, the root logger has no handler at all: WARNING+ messages
 # only reach the console via Python's undocumented `logging.lastResort`
@@ -61,3 +61,4 @@ app.include_router(invoices.router)
 app.include_router(customers.router)
 app.include_router(dashboard.router)
 app.include_router(organizations.router)
+app.include_router(assistant.router)
