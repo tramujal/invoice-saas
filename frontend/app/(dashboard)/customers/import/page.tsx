@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useToast } from "@/components/ui/toast";
-import { apiFetchForm, ApiError, orgPath } from "@/lib/api";
+import { apiFetch, apiFetchForm, ApiError, orgPath } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import type {
@@ -14,6 +14,7 @@ import type {
   ImportPreviewResponse,
   ImportPreviewRowResult,
   ImportTargetField,
+  OrganizationProfile,
 } from "@/lib/types";
 
 type Step = "upload" | "mapping" | "preview" | "confirm" | "result";
@@ -48,6 +49,77 @@ function statusLabel(t: TranslateFn, status: string): string {
   const key = `import.status${status.charAt(0).toUpperCase()}${status.slice(1)}`;
   const translated = t(key);
   return translated === key ? status : translated;
+}
+
+// Inline SVG icons matching this app's existing icon style (stroke-based,
+// viewBox 0 0 24 24 — see e.g. the empty-state icon on the Customers page)
+// rather than emoji, so the wizard feels consistent with the rest of the
+// product.
+function FileIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+    </svg>
+  );
+}
+
+function CheckCircleIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="M22 4 12 14.01l-3-3" />
+    </svg>
+  );
+}
+
+function WarningTriangleIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+type PreviewOutcome = "all-valid" | "partial" | "none-valid";
+
+function previewOutcome(preview: ImportPreviewResponse): PreviewOutcome {
+  const importable = preview.valid_count + preview.warning_count;
+  if (importable === 0) return "none-valid";
+  if (preview.invalid_count === 0 && preview.duplicate_count === 0) return "all-valid";
+  return "partial";
 }
 
 function StatusBadge({ status, t }: { status: string; t: TranslateFn }) {
@@ -134,7 +206,14 @@ export default function CustomerImportPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [orgProfile, setOrgProfile] = useState<OrganizationProfile | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    apiFetch<OrganizationProfile>(orgPath())
+      .then(setOrgProfile)
+      .catch(() => {});
+  }, []);
 
   function isAcceptedFile(candidate: File): boolean {
     const name = candidate.name.toLowerCase();
@@ -300,10 +379,16 @@ export default function CustomerImportPage() {
               isDragging ? "border-slate-500 bg-slate-50" : "border-slate-300 hover:bg-slate-50/60"
             }`}
           >
-            <p className="text-sm font-medium text-slate-700">
+            <FileIcon className="h-10 w-10 text-slate-400" />
+            <p className="mt-3 text-sm font-medium text-slate-700">
               {t("import.uploadDropzoneTitle")}
             </p>
-            <p className="mt-1 text-xs text-slate-500">{t("import.uploadDropzoneSubtitle")}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {t("import.uploadDropzoneOr")}
+            </p>
+            <p className="mt-1 text-sm font-medium text-slate-700 underline">
+              {t("import.uploadBrowseAction")}
+            </p>
             <p className="mt-3 text-xs text-slate-400">
               {t("import.uploadAcceptedTypes", { size: MAX_DISPLAY_SIZE })}
             </p>
@@ -435,6 +520,49 @@ export default function CustomerImportPage() {
 
       {step === "preview" && preview ? (
         <section className="space-y-4">
+          {(() => {
+            const outcome = previewOutcome(preview);
+            if (outcome === "all-valid") {
+              return (
+                <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+                  <CheckCircleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold">{t("import.previewAllValidTitle")}</p>
+                    <p className="mt-0.5 text-sm">
+                      {t("import.previewAllValidMessage", { count: importableCount })}
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (outcome === "partial") {
+              return (
+                <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+                  <WarningTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {t("import.previewPartialTitle", { count: importableCount })}
+                    </p>
+                    <p className="mt-0.5 text-sm">
+                      {t("import.previewPartialMessage", {
+                        count: preview.duplicate_count + preview.invalid_count,
+                      })}
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-800">
+                <WarningTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">{t("import.previewNoneValidTitle")}</p>
+                  <p className="mt-0.5 text-sm">{t("import.previewNoImportableRows")}</p>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               { label: t("import.previewSummaryTotal"), value: preview.total_rows },
@@ -453,6 +581,14 @@ export default function CustomerImportPage() {
               </div>
             ))}
           </div>
+          <p className="text-sm text-slate-500">
+            {t("import.previewSummaryLine", {
+              total: preview.total_rows,
+              valid: importableCount,
+              duplicate: preview.duplicate_count,
+              invalid: preview.invalid_count,
+            })}
+          </p>
 
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 p-4 sm:p-6">
@@ -473,6 +609,11 @@ export default function CustomerImportPage() {
                     <th className="px-4 py-3">{t("import.previewColRow")}</th>
                     <th className="px-4 py-3">{t("import.fieldName")}</th>
                     <th className="px-4 py-3">{t("import.fieldEmail")}</th>
+                    <th className="hidden px-4 py-3 md:table-cell">{t("common.phone")}</th>
+                    <th className="hidden px-4 py-3 lg:table-cell">{t("common.address")}</th>
+                    <th className="hidden px-4 py-3 lg:table-cell">
+                      {orgProfile?.tax_label || t("customers.taxIdColumn")}
+                    </th>
                     <th className="px-4 py-3">{t("import.previewColStatus")}</th>
                     <th className="px-4 py-3">{t("import.previewColReason")}</th>
                   </tr>
@@ -485,6 +626,15 @@ export default function CustomerImportPage() {
                       </td>
                       <td className="px-4 py-2 text-slate-800">{row.values.name || "—"}</td>
                       <td className="px-4 py-2 text-slate-600">{row.values.email || "—"}</td>
+                      <td className="hidden px-4 py-2 text-slate-600 md:table-cell">
+                        {row.values.phone || "—"}
+                      </td>
+                      <td className="hidden max-w-xs truncate px-4 py-2 text-slate-600 lg:table-cell">
+                        {row.values.address || "—"}
+                      </td>
+                      <td className="hidden px-4 py-2 text-slate-600 lg:table-cell">
+                        {row.values.tax_id || "—"}
+                      </td>
                       <td className="px-4 py-2">
                         <StatusBadge status={row.status} t={t} />
                       </td>
@@ -566,6 +716,18 @@ export default function CustomerImportPage() {
 
       {step === "result" && confirmResult ? (
         <section className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <CheckCircleIcon className="mx-auto h-10 w-10 text-emerald-600" />
+            <h2 className="mt-4 text-lg font-semibold text-slate-900">
+              {t("import.resultHeading")}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {confirmResult.imported_count > 0
+                ? t("import.resultBodyMessage", { count: confirmResult.imported_count })
+                : t("import.resultBodyMessageNone")}
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-white p-4 text-center shadow-sm">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
