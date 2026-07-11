@@ -273,3 +273,9 @@ RESET_PASSWORD_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 VERIFY_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 RESEND_VERIFICATION_RULES = (RateLimitRule(limit=3, window_seconds=3600),)
 SEND_INVOICE_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
+# Each import endpoint gets its own 10/hour budget (matching this file's
+# existing one-scope-per-endpoint convention) rather than a single budget
+# shared between preview and confirm.
+IMPORT_PREVIEW_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+IMPORT_CONFIRM_RULES = (RateLimitRule(limit=10, window_seconds=3600),)

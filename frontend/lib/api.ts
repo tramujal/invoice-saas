@@ -140,6 +140,43 @@ export async function apiFetchStream(
 }
 
 /**
+ * Like apiFetch, but for a multipart/form-data body (file uploads) —
+ * never sets Content-Type itself, since the browser must set its own
+ * `multipart/form-data; boundary=...` value, which only happens if we
+ * don't set it manually (unlike apiFetch's JSON default).
+ */
+export async function apiFetchForm<T = Json>(
+  path: string,
+  formData: FormData,
+  init?: Omit<RequestInit, "body">
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+
+  const token = getAuthToken();
+  if (!token) throw new ApiError("Not authenticated", 401);
+  headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Accept", "application/json");
+
+  const res = await fetch(buildUrl(path), { ...init, method: init?.method ?? "POST", headers, body: formData });
+
+  if (res.status === 401) {
+    clearAuthSession();
+  }
+
+  if (!res.ok) {
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text();
+    }
+    throw new ApiError(`Request failed (${res.status})`, res.status, body);
+  }
+
+  return (await res.json()) as T;
+}
+
+/**
  * Unauthenticated POST request used by the login/register flows, before a
  * token exists. Reuses the same ApiError shape as apiFetch so callers can
  * share error-formatting logic.

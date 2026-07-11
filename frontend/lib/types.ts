@@ -36,8 +36,51 @@ export type Customer = {
   email: string;
   phone: string;
   address: string;
+  tax_id: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ImportTargetField = "name" | "email" | "phone" | "address" | "tax_id" | "ignore";
+
+export type ImportPreviewRowStatus = "valid" | "warning" | "invalid" | "duplicate";
+export type ImportConfirmRowStatus = "imported" | "skipped" | "failed";
+
+export type ImportPreviewRowResult = {
+  row_number: number;
+  status: ImportPreviewRowStatus;
+  reason_code: string | null;
+  values: Record<string, string | null>;
+};
+
+export type ImportPreviewResponse = {
+  file_type: "csv" | "xlsx";
+  headers: string[];
+  normalized_headers: string[];
+  auto_mapping: Record<string, string>;
+  requires_manual_mapping: boolean;
+  missing_required_fields: string[];
+  total_rows: number;
+  preview_rows: ImportPreviewRowResult[];
+  valid_count: number;
+  warning_count: number;
+  invalid_count: number;
+  duplicate_count: number;
+};
+
+export type ImportConfirmRowResult = {
+  row_number: number;
+  status: ImportConfirmRowStatus;
+  reason_code: string | null;
+  values: Record<string, string | null>;
+};
+
+export type ImportConfirmResponse = {
+  imported_count: number;
+  skipped_duplicate_count: number;
+  failed_count: number;
+  total_processed: number;
+  row_results: ImportConfirmRowResult[];
 };
 
 export type InvoiceLineItemResponse = {

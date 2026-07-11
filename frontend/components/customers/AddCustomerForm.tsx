@@ -14,6 +14,7 @@ const LIMITS = {
   email: 255,
   phone: 64,
   address: 512,
+  tax_id: 64,
 } as const;
 
 type FieldKey = keyof typeof LIMITS;
@@ -30,6 +31,7 @@ function validate(
     email: string;
     phone: string;
     address: string;
+    taxId: string;
   }
 ): FieldErrors | null {
   const errors: FieldErrors = {};
@@ -37,6 +39,7 @@ function validate(
   const email = params.email.trim();
   const phone = params.phone.trim();
   const address = params.address.trim();
+  const taxId = params.taxId.trim();
 
   if (!name) errors.name = t("common.errorRequired", { field: t("common.name") });
   else if (name.length > LIMITS.name)
@@ -56,6 +59,12 @@ function validate(
       max: LIMITS.address,
     });
 
+  if (taxId.length > LIMITS.tax_id)
+    errors.tax_id = t("common.errorMaxLength", {
+      field: t("customers.taxIdLabel"),
+      max: LIMITS.tax_id,
+    });
+
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
@@ -70,13 +79,14 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  const [taxId, setTaxId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    const errs = validate(t, { name, email, phone, address });
+    const errs = validate(t, { name, email, phone, address, taxId });
     if (errs) {
       setFieldErrors(errs);
       return;
@@ -93,6 +103,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
           email: email.trim(),
           phone: phone.trim(),
           address: address.trim(),
+          tax_id: taxId.trim(),
         }),
       });
       toast.dismiss(loadingId);
@@ -101,6 +112,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
       setEmail("");
       setPhone("");
       setAddress("");
+      setTaxId("");
       await onCreated();
     } catch (err) {
       toast.dismiss(loadingId);
@@ -224,6 +236,29 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
                 </p>
               ) : null}
             </div>
+
+            <div>
+              <label htmlFor="cust-tax-id" className="text-sm font-medium text-slate-700">
+                {t("customers.taxIdLabel")}
+              </label>
+              <input
+                id="cust-tax-id"
+                type="text"
+                name="tax_id"
+                value={taxId}
+                onChange={(e) => setTaxId(e.target.value)}
+                disabled={disabled}
+                maxLength={LIMITS.tax_id}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                aria-invalid={Boolean(fieldErrors.tax_id)}
+                aria-describedby={fieldErrors.tax_id ? "cust-tax-id-err" : undefined}
+              />
+              {fieldErrors.tax_id ? (
+                <p id="cust-tax-id-err" className="mt-1 text-xs text-red-600" role="alert">
+                  {fieldErrors.tax_id}
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -236,6 +271,7 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
               setEmail("");
               setPhone("");
               setAddress("");
+              setTaxId("");
               setFieldErrors({});
             }}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"

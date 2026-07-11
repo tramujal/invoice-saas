@@ -85,6 +85,15 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_monthly_volume_heading": (
             "Monthly Invoice Volume (last 6 months, all currencies combined — a count, not money)"
         ),
+        "import_template_name_label": "Name",
+        "import_template_email_label": "Email",
+        "import_template_phone_label": "Phone",
+        "import_template_address_label": "Address",
+        "import_template_example_name": "Acme Inc.",
+        "import_template_example_email": "billing@example.com",
+        "import_template_example_phone": "+1 555 0100",
+        "import_template_example_address": "123 Main St, Springfield",
+        "import_template_example_tax_id": "12-3456789",
     },
     "es": {
         "invoice_title": "Factura",
@@ -155,6 +164,15 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_monthly_volume_heading": (
             "Volumen mensual de facturas (últimos 6 meses, todas las monedas combinadas — es un conteo, no dinero)"
         ),
+        "import_template_name_label": "Nombre",
+        "import_template_email_label": "Correo electrónico",
+        "import_template_phone_label": "Teléfono",
+        "import_template_address_label": "Dirección",
+        "import_template_example_name": "Acme S.A.",
+        "import_template_example_email": "facturacion@ejemplo.com",
+        "import_template_example_phone": "+598 99 123 456",
+        "import_template_example_address": "Av. Principal 123, Montevideo",
+        "import_template_example_tax_id": "12345678-9",
     },
 }
 

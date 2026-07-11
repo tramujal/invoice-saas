@@ -20,6 +20,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_invoice_currency_and_language(engine)
     _add_user_email_verified_at(engine)
     _add_email_verification_tokens_table(engine)
+    _add_customer_tax_id(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -259,6 +260,27 @@ def _add_email_verification_tokens_table(engine: Engine) -> None:
                 "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ")"
             )
+        )
+
+
+def _add_customer_tax_id(engine: Engine) -> None:
+    """Adds customers.tax_id, defaulted to '' for existing rows (matching
+    phone/address's existing nullable-in-spirit-but-NOT-NULL-with-default
+    pattern) — no backfill of real values is possible or needed, an empty
+    string means "not provided," identical to how phone/address already
+    behave when left blank.
+    """
+    inspector = inspect(engine)
+    if "customers" not in inspector.get_table_names():
+        return
+
+    columns = {c["name"] for c in inspector.get_columns("customers")}
+    if "tax_id" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE customers ADD COLUMN tax_id VARCHAR(64) NOT NULL DEFAULT ''")
         )
 
 

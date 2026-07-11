@@ -75,7 +75,10 @@
       "Bash(npm install *)",
       "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_context.py\")",
       "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_provider.py\")",
-      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_live.py\")"
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_assistant_live.py\")",
+      "Bash(python -c \"import openpyxl; print\\(openpyxl.__version__\\)\")",
+      "Bash(python -c \"import requests; print\\('OK', requests.__version__\\)\")",
+      "Bash(python \"C:\\\\Users\\\\facun\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-facun-SaaS\\\\e888dab9-8034-46b2-a701-67078c490057\\\\scratchpad\\\\verify_customer_import.py\")"
     ]
   }
 }

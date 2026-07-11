@@ -11,6 +11,7 @@ from app.ai.limits import (
     AI_MAX_HISTORY_TOTAL_CHARS,
     AI_MAX_USER_MESSAGE_LENGTH,
 )
+from app.customer_validation import is_valid_email_format
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
 from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
@@ -311,11 +312,26 @@ class PaginatedInvoicesResponse(BaseModel):
     items: list[InvoiceSummaryResponse]
 
 
+def _check_customer_email_format(value: str) -> str:
+    """Shared by CustomerCreateRequest/CustomerUpdateRequest and the CSV/XLSX
+    importer (app.imports.customers) — see app.customer_validation for why
+    this is centralized rather than re-implemented per call site."""
+    if not is_valid_email_format(value):
+        raise ValueError("Invalid email address")
+    return value
+
+
 class CustomerCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=1, max_length=255)
     phone: str = Field(default="", max_length=64)
     address: str = Field(default="", max_length=512)
+    tax_id: str = Field(default="", max_length=64)
+
+    @field_validator("email")
+    @classmethod
+    def check_email_format(cls, value: str) -> str:
+        return _check_customer_email_format(value)
 
 
 class CustomerUpdateRequest(BaseModel):
@@ -323,6 +339,14 @@ class CustomerUpdateRequest(BaseModel):
     email: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=64)
     address: str | None = Field(default=None, max_length=512)
+    tax_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("email")
+    @classmethod
+    def check_email_format(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _check_customer_email_format(value)
 
 
 class CurrencyRevenueSummary(BaseModel):
@@ -399,6 +423,7 @@ class CustomerResponse(BaseModel):
     email: str
     phone: str
     address: str
+    tax_id: str
     created_at: datetime
     updated_at: datetime
 
@@ -436,3 +461,45 @@ class AssistantChatRequest(BaseModel):
         if total_chars > AI_MAX_HISTORY_TOTAL_CHARS:
             raise ValueError("Conversation history is too large.")
         return value
+
+
+class ImportPreviewRowResult(BaseModel):
+    row_number: int
+    status: Literal["valid", "warning", "invalid", "duplicate"]
+    reason_code: str | None
+    values: dict[str, str | None]
+
+
+class ImportPreviewResponse(BaseModel):
+    file_type: Literal["csv", "xlsx"]
+    headers: list[str]
+    normalized_headers: list[str]
+    auto_mapping: dict[str, str]
+    requires_manual_mapping: bool
+    missing_required_fields: list[str]
+    total_rows: int
+    # Capped subset for display — see IMPORT_MAX_PREVIEW_ROWS. The full
+    # file is still validated server-side; valid/warning/invalid/duplicate
+    # counts below reflect ALL rows, not just the ones shown.
+    preview_rows: list[ImportPreviewRowResult]
+    valid_count: int
+    warning_count: int
+    invalid_count: int
+    duplicate_count: int
+
+
+class ImportConfirmRowResult(BaseModel):
+    row_number: int
+    status: Literal["imported", "skipped", "failed"]
+    reason_code: str | None
+    values: dict[str, str | None]
+
+
+class ImportConfirmResponse(BaseModel):
+    imported_count: int
+    skipped_duplicate_count: int
+    failed_count: int
+    total_processed: int
+    # Every row, never capped — this is the authoritative final record and
+    # (client-side) error-report source, unlike preview_rows above.
+    row_results: list[ImportConfirmRowResult]

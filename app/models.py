@@ -148,6 +148,12 @@ class Customer(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     address: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    # Optional. No DB-level uniqueness (matching email's existing lax
+    # behavior above) — duplicate detection is an application-level,
+    # per-organization concern (see app/customer_validation.py's
+    # normalize_tax_id and app/imports/customers.py), never a global
+    # constraint that could affect other organizations.
+    tax_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

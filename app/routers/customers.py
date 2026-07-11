@@ -54,6 +54,7 @@ def create_customer(
         email=body.email,
         phone=body.phone,
         address=body.address,
+        tax_id=body.tax_id,
     )
     db.add(customer)
     db.commit()
