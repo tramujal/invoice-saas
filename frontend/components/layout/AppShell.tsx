@@ -14,7 +14,7 @@ import {
   isAuthenticated,
   setEmailVerified as cacheEmailVerified,
 } from "@/lib/auth-storage";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { MeResponse, MessageResponse } from "@/lib/types";
 
@@ -100,7 +100,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       });
       toast.success(result.message || t("emailBanner.resendSuccess"));
     } catch (err) {
-      toast.error(formatApiError(err, t("emailBanner.resendError")));
+      toast.error(
+        isRateLimitedError(err)
+          ? t("errors.rateLimitedVerification")
+          : formatApiError(err, t("emailBanner.resendError"))
+      );
     } finally {
       setIsResending(false);
     }

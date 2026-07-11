@@ -8,7 +8,7 @@ import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequire
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, authRequest } from "@/lib/api";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import { isPasswordValid } from "@/lib/password-policy";
 
@@ -87,9 +87,11 @@ function ResetPasswordForm() {
       router.replace("/login");
     } catch (err) {
       setError(
-        err instanceof ApiError
-          ? formatApiError(err, t("auth.errorGeneric"))
-          : t("auth.errorGeneric")
+        isRateLimitedError(err)
+          ? t("errors.rateLimitedPasswordReset")
+          : err instanceof ApiError
+            ? formatApiError(err, t("auth.errorGeneric"))
+            : t("auth.errorGeneric")
       );
     } finally {
       setIsSubmitting(false);

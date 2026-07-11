@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequirementsChecklist";
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { ApiError, authRequest } from "@/lib/api";
-import { formatApiError } from "@/lib/format-api-error";
+import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { isAuthenticated, setAuthSession } from "@/lib/auth-storage";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import { isPasswordValid } from "@/lib/password-policy";
@@ -96,14 +96,22 @@ function LoginForm() {
       }
       router.replace("/dashboard");
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? formatApiError(
-              err,
-              mode === "login" ? t("auth.errorSignInFailed") : t("auth.errorRegisterFailed")
-            )
-          : t("auth.errorGeneric")
-      );
+      if (isRateLimitedError(err)) {
+        setError(
+          mode === "login"
+            ? t("errors.rateLimitedLogin")
+            : t("errors.rateLimitedRegister")
+        );
+      } else {
+        setError(
+          err instanceof ApiError
+            ? formatApiError(
+                err,
+                mode === "login" ? t("auth.errorSignInFailed") : t("auth.errorRegisterFailed")
+              )
+            : t("auth.errorGeneric")
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }

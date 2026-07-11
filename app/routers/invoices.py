@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -16,6 +16,13 @@ from app.invoice_numbering import INVOICE_NUMBER_PREFIX, format_invoice_number
 from app.invoice_pdf import render_invoice_pdf
 from app.models import Customer, Invoice, InvoiceLineItem, Organization, User
 from app.payment_status import PaymentStatus
+from app.rate_limit import (
+    SEND_INVOICE_EMAIL_RULES,
+    RateLimitCheck,
+    enforce_rate_limit,
+    user_identity,
+    user_ip_identity,
+)
 from app.schemas import (
     InvoiceCreateRequest,
     InvoicePaymentStatusUpdate,
@@ -170,9 +177,29 @@ def download_invoice_pdf(
 def send_invoice_email(
     organization_id: str,
     invoice_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SendInvoiceEmailResponse:
+    # Rate limit first, before any DB/authorization work: two independent
+    # 10/hour buckets (user-only and user+IP), same rationale as
+    # resend-verification — a user-only bucket can't be evaded by switching
+    # IPs, while the user+IP bucket still surfaces single-source abuse.
+    enforce_rate_limit(
+        [
+            RateLimitCheck(
+                scope="invoices:send_email:user",
+                identity=user_identity(current_user.id),
+                rules=SEND_INVOICE_EMAIL_RULES,
+            ),
+            RateLimitCheck(
+                scope="invoices:send_email:user_ip",
+                identity=user_ip_identity(request, current_user.id),
+                rules=SEND_INVOICE_EMAIL_RULES,
+            ),
+        ]
+    )
+
     # Authorization/existence/validation checks happen before we even ask
     # whether the email provider is configured, so a bad request (wrong org,
     # missing invoice, no customer email) always reports its real 403/404/422

@@ -321,6 +321,11 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "emailBanner.resendSuccess": "A verification email has been sent to your address.",
     "emailBanner.resendError": "Could not send verification email. Please try again.",
     "errors.emailNotVerified": "Verify your email to continue — resend the link from the banner above.",
+    "errors.rateLimitedLogin": "Too many login attempts. Please try again later.",
+    "errors.rateLimitedRegister": "Too many registration attempts. Please try again later.",
+    "errors.rateLimitedPasswordReset": "Too many password reset requests. Please try again later.",
+    "errors.rateLimitedVerification": "Too many verification emails. Please try again later.",
+    "errors.rateLimitedInvoiceEmail": "Too many invoice emails sent. Please try again later.",
 
     "dashboard.title": "Dashboard",
     "dashboard.subtitle": "Overview of invoices, revenue, and customers for your organization.",
@@ -682,6 +687,11 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "emailBanner.resendSuccess": "Se ha enviado un correo de verificación a tu dirección.",
     "emailBanner.resendError": "No se pudo enviar el correo de verificación. Intenta de nuevo.",
     "errors.emailNotVerified": "Verifica tu correo para continuar: reenvía el enlace desde el aviso de arriba.",
+    "errors.rateLimitedLogin": "Demasiados intentos de inicio de sesión. Intenta de nuevo más tarde.",
+    "errors.rateLimitedRegister": "Demasiados intentos de registro. Intenta de nuevo más tarde.",
+    "errors.rateLimitedPasswordReset": "Demasiadas solicitudes para restablecer la contraseña. Intenta de nuevo más tarde.",
+    "errors.rateLimitedVerification": "Demasiados correos de verificación. Intenta de nuevo más tarde.",
+    "errors.rateLimitedInvoiceEmail": "Demasiados correos de factura enviados. Intenta de nuevo más tarde.",
 
     "dashboard.title": "Panel",
     "dashboard.subtitle": "Resumen de facturas, ingresos y clientes de tu empresa.",

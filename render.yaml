@@ -12,7 +12,14 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # --forwarded-allow-ips="" disables uvicorn's OWN built-in X-Forwarded-For
+    # trust (its ProxyHeadersMiddleware trusts 127.0.0.1 by default, and would
+    # rewrite request.client.host from X-Forwarded-For independently of --
+    # and before -- app.rate_limit's own TRUSTED_PROXY_HOPS check below,
+    # which is meant to be the *only* place that header is ever interpreted.
+    # See the "IMPORTANT" note in app/rate_limit.py's module docstring.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --forwarded-allow-ips=
+
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -24,3 +31,13 @@ services:
         value: "1440"
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # This service sits behind exactly one Render reverse-proxy hop, which
+      # appends the real client IP as the last entry of X-Forwarded-For
+      # (nginx-style $proxy_add_x_forwarded_for — it appends, never
+      # replaces). TRUSTED_PROXY_HOPS=1 tells app.rate_limit.get_client_ip to
+      # trust only that last entry for IP-based rate limiting; everything
+      # before it is attacker-controllable and ignored. Left at the default
+      # of 0 (X-Forwarded-For ignored, request.client.host used) anywhere
+      # this isn't explicitly set, e.g. local dev — see app/rate_limit.py.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"

@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,21 @@ from app.password_reset import (
     generate_reset_token,
     hash_reset_token,
     tokens_match,
+)
+from app.rate_limit import (
+    FORGOT_PASSWORD_RULES,
+    LOGIN_EMAIL_RULES,
+    LOGIN_IP_RULES,
+    REGISTER_RULES,
+    RESEND_VERIFICATION_RULES,
+    RESET_PASSWORD_RULES,
+    VERIFY_EMAIL_RULES,
+    RateLimitCheck,
+    email_identity,
+    enforce_rate_limit,
+    ip_identity,
+    user_identity,
+    user_ip_identity,
 )
 from app.schemas import (
     AuthResponse,
@@ -90,8 +105,13 @@ def _user_organizations(db: Session, user_id: str) -> list[Organization]:
 def register(
     body: RegisterRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> AuthResponse:
+    enforce_rate_limit(
+        [RateLimitCheck(scope="auth:register:ip", identity=ip_identity(request), rules=REGISTER_RULES)]
+    )
+
     existing = db.scalar(select(User).where(User.email == body.email))
     if existing is not None:
         raise HTTPException(
@@ -130,7 +150,23 @@ def register(
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -> AuthResponse:
+    # Two independent buckets: per-IP (5/min, 20/hour — catches a single
+    # source hammering any account) and per-account via a hash of the
+    # normalized email (10/hour — catches distributed brute force against
+    # ONE account spread across many IPs, which the IP buckets alone can't
+    # see). Checked regardless of whether the account exists, exactly like
+    # the dummy-password-hash comparison below — the rate limiter must
+    # never become a second timing/enumeration side-channel.
+    enforce_rate_limit(
+        [
+            RateLimitCheck(scope="auth:login:ip", identity=ip_identity(request), rules=LOGIN_IP_RULES),
+            RateLimitCheck(
+                scope="auth:login:email", identity=email_identity(body.email), rules=LOGIN_EMAIL_RULES
+            ),
+        ]
+    )
+
     user = db.scalar(select(User).where(User.email == body.email))
     password_valid = verify_password(
         body.password, user.hashed_password if user else _DUMMY_PASSWORD_HASH
@@ -236,8 +272,17 @@ def _issue_password_reset_task(user_id: str, language: str) -> None:
 def forgot_password(
     body: ForgotPasswordRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> ForgotPasswordResponse:
+    enforce_rate_limit(
+        [
+            RateLimitCheck(
+                scope="auth:forgot_password:ip", identity=ip_identity(request), rules=FORGOT_PASSWORD_RULES
+            )
+        ]
+    )
+
     # Token creation and email sending happen in a background task, after
     # this response is already sent, so the response time can't reveal
     # whether the account exists — otherwise "email exists" would take a
@@ -254,8 +299,16 @@ def forgot_password(
 
 @router.post("/reset-password", response_model=ResetPasswordResponse)
 def reset_password(
-    body: ResetPasswordRequest, db: Session = Depends(get_db)
+    body: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)
 ) -> ResetPasswordResponse:
+    enforce_rate_limit(
+        [
+            RateLimitCheck(
+                scope="auth:reset_password:ip", identity=ip_identity(request), rules=RESET_PASSWORD_RULES
+            )
+        ]
+    )
+
     token_hash = hash_reset_token(body.token)
     now = datetime.now(timezone.utc)
 
@@ -356,6 +409,7 @@ def _issue_email_verification_task(user_id: str, language: str) -> None:
 @router.post("/resend-verification", response_model=ResendVerificationResponse)
 def resend_verification(
     background_tasks: BackgroundTasks,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResendVerificationResponse:
@@ -363,6 +417,25 @@ def resend_verification(
     # the request body — unlike forgot-password, there's no enumeration
     # surface to protect here at all, since the caller has already proven
     # ownership of this exact account just to reach this endpoint.
+    #
+    # Two independent buckets, both 3/hour: a user-only bucket (so this
+    # account can't be spammed by switching IPs) and a user+IP bucket (so
+    # IP-level abuse from a single source is still visible independently).
+    enforce_rate_limit(
+        [
+            RateLimitCheck(
+                scope="auth:resend_verification:user",
+                identity=user_identity(current_user.id),
+                rules=RESEND_VERIFICATION_RULES,
+            ),
+            RateLimitCheck(
+                scope="auth:resend_verification:user_ip",
+                identity=user_ip_identity(request, current_user.id),
+                rules=RESEND_VERIFICATION_RULES,
+            ),
+        ]
+    )
+
     if current_user.email_verified_at is not None:
         return ResendVerificationResponse(message=ALREADY_VERIFIED_MESSAGE)
 
@@ -376,8 +449,12 @@ def resend_verification(
 
 @router.post("/verify-email", response_model=VerifyEmailResponse)
 def verify_email(
-    body: VerifyEmailRequest, db: Session = Depends(get_db)
+    body: VerifyEmailRequest, request: Request, db: Session = Depends(get_db)
 ) -> VerifyEmailResponse:
+    enforce_rate_limit(
+        [RateLimitCheck(scope="auth:verify_email:ip", identity=ip_identity(request), rules=VERIFY_EMAIL_RULES)]
+    )
+
     token_hash = hash_verification_token(body.token)
     now = datetime.now(timezone.utc)
 

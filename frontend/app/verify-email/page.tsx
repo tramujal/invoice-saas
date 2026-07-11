@@ -10,13 +10,14 @@ import {
   isAuthenticated,
   setEmailVerified as cacheEmailVerified,
 } from "@/lib/auth-storage";
+import { isRateLimitedError } from "@/lib/format-api-error";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import type { MeResponse, MessageResponse } from "@/lib/types";
 
 const defaultApi =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
 
-type Status = "verifying" | "success" | "error" | "missing-token";
+type Status = "verifying" | "success" | "error" | "rate-limited" | "missing-token";
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams();
@@ -53,8 +54,8 @@ function VerifyEmailContent() {
             // banner will simply catch up next time /auth/me is reachable.
           }
         }
-      } catch {
-        setStatus("error");
+      } catch (err) {
+        setStatus(isRateLimitedError(err) ? "rate-limited" : "error");
       }
     }
 
@@ -99,6 +100,23 @@ function VerifyEmailContent() {
             </p>
             <p className="mt-1 text-sm text-red-600" role="alert">
               {t("verifyEmail.errorMessage")}
+            </p>
+            <Link
+              href="/login"
+              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+            >
+              {t("verifyEmail.goToLogin")}
+            </Link>
+          </>
+        ) : null}
+
+        {status === "rate-limited" ? (
+          <>
+            <p className="mt-2 text-sm font-medium text-red-700">
+              {t("verifyEmail.errorTitle")}
+            </p>
+            <p className="mt-1 text-sm text-red-600" role="alert">
+              {t("errors.rateLimitedVerification")}
             </p>
             <Link
               href="/login"

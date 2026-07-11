@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { authRequest } from "@/lib/api";
+import { isRateLimitedError } from "@/lib/format-api-error";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 
 const defaultApi =
@@ -38,8 +39,12 @@ export default function ForgotPasswordPage() {
         language,
       });
       setSubmitted(true);
-    } catch {
-      setError(t("auth.errorGeneric"));
+    } catch (err) {
+      setError(
+        isRateLimitedError(err)
+          ? t("errors.rateLimitedPasswordReset")
+          : t("auth.errorGeneric")
+      );
     } finally {
       setIsSubmitting(false);
     }

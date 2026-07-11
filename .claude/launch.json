@@ -10,7 +10,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8000"],
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8000", "--forwarded-allow-ips="],
       "port": 8000
     }
   ]
