@@ -213,6 +213,61 @@ export type DashboardAnalytics = {
   top_customers: TopCustomerRevenue[];
 };
 
+// --- Dashboard business insights -----------------------------------------
+//
+// title/message/suggestion arrive already localized from the backend (see
+// app/localization.py) -- the frontend never translates insight content
+// itself, only the surrounding chrome (section heading, buttons, etc).
+
+export type InsightSeverity = "info" | "warning" | "critical" | "positive";
+export type InsightTier = "primary" | "secondary";
+
+export type InsightCtaType =
+  | "view_overdue_invoices"
+  | "review_pending_invoices"
+  | "create_invoice"
+  | "ask_assistant";
+
+export type InsightMetric = {
+  currency_code: string | null;
+  value: string | null;
+  percentage: number | null;
+};
+
+export type InsightRelatedEntity = {
+  type: "invoice" | "customer" | null;
+  id: string | null;
+  label: string | null;
+};
+
+export type InsightCta = {
+  type: InsightCtaType;
+  /** Only set for type === "ask_assistant" -- a deterministic, already-
+   * localized prefill question, never AI-generated. */
+  question: string | null;
+};
+
+export type Insight = {
+  id: string;
+  category: string;
+  severity: InsightSeverity;
+  tier: InsightTier;
+  title: string;
+  message: string;
+  suggestion: string | null;
+  metric: InsightMetric | null;
+  related_entity: InsightRelatedEntity | null;
+  cta: InsightCta | null;
+};
+
+/** Response from GET /organizations/{org}/dashboard/insights */
+export type DashboardInsightsResponse = {
+  generated_at: string;
+  source: "deterministic" | "ai_enhanced";
+  ai_available: boolean;
+  insights: Insight[];
+};
+
 // --- AI assistant actions ----------------------------------------------
 //
 // The stable set of action names the backend currently registers (see

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -51,9 +52,11 @@ const markdownComponents: Components = {
   td: ({ children }) => <td className="px-2 py-1">{children}</td>,
 };
 
-export default function AssistantPage() {
+function AssistantContent() {
   const { t } = useTranslation();
   const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -65,6 +68,18 @@ export default function AssistantPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
+
+  // A dashboard insight's "Ask Assistant" CTA links here with ?q=<question>
+  // prefilled -- read it once on mount, then strip it from the URL so a
+  // later manual refresh of this page doesn't keep re-seeding the input.
+  useEffect(() => {
+    const question = searchParams.get("q");
+    if (question) {
+      setInput(question);
+      router.replace("/assistant");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function clearConversation() {
     if (isStreaming) return;
@@ -350,5 +365,13 @@ export default function AssistantPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AssistantPage() {
+  return (
+    <Suspense fallback={null}>
+      <AssistantContent />
+    </Suspense>
   );
 }

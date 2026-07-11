@@ -94,6 +94,111 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "import_template_example_phone": "+1 555 0100",
         "import_template_example_address": "123 Main St, Springfield",
         "import_template_example_tax_id": "12-3456789",
+        "insight_no_invoices_title": "No invoices yet",
+        "insight_no_invoices_message": (
+            "You haven't created any invoices yet — once you do, you'll see insights "
+            "about revenue, overdue payments, and your customers here."
+        ),
+        "insight_no_invoices_suggestion": "Create your first invoice to get started.",
+        "insight_first_invoice_title": "First invoice created",
+        "insight_first_invoice_message": (
+            "You've created your first invoice. As you add more, you'll start seeing "
+            "trends and comparisons here."
+        ),
+        "insight_revenue_first_month_title": "First month with {currency} revenue",
+        "insight_revenue_first_month_message": (
+            "You've recorded {currency} {amount} in revenue this month — there's no "
+            "prior month yet to compare it to."
+        ),
+        "insight_revenue_increase_title": "{currency} revenue up {percentage}%",
+        "insight_revenue_increase_message": (
+            "{currency} revenue this month is {this_month}, up from {last_month} "
+            "last month ({percentage}%)."
+        ),
+        "insight_revenue_decline_title": "{currency} revenue down {percentage}%",
+        "insight_revenue_decline_message": (
+            "{currency} revenue this month is {this_month}, down from {last_month} "
+            "last month ({percentage}%)."
+        ),
+        "insight_revenue_stable_title": "{currency} revenue holding steady",
+        "insight_revenue_stable_message": (
+            "{currency} revenue this month is {this_month}, close to last month's {last_month}."
+        ),
+        "insight_revenue_decline_suggestion": (
+            "Review recent invoices and customer activity to understand the change."
+        ),
+        "insight_revenue_ask_question": "Explain why {currency} revenue changed this month.",
+        "insight_overdue_title": "{count} overdue invoices in {currency}",
+        "insight_overdue_message": (
+            "{count} invoices totaling {currency} {amount} are overdue. The oldest, "
+            "{oldest_invoice}, is {oldest_days} days overdue; the largest is "
+            "{largest_invoice} at {currency} {largest_amount}."
+        ),
+        "insight_overdue_suggestion": "Follow up on the oldest or largest overdue invoices first.",
+        "insight_pending_title": "High pending balance in {currency}",
+        "insight_pending_message": (
+            "{currency} {amount} is still pending payment — {percentage}% of this "
+            "currency's total revenue."
+        ),
+        "insight_pending_suggestion": (
+            "Review pending invoices and consider following up with customers."
+        ),
+        "insight_concentration_title": "Revenue concentrated in one customer ({currency})",
+        "insight_concentration_message": (
+            "{customer} accounts for {percentage}% of your {currency} revenue."
+        ),
+        "insight_concentration_suggestion": (
+            "Consider diversifying your customer base to reduce this risk."
+        ),
+        "insight_concentration_ask_question": "Help me reduce customer concentration risk.",
+        "insight_inactivity_title": "{count} customers gone quiet",
+        "insight_inactivity_message": (
+            "{count} previously active customers haven't been invoiced in a while — "
+            "{customer} the longest, at {days} days."
+        ),
+        "insight_inactivity_suggestion": "Consider reaching out to check in.",
+        "insight_inactivity_ask_question": (
+            "Which inactive customers should I follow up with, starting with {customer}?"
+        ),
+        "insight_volume_first_month_title": "First month with invoices",
+        "insight_volume_first_month_message": (
+            "You created {count} invoices this month — there's no prior month yet to "
+            "compare it to."
+        ),
+        "insight_volume_increase_title": "Invoice volume up {percentage}%",
+        "insight_volume_decrease_title": "Invoice volume down {percentage}%",
+        "insight_volume_message": (
+            "You created {this_month} invoices this month, versus {last_month} last month."
+        ),
+        "insight_status_high_overdue_title": "High share of overdue invoices",
+        "insight_status_high_overdue_message": (
+            "{overdue} of your {total} invoices ({percentage}%) are overdue."
+        ),
+        "insight_status_all_pending_title": "All invoices still pending",
+        "insight_status_all_pending_message": "All {count} of your invoices are still pending payment.",
+        "insight_status_no_paid_title": "No invoices paid yet",
+        "insight_status_no_paid_message": (
+            "None of your invoices have been paid yet, and {overdue} are overdue."
+        ),
+        "insight_status_mostly_paid_title": "Most invoices paid",
+        "insight_status_mostly_paid_message": (
+            "{paid} of your {total} invoices ({percentage}%) are paid."
+        ),
+        "insight_multi_currency_title": "Tracking revenue in {count} currencies",
+        "insight_multi_currency_message": (
+            "You have revenue in {currencies}. Figures are always tracked separately "
+            "per currency and never combined."
+        ),
+        "insight_data_quality_title": "A few things worth tidying up",
+        "insight_data_quality_invoices_without_customer_message": (
+            "{count} invoices have no customer attached."
+        ),
+        "insight_data_quality_customers_missing_phone_message": (
+            "{count} customers have no phone number on file."
+        ),
+        "insight_data_quality_customers_never_invoiced_message": (
+            "{count} customers have never been invoiced."
+        ),
     },
     "es": {
         "invoice_title": "Factura",
@@ -173,6 +278,116 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "import_template_example_phone": "+598 99 123 456",
         "import_template_example_address": "Av. Principal 123, Montevideo",
         "import_template_example_tax_id": "12345678-9",
+        "insight_no_invoices_title": "Aún no hay facturas",
+        "insight_no_invoices_message": (
+            "Todavía no has creado ninguna factura — cuando lo hagas, aquí verás "
+            "información sobre ingresos, pagos vencidos y tus clientes."
+        ),
+        "insight_no_invoices_suggestion": "Crea tu primera factura para comenzar.",
+        "insight_first_invoice_title": "Primera factura creada",
+        "insight_first_invoice_message": (
+            "Creaste tu primera factura. A medida que agregues más, aquí comenzarás "
+            "a ver tendencias y comparaciones."
+        ),
+        "insight_revenue_first_month_title": "Primer mes con ingresos en {currency}",
+        "insight_revenue_first_month_message": (
+            "Registraste {currency} {amount} en ingresos este mes — todavía no hay "
+            "un mes anterior con el que compararlo."
+        ),
+        "insight_revenue_increase_title": "Los ingresos en {currency} subieron {percentage}%",
+        "insight_revenue_increase_message": (
+            "Los ingresos en {currency} este mes son {this_month}, frente a "
+            "{last_month} el mes pasado ({percentage}%)."
+        ),
+        "insight_revenue_decline_title": "Los ingresos en {currency} bajaron {percentage}%",
+        "insight_revenue_decline_message": (
+            "Los ingresos en {currency} este mes son {this_month}, frente a "
+            "{last_month} el mes pasado ({percentage}%)."
+        ),
+        "insight_revenue_stable_title": "Los ingresos en {currency} se mantienen estables",
+        "insight_revenue_stable_message": (
+            "Los ingresos en {currency} este mes son {this_month}, cerca de los "
+            "{last_month} del mes pasado."
+        ),
+        "insight_revenue_decline_suggestion": (
+            "Revisa las facturas recientes y la actividad de los clientes para entender el cambio."
+        ),
+        "insight_revenue_ask_question": "Explica por qué cambiaron los ingresos en {currency} este mes.",
+        "insight_overdue_title": "{count} facturas vencidas en {currency}",
+        "insight_overdue_message": (
+            "{count} facturas por un total de {currency} {amount} están vencidas. "
+            "La más antigua, {oldest_invoice}, lleva {oldest_days} días vencida; la "
+            "más grande es {largest_invoice} por {currency} {largest_amount}."
+        ),
+        "insight_overdue_suggestion": (
+            "Da seguimiento primero a las facturas vencidas más antiguas o más grandes."
+        ),
+        "insight_pending_title": "Saldo pendiente alto en {currency}",
+        "insight_pending_message": (
+            "{currency} {amount} sigue pendiente de pago — el {percentage}% de los "
+            "ingresos totales en esta moneda."
+        ),
+        "insight_pending_suggestion": (
+            "Revisa las facturas pendientes y considera dar seguimiento a los clientes."
+        ),
+        "insight_concentration_title": "Ingresos concentrados en un cliente ({currency})",
+        "insight_concentration_message": (
+            "{customer} representa el {percentage}% de tus ingresos en {currency}."
+        ),
+        "insight_concentration_suggestion": (
+            "Considera diversificar tu base de clientes para reducir este riesgo."
+        ),
+        "insight_concentration_ask_question": "Ayúdame a reducir el riesgo de concentración de clientes.",
+        "insight_inactivity_title": "{count} clientes sin actividad reciente",
+        "insight_inactivity_message": (
+            "{count} clientes antes activos no han sido facturados en un tiempo — "
+            "{customer} es quien más tiempo lleva, con {days} días."
+        ),
+        "insight_inactivity_suggestion": "Considera contactarlos para saber cómo están.",
+        "insight_inactivity_ask_question": (
+            "¿A qué clientes inactivos debería dar seguimiento, empezando por {customer}?"
+        ),
+        "insight_volume_first_month_title": "Primer mes con facturas",
+        "insight_volume_first_month_message": (
+            "Creaste {count} facturas este mes — todavía no hay un mes anterior con "
+            "el que compararlo."
+        ),
+        "insight_volume_increase_title": "El volumen de facturas subió {percentage}%",
+        "insight_volume_decrease_title": "El volumen de facturas bajó {percentage}%",
+        "insight_volume_message": (
+            "Creaste {this_month} facturas este mes, frente a {last_month} el mes pasado."
+        ),
+        "insight_status_high_overdue_title": "Alta proporción de facturas vencidas",
+        "insight_status_high_overdue_message": (
+            "{overdue} de tus {total} facturas ({percentage}%) están vencidas."
+        ),
+        "insight_status_all_pending_title": "Todas las facturas siguen pendientes",
+        "insight_status_all_pending_message": (
+            "Las {count} facturas que tienes siguen pendientes de pago."
+        ),
+        "insight_status_no_paid_title": "Aún no se ha pagado ninguna factura",
+        "insight_status_no_paid_message": (
+            "Ninguna de tus facturas se ha pagado todavía, y {overdue} están vencidas."
+        ),
+        "insight_status_mostly_paid_title": "La mayoría de las facturas están pagadas",
+        "insight_status_mostly_paid_message": (
+            "{paid} de tus {total} facturas ({percentage}%) están pagadas."
+        ),
+        "insight_multi_currency_title": "Ingresos registrados en {count} monedas",
+        "insight_multi_currency_message": (
+            "Tienes ingresos en {currencies}. Los montos siempre se registran por "
+            "separado en cada moneda y nunca se combinan."
+        ),
+        "insight_data_quality_title": "Algunos detalles para ordenar",
+        "insight_data_quality_invoices_without_customer_message": (
+            "{count} facturas no tienen un cliente asociado."
+        ),
+        "insight_data_quality_customers_missing_phone_message": (
+            "{count} clientes no tienen un teléfono registrado."
+        ),
+        "insight_data_quality_customers_never_invoiced_message": (
+            "{count} clientes nunca han sido facturados."
+        ),
     },
 }
 

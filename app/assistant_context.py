@@ -19,11 +19,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.limits import AI_MAX_CONTEXT_CHARS
 from app.currency import format_amount
+from app.customer_activity import get_last_invoice_at_by_customer
 from app.invoice_numbering import format_invoice_number
 from app.localization import get_language, t
 from app.models import Customer, Invoice, Organization
@@ -85,16 +86,7 @@ def _overdue_invoice_list(db: Session, organization_id: str) -> list[OverdueInvo
 
 
 def _stale_customers(db: Session, organization_id: str, now: datetime) -> list[StaleCustomerInfo]:
-    last_invoice_at = dict(
-        db.execute(
-            select(Invoice.customer_id, func.max(Invoice.created_at))
-            .where(
-                Invoice.organization_id == organization_id,
-                Invoice.customer_id.is_not(None),
-            )
-            .group_by(Invoice.customer_id)
-        ).all()
-    )
+    last_invoice_at = get_last_invoice_at_by_customer(db, organization_id)
     customers = db.scalars(
         select(Customer).where(Customer.organization_id == organization_id)
     ).all()
@@ -103,12 +95,6 @@ def _stale_customers(db: Session, organization_id: str, now: datetime) -> list[S
     stale: list[StaleCustomerInfo] = []
     for customer in customers:
         last_at = last_invoice_at.get(customer.id)
-        # SQLite returns naive datetimes even for DateTime(timezone=True)
-        # columns (Postgres returns aware ones) — normalize to UTC-aware
-        # before comparing, since every timestamp in this table is written
-        # as UTC regardless of backend (see dashboard.py's own note on this).
-        if last_at is not None and last_at.tzinfo is None:
-            last_at = last_at.replace(tzinfo=timezone.utc)
         if last_at is None:
             stale.append(StaleCustomerInfo(name=customer.name, days_since_last_invoice=None))
         elif last_at < cutoff:

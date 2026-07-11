@@ -173,6 +173,25 @@ def get_dashboard_summary(db: Session, organization_id: str) -> DashboardRespons
     )
 
 
+def get_pending_total_by_currency(db: Session, organization_id: str) -> dict[str, Decimal]:
+    """Pending-only revenue exposure, grouped by currency — same query
+    shape as get_dashboard_summary's total/this-month/last-month currency
+    sums above, filtered to payment_status == pending. Not used by any
+    existing route; added for app.insights.engine's pending-exposure
+    insight, which needs this and nothing else from this file changes."""
+    rows = dict(
+        db.execute(
+            select(Invoice.currency_code, func.coalesce(func.sum(Invoice.total), 0))
+            .where(
+                Invoice.organization_id == organization_id,
+                Invoice.payment_status == PaymentStatus.pending.value,
+            )
+            .group_by(Invoice.currency_code)
+        ).all()
+    )
+    return {code: _quantize_money(total) for code, total in rows.items()}
+
+
 @router.get("", response_model=DashboardResponse)
 def get_dashboard(
     organization_id: str,

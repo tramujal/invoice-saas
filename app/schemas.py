@@ -12,6 +12,11 @@ from app.ai.limits import (
     AI_MAX_USER_MESSAGE_LENGTH,
 )
 from app.customer_validation import is_valid_email_format
+from app.insights.limits import (
+    INSIGHTS_MAX_MESSAGE_LENGTH,
+    INSIGHTS_MAX_SUGGESTION_LENGTH,
+    INSIGHTS_MAX_TITLE_LENGTH,
+)
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
 from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
@@ -412,6 +417,87 @@ class DashboardAnalyticsResponse(BaseModel):
     # tagged with currency_code so the frontend can filter to one
     # currency at a time without ever summing revenue across currencies.
     top_customers: list[TopCustomerRevenue]
+
+
+class InsightMetricResponse(BaseModel):
+    currency_code: str | None
+    value: Decimal | None
+    percentage: float | None
+
+
+class InsightRelatedEntityResponse(BaseModel):
+    type: Literal["invoice", "customer"] | None
+    id: str | None
+    label: str | None
+
+
+class InsightCtaResponse(BaseModel):
+    type: Literal[
+        "view_overdue_invoices", "review_pending_invoices", "create_invoice", "ask_assistant"
+    ]
+    # Only set for type == "ask_assistant" -- a deterministic, already-
+    # localized prefill question, never AI-generated.
+    question: str | None = None
+
+
+class InsightResponse(BaseModel):
+    """API-facing shape of one dashboard insight (app.insights.models.Insight,
+    serialized). `title`/`message`/`suggestion` arrive already localized
+    from the backend -- the frontend never translates insight content
+    itself, only the surrounding chrome (see app.localization)."""
+
+    id: str
+    category: str
+    severity: Literal["info", "warning", "critical", "positive"]
+    tier: Literal["primary", "secondary"]
+    title: str
+    message: str
+    suggestion: str | None
+    metric: InsightMetricResponse | None
+    related_entity: InsightRelatedEntityResponse | None
+    cta: InsightCtaResponse | None
+
+
+class DashboardInsightsResponse(BaseModel):
+    generated_at: datetime
+    # "deterministic" when AI narration was unavailable/disabled/invalid;
+    # "ai_enhanced" when the AI's rewrite+ranking passed validation and was
+    # applied. Purely informational -- the frontend renders identically
+    # either way.
+    source: Literal["deterministic", "ai_enhanced"]
+    # Whether AI enhancement is actually configured for this deployment --
+    # drives whether the frontend shows a "Refresh insights" button at all.
+    ai_available: bool
+    insights: list[InsightResponse]
+
+
+class InsightNarrationEntry(BaseModel):
+    """One insight's AI-rewritten text. Deliberately has NO numeric field
+    of any kind -- title/message/suggestion are free text only, so the
+    model is structurally incapable of injecting a new figure, not merely
+    discouraged from it by prompt. extra="forbid" rejects the whole
+    response if a model tries to sneak in e.g. a "metric" or "value" field
+    anyway."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=INSIGHTS_MAX_TITLE_LENGTH)
+    message: str = Field(min_length=1, max_length=INSIGHTS_MAX_MESSAGE_LENGTH)
+    suggestion: str | None = Field(default=None, max_length=INSIGHTS_MAX_SUGGESTION_LENGTH)
+
+
+class InsightNarrationResponse(BaseModel):
+    """The AI narration tool's full argument schema -- see
+    app/insights/narration.py. Every `id` referenced here (in ranked_ids or
+    in a narration entry) is checked against the deterministic engine's own
+    known-id set for THIS request; any unknown id invalidates the whole
+    response and the caller falls back to fully deterministic output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ranked_ids: list[str] = Field(max_length=32)
+    narration: list[InsightNarrationEntry] = Field(max_length=32)
 
 
 class CustomerResponse(BaseModel):

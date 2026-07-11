@@ -35,7 +35,26 @@ _DEV_FALLBACK_MODEL = {
 _DEFAULT_PROVIDER = "anthropic"
 
 
-def get_ai_provider() -> AIProvider:
+def is_ai_configured() -> bool:
+    """Cheap check for whether get_ai_provider() would currently succeed --
+    no provider object is constructed, no exception is raised. Used by
+    callers that need to know AI availability without necessarily calling
+    it this request (e.g. app/routers/insights.py deciding whether to
+    advertise a "Refresh insights" action at all, even on a narration
+    cache hit where get_ai_provider() is never actually called)."""
+    provider_name = (os.environ.get("AI_PROVIDER") or _DEFAULT_PROVIDER).strip().lower()
+    if provider_name not in _PROVIDER_API_KEY_ENV_VARS:
+        return False
+
+    api_key = os.environ.get(_PROVIDER_API_KEY_ENV_VARS[provider_name])
+    model = os.environ.get("AI_MODEL")
+    if not model and ENVIRONMENT != "production":
+        model = _DEV_FALLBACK_MODEL[provider_name]
+
+    return bool(api_key) and bool(model)
+
+
+def get_ai_provider(*, timeout_seconds: float | None = None) -> AIProvider:
     """Resolves the configured AI provider. Called explicitly inside a
     route body (not as a FastAPI Depends parameter) — like
     get_email_sender(), so that cheaper checks (auth, org membership, email
@@ -45,6 +64,13 @@ def get_ai_provider() -> AIProvider:
     AI is optional infrastructure, like email: missing or invalid
     configuration doesn't stop the app from booting, it just makes this
     call raise a clean 503 when actually invoked.
+
+    `timeout_seconds` overrides AI_REQUEST_TIMEOUT_SECONDS for call sites
+    with a tighter budget than the assistant chat's default 30s -- e.g.
+    the dashboard insights narration call (app/insights/narration.py),
+    which sits on the critical path of a page load rather than a chat the
+    user is already waiting on. Every existing caller that doesn't pass
+    this keeps behaving exactly as before.
     """
     provider_name = (os.environ.get("AI_PROVIDER") or _DEFAULT_PROVIDER).strip().lower()
 
@@ -112,17 +138,19 @@ def get_ai_provider() -> AIProvider:
         model,
     )
 
+    resolved_timeout = timeout_seconds if timeout_seconds is not None else AI_REQUEST_TIMEOUT_SECONDS
+
     if provider_name == "gemini":
         return GeminiProvider(
             api_key=api_key,
             model=model,
             max_output_tokens=AI_MAX_OUTPUT_TOKENS,
-            timeout_seconds=AI_REQUEST_TIMEOUT_SECONDS,
+            timeout_seconds=resolved_timeout,
         )
 
     return AnthropicProvider(
         api_key=api_key,
         model=model,
         max_output_tokens=AI_MAX_OUTPUT_TOKENS,
-        timeout_seconds=AI_REQUEST_TIMEOUT_SECONDS,
+        timeout_seconds=resolved_timeout,
     )

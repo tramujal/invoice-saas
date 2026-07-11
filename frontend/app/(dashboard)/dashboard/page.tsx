@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { BusinessInsightsSection } from "@/components/dashboard/BusinessInsightsSection";
 import { CurrencySelector } from "@/components/dashboard/CurrencySelector";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { InvoiceVolumeChart } from "@/components/dashboard/InvoiceVolumeChart";
@@ -132,6 +133,8 @@ export default function DashboardPage() {
           t={t}
         />
       </header>
+
+      <BusinessInsightsSection />
 
       {error ? (
         <div

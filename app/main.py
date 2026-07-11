@@ -13,6 +13,7 @@ from app.routers import (
     customer_imports,
     customers,
     dashboard,
+    insights,
     invoices,
     organizations,
 )
@@ -70,6 +71,7 @@ app.include_router(invoices.router)
 app.include_router(customers.router)
 app.include_router(customer_imports.router)
 app.include_router(dashboard.router)
+app.include_router(insights.router)
 app.include_router(organizations.router)
 app.include_router(assistant.router)
 app.include_router(assistant_actions.router)

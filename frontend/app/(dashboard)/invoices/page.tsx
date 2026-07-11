@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 
 import { PaymentStatusSelect } from "@/components/invoices/PaymentStatusSelect";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
@@ -77,9 +78,11 @@ function computeCreatedAfter(preset: DateRangePreset): string | null {
   return start.toISOString();
 }
 
-export default function InvoicesPage() {
+function InvoicesContent() {
   const toast = useToast();
   const { t } = useTranslation();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState<PaginatedInvoices | null>(null);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -160,6 +163,20 @@ export default function InvoicesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A dashboard insight's "View overdue invoices" / "Review pending
+  // invoices" CTA links here with ?status=overdue|pending prefilled --
+  // read it once on mount, then strip it from the URL so a later manual
+  // refresh of this page doesn't keep re-applying it over a filter the
+  // user has since changed.
+  useEffect(() => {
+    const status = searchParams.get("status");
+    if (status && isPaymentStatus(status)) {
+      resetToFirstPage(setPaymentStatus)(status);
+      router.replace("/invoices");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function resetFilters() {
     setSearch("");
@@ -515,5 +532,13 @@ export default function InvoicesPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+export default function InvoicesPage() {
+  return (
+    <Suspense fallback={null}>
+      <InvoicesContent />
+    </Suspense>
   );
 }
