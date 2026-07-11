@@ -31,3 +31,15 @@ AI_MAX_HISTORY_TOTAL_CHARS = int(os.environ.get("AI_MAX_HISTORY_TOTAL_CHARS", "8
 # close to this in practice — it's a belt-and-suspenders cap, not the
 # primary control.
 AI_MAX_CONTEXT_CHARS = int(os.environ.get("AI_MAX_CONTEXT_CHARS", "6000"))
+
+# Maximum line items the AI's create_invoice_draft tool will accept in one
+# proposal — same purpose as every other AI_MAX_* cap: a defensive ceiling
+# independent of whatever the model or a malicious client tries to send.
+# Per-line amount limits are already enforced by InvoiceLineItemCreate's
+# own field constraints (app/schemas.py), reused as-is by the tool.
+AI_MAX_LINE_ITEMS = int(os.environ.get("AI_MAX_LINE_ITEMS", "20"))
+
+# How long an AI-proposed action stays confirmable before it silently
+# expires. Short on purpose — a proposal is only ever meant to be
+# confirmed within the same live chat session, not saved for later.
+ASSISTANT_ACTION_TTL_SECONDS = int(os.environ.get("ASSISTANT_ACTION_TTL_SECONDS", "600"))

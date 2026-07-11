@@ -21,6 +21,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_user_email_verified_at(engine)
     _add_email_verification_tokens_table(engine)
     _add_customer_tax_id(engine)
+    _add_assistant_actions_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -281,6 +282,35 @@ def _add_customer_tax_id(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(
             text("ALTER TABLE customers ADD COLUMN tax_id VARCHAR(64) NOT NULL DEFAULT ''")
+        )
+
+
+def _add_assistant_actions_table(engine: Engine) -> None:
+    """Creates assistant_actions if it's missing — same idempotent safety
+    net as _add_password_reset_tokens_table/_add_email_verification_tokens_table,
+    for the same reason (Base.metadata.create_all() already creates this
+    table on a fresh database since AssistantAction is a declared model)."""
+    inspector = inspect(engine)
+    if "assistant_actions" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS assistant_actions ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "user_id CHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "action_name VARCHAR(64) NOT NULL, "
+                "input_payload TEXT NOT NULL, "
+                "summary TEXT NOT NULL, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'proposed', "
+                "failure_code VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "executed_at TIMESTAMP NULL"
+                ")"
+            )
         )
 
 

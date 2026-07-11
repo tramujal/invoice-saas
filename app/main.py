@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.models import init_db
 from app.routers import (
     assistant,
+    assistant_actions,
     auth,
     customer_imports,
     customers,
@@ -71,3 +72,4 @@ app.include_router(customer_imports.router)
 app.include_router(dashboard.router)
 app.include_router(organizations.router)
 app.include_router(assistant.router)
+app.include_router(assistant_actions.router)

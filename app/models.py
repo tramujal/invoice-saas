@@ -9,11 +9,13 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
 from app.payment_status import PaymentStatus
 from app.schema_migrations import run_startup_migrations
@@ -239,6 +241,48 @@ class InvoiceLineItem(Base):
     line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
 
     invoice: Mapped["Invoice"] = relationship(back_populates="line_items")
+
+
+class AssistantAction(Base):
+    """A single AI-proposed business action: its lifecycle (proposed ->
+    executed/cancelled/expired/failed) IS the audit trail — there is
+    deliberately no separate audit-log table. `input_payload` holds the
+    already-validated, already-resolved tool input (e.g. a resolved
+    customer_id, never a raw model-provided name or an unvalidated
+    argument) as a JSON string; `summary` holds the safe, user-facing
+    values shown at proposal time and re-shown identically at confirm
+    time. Neither ever contains API keys, prompts, or raw conversation
+    text — see app/ai/tools/.
+    """
+
+    __tablename__ = "assistant_actions"
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    action_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=AssistantActionStatus.proposed.value,
+        server_default=AssistantActionStatus.proposed.value,
+    )
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 def init_db() -> None:

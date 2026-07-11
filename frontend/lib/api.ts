@@ -4,6 +4,7 @@ import {
   getAuthToken,
   getOrganizationId,
 } from "@/lib/auth-storage";
+import type { AssistantActionCancelResponse, AssistantActionConfirmResponse } from "@/lib/types";
 
 export class ApiError extends Error {
   constructor(
@@ -214,4 +215,29 @@ export function orgPath(segment: string = ""): string {
   if (!orgId) throw new ApiError("Organization is not configured", 0);
   const s = segment.startsWith("/") ? segment.slice(1) : segment;
   return s ? `/organizations/${orgId}/${s}` : `/organizations/${orgId}`;
+}
+
+/**
+ * Confirms (executes) or cancels an AI-proposed action. The request body
+ * is intentionally empty in both cases — every business detail was
+ * already validated and resolved server-side when the proposal was
+ * created; the client only ever references it by id. See
+ * app/routers/assistant_actions.py.
+ */
+export async function confirmAssistantAction(
+  proposalId: string
+): Promise<AssistantActionConfirmResponse> {
+  return apiFetch<AssistantActionConfirmResponse>(
+    orgPath(`assistant/actions/${proposalId}/confirm`),
+    { method: "POST" }
+  );
+}
+
+export async function cancelAssistantAction(
+  proposalId: string
+): Promise<AssistantActionCancelResponse> {
+  return apiFetch<AssistantActionCancelResponse>(
+    orgPath(`assistant/actions/${proposalId}/cancel`),
+    { method: "POST" }
+  );
 }

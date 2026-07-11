@@ -4,13 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { ActionProposalCard } from "@/components/assistant/ActionProposalCard";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetchStream, orgPath } from "@/lib/api";
+import { assistantErrorMessageForCode } from "@/lib/assistant-errors";
 import { isEmailNotVerifiedError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-
-type Role = "user" | "assistant";
-type ChatMessage = { role: Role; content: string };
+import type { AssistantChatMessage, AssistantStreamEvent } from "@/lib/types";
 
 // Mirrors the backend's AI_MAX_HISTORY_MESSAGES default (app/ai/limits.py)
 // so we never even try to send more than the server will accept.
@@ -54,9 +54,10 @@ const markdownComponents: Components = {
 export default function AssistantPage() {
   const { t } = useTranslation();
   const toast = useToast();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isAwaitingFirstEvent, setIsAwaitingFirstEvent] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -74,21 +75,83 @@ export default function AssistantPage() {
     abortRef.current?.abort();
   }
 
+  function updateProposalMessage(
+    proposalId: string,
+    patch: Partial<Extract<AssistantChatMessage, { kind: "proposal" }>>
+  ) {
+    setMessages((prev) =>
+      prev.map((m) => (m.kind === "proposal" && m.proposalId === proposalId ? { ...m, ...patch } : m))
+    );
+  }
+
   async function sendMessage() {
     const text = input.trim();
     if (!text || isStreaming) return;
 
     setInput("");
-    const history = messages.slice(-MAX_HISTORY_MESSAGES);
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: text },
-      { role: "assistant", content: "" },
-    ]);
+    const history = messages
+      .filter((m): m is Extract<AssistantChatMessage, { kind: "text" }> => m.kind === "text")
+      .slice(-MAX_HISTORY_MESSAGES)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    setMessages((prev) => [...prev, { kind: "text", role: "user", content: text }]);
     setIsStreaming(true);
+    setIsAwaitingFirstEvent(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
+
+    // Tracks the array index of the assistant text bubble currently being
+    // filled in by text_delta events, if any — a plain closure variable
+    // (not React state), reset to null whenever a proposal/clarification
+    // event starts a new message, so any text that follows one in the
+    // same turn opens a fresh bubble after it rather than merging into it.
+    let currentTextIndex: number | null = null;
+
+    function handleEvent(event: AssistantStreamEvent) {
+      if (event.type === "text_delta") {
+        if (!event.text) return;
+        setMessages((prev) => {
+          const existing = currentTextIndex !== null ? prev[currentTextIndex] : undefined;
+          if (existing !== undefined && existing.kind === "text" && existing.role === "assistant") {
+            const next = [...prev];
+            next[currentTextIndex as number] = {
+              ...existing,
+              content: existing.content + event.text,
+            };
+            return next;
+          }
+          const next: AssistantChatMessage[] = [
+            ...prev,
+            { kind: "text", role: "assistant", content: event.text },
+          ];
+          currentTextIndex = next.length - 1;
+          return next;
+        });
+      } else if (event.type === "action_proposal") {
+        currentTextIndex = null;
+        setMessages((prev) => [
+          ...prev,
+          {
+            kind: "proposal",
+            proposalId: event.proposal_id,
+            action: event.action,
+            summary: event.summary,
+            expiresAt: event.expires_at,
+            status: "pending",
+          },
+        ]);
+      } else if (event.type === "clarification_needed") {
+        currentTextIndex = null;
+        setMessages((prev) => [
+          ...prev,
+          { kind: "clarification", code: event.code, candidates: event.candidates },
+        ]);
+      } else if (event.type === "error") {
+        currentTextIndex = null;
+        toast.error(assistantErrorMessageForCode(t, event.code));
+      }
+    }
 
     try {
       const response = await apiFetchStream(orgPath("assistant/chat"), {
@@ -100,26 +163,41 @@ export default function AssistantPage() {
       if (!reader) throw new Error("Streaming is not supported in this browser.");
 
       const decoder = new TextDecoder();
-      let accumulated = "";
+      let buffer = "";
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        accumulated += decoder.decode(value, { stream: true });
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: "assistant", content: accumulated };
-          return next;
-        });
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          setIsAwaitingFirstEvent(false);
+          try {
+            handleEvent(JSON.parse(line) as AssistantStreamEvent);
+          } catch {
+            // Malformed NDJSON line -- skip rather than crash the stream.
+          }
+        }
+      }
+      if (buffer.trim()) {
+        setIsAwaitingFirstEvent(false);
+        try {
+          handleEvent(JSON.parse(buffer) as AssistantStreamEvent);
+        } catch {
+          // Malformed trailing fragment -- ignore.
+        }
       }
     } catch (err) {
       const isAbort = err instanceof DOMException && err.name === "AbortError";
       if (!isAbort) {
-        // Every error here happens before any streaming starts (see
-        // app/routers/assistant.py — auth/rate-limit/config checks all
-        // run before the response begins), so it's safe to drop the
-        // optimistic empty exchange rather than leave a dangling bubble.
-        setMessages((prev) => prev.slice(0, -2));
+        // Every error caught here happens before any streaming starts
+        // (see app/routers/assistant.py — auth/rate-limit/config checks
+        // all run before the response begins), so only the optimistic
+        // user message needs to be rolled back, never any assistant-side
+        // message (none can exist yet at this point).
+        setMessages((prev) => prev.slice(0, -1));
         if (isEmailNotVerifiedError(err)) {
           toast.error(t("errors.emailNotVerified"));
         } else if (isRateLimitedError(err)) {
@@ -134,6 +212,7 @@ export default function AssistantPage() {
       }
     } finally {
       setIsStreaming(false);
+      setIsAwaitingFirstEvent(false);
       abortRef.current = null;
     }
   }
@@ -144,12 +223,6 @@ export default function AssistantPage() {
       void sendMessage();
     }
   }
-
-  const isThinking =
-    isStreaming &&
-    messages.length > 0 &&
-    messages[messages.length - 1].role === "assistant" &&
-    messages[messages.length - 1].content === "";
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-6rem)] max-w-4xl flex-col gap-4">
@@ -187,36 +260,56 @@ export default function AssistantPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
-                      message.role === "user"
-                        ? "bg-slate-900 text-white"
-                        : "bg-surface-muted text-slate-900"
-                    }`}
-                  >
-                    {message.role === "assistant" ? (
-                      message.content ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {message.content}
-                        </ReactMarkdown>
-                      ) : isThinking && index === messages.length - 1 ? (
-                        <span className="inline-flex items-center gap-1 text-slate-500">
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.2s]" />
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0.2s]" />
-                        </span>
-                      ) : null
+              {messages.map((message, index) => {
+                const isUser = message.kind === "text" && message.role === "user";
+                return (
+                  <div key={index} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+                    {message.kind === "text" ? (
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+                          isUser ? "bg-slate-900 text-white" : "bg-surface-muted text-slate-900"
+                        }`}
+                      >
+                        {message.role === "assistant" ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                            {message.content}
+                          </ReactMarkdown>
+                        ) : (
+                          <p className="whitespace-pre-wrap">{message.content}</p>
+                        )}
+                      </div>
+                    ) : message.kind === "proposal" ? (
+                      <ActionProposalCard
+                        message={message}
+                        onStateChange={(patch) => updateProposalMessage(message.proposalId, patch)}
+                      />
                     ) : (
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <div className="max-w-[85%] rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        <p className="font-semibold">{t("assistant.clarification.title")}</p>
+                        <p className="mt-1 text-xs">
+                          {t("assistant.clarification.ambiguousCustomerHint")}
+                        </p>
+                        <ul className="mt-2 list-disc space-y-0.5 pl-5">
+                          {message.candidates.map((name) => (
+                            <li key={name}>{name}</li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
                   </div>
+                );
+              })}
+              {isAwaitingFirstEvent ? (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-2xl bg-surface-muted px-4 py-2.5 text-sm text-slate-900">
+                    <span className="inline-flex items-center gap-1 text-slate-500">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.2s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0.2s]" />
+                    </span>
+                  </div>
                 </div>
-              ))}
+              ) : null}
               <div ref={bottomRef} />
             </div>
           )}

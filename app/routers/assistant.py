@@ -1,20 +1,28 @@
 import hashlib
+import json
 import logging
 import time
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.ai.base import AIProviderError, AIProviderTimeoutError, ChatMessage
+from app.ai.base import AIProviderError, AIProviderTimeoutError, ChatMessage, TextDelta, ToolInvocation
 from app.ai.factory import get_ai_provider
+from app.ai.limits import ASSISTANT_ACTION_TTL_SECONDS
 from app.ai.prompts import ASSISTANT_SYSTEM_PROMPT
+from app.ai.tools.registry import TOOL_REGISTRY, tool_definitions
+from app.ai.tools.types import ActionToolError, AmbiguousCustomerError
+from app.assistant_action_status import AssistantActionStatus
 from app.assistant_context import build_business_context, format_business_context_as_text
 from app.database import get_db
 from app.deps import get_current_user, require_org_member, require_verified_email
-from app.models import User
+from app.models import AssistantAction, User
 from app.rate_limit import (
+    RATE_LIMIT_CODE,
     RateLimitCheck,
     RateLimitRule,
     enforce_rate_limit,
@@ -35,6 +43,12 @@ router = APIRouter(
 # switching IPs, and a user+IP bucket for single-source abuse.
 ASSISTANT_CHAT_RULES = (RateLimitRule(limit=20, window_seconds=3600),)
 
+# Tighter than plain chat and only ever consumed on the branch where the
+# model actually calls a tool (see _handle_tool_invocation) -- proposing a
+# business action is more consequential than an ordinary Q&A turn, so it
+# gets its own, smaller budget rather than sharing ASSISTANT_CHAT_RULES.
+ASSISTANT_ACTION_PROPOSE_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
 GENERIC_PROVIDER_ERROR_MESSAGE = (
     "The assistant is temporarily unavailable. Please try again later."
 )
@@ -48,6 +62,13 @@ def _hash_for_log(value: str) -> str:
     non-reversible fingerprint, matching app.rate_limit's own logging
     convention."""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _ndjson(payload: dict) -> bytes:
+    """Serializes one NDJSON event line. Every event the client can ever
+    receive is one of: text_delta, action_proposal, clarification_needed,
+    error -- see the frontend's assistant page for the matching parser."""
+    return (json.dumps(payload) + "\n").encode("utf-8")
 
 
 @router.post("/chat")
@@ -113,7 +134,9 @@ def assistant_chat(
     # which is the best this can do once a 200 has actually been sent.
     start = time.monotonic()
     try:
-        stream_iterator = ai_provider.stream_complete(system_prompt, messages)
+        stream_iterator = ai_provider.stream_complete(
+            system_prompt, messages, tools=tool_definitions()
+        )
     except AIProviderTimeoutError:
         logger.warning(
             "assistant_chat: provider timed out before streaming began "
@@ -139,13 +162,135 @@ def assistant_chat(
             detail={"code": "ai_provider_error", "message": GENERIC_PROVIDER_ERROR_MESSAGE},
         )
 
+    def _handle_tool_invocation(event: ToolInvocation) -> Iterator[bytes]:
+        """Turns a single ToolInvocation into either an action_proposal, a
+        clarification_needed, or an error NDJSON event. Never executes
+        anything -- only ever inserts a `proposed` AssistantAction row.
+        Provider output (event.arguments) is treated as fully untrusted
+        until the tool's own Pydantic input_schema validates it."""
+        tool = TOOL_REGISTRY.get(event.name)
+        if tool is None:
+            logger.warning(
+                "assistant_chat: model called unknown tool=%s org_hash=%s user_hash=%s",
+                event.name,
+                org_hash,
+                user_hash,
+            )
+            yield _ndjson({"type": "error", "code": "assistant_action_invalid"})
+            return
+
+        # Only ever consumed on this branch (an actual tool call), never
+        # for plain-text turns -- see ASSISTANT_ACTION_PROPOSE_RULES.
+        try:
+            enforce_rate_limit(
+                [
+                    RateLimitCheck(
+                        scope="assistant:action_propose:user",
+                        identity=user_identity(current_user.id),
+                        rules=ASSISTANT_ACTION_PROPOSE_RULES,
+                    ),
+                    RateLimitCheck(
+                        scope="assistant:action_propose:user_ip",
+                        identity=user_ip_identity(request, current_user.id),
+                        rules=ASSISTANT_ACTION_PROPOSE_RULES,
+                    ),
+                ]
+            )
+        except HTTPException as exc:
+            # enforce_rate_limit normally raises before any response has
+            # been sent; here we're already mid-stream, so a 429 can't be
+            # sent as a fresh HTTP status -- surface it as an error event
+            # instead, using the same stable code.
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            yield _ndjson({"type": "error", "code": detail.get("code", RATE_LIMIT_CODE)})
+            return
+
+        try:
+            proposal = tool.build_proposal(db, organization_id, current_user, event.arguments)
+        except AmbiguousCustomerError as exc:
+            yield _ndjson(
+                {
+                    "type": "clarification_needed",
+                    "code": exc.code,
+                    "candidates": exc.candidate_names,
+                }
+            )
+            return
+        except ActionToolError as exc:
+            yield _ndjson({"type": "error", "code": exc.code})
+            return
+        except ValidationError:
+            # The model's tool call didn't match the tool's own input
+            # schema -- never executed, never persisted.
+            logger.warning(
+                "assistant_chat: invalid tool arguments for tool=%s org_hash=%s user_hash=%s",
+                tool.name,
+                org_hash,
+                user_hash,
+            )
+            yield _ndjson({"type": "error", "code": "assistant_action_invalid"})
+            return
+
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=ASSISTANT_ACTION_TTL_SECONDS)
+        action = AssistantAction(
+            organization_id=organization_id,
+            user_id=current_user.id,
+            action_name=tool.name,
+            input_payload=json.dumps(proposal.resolved_input),
+            summary=json.dumps(proposal.summary),
+            status=AssistantActionStatus.proposed.value,
+            expires_at=expires_at,
+        )
+        db.add(action)
+        db.commit()
+        db.refresh(action)
+
+        logger.info(
+            "assistant_chat: proposal created action_id=%s action_name=%s "
+            "org_hash=%s user_hash=%s",
+            action.id,
+            tool.name,
+            org_hash,
+            user_hash,
+        )
+        yield _ndjson(
+            {
+                "type": "action_proposal",
+                "proposal_id": action.id,
+                "action": tool.name,
+                "summary": proposal.summary,
+                "expires_at": expires_at.isoformat(),
+            }
+        )
+
     def generate() -> Iterator[bytes]:
         # Never logs prompts, business context, or conversation content --
         # only identity hashes, provider/model, duration, success/failure,
         # and token usage if the provider returned it.
+        tool_call_handled = False
         try:
-            for chunk in stream_iterator:
-                yield chunk.encode("utf-8")
+            for event in stream_iterator:
+                if isinstance(event, TextDelta):
+                    if event.text:
+                        yield _ndjson({"type": "text_delta", "text": event.text})
+                elif isinstance(event, ToolInvocation):
+                    if tool_call_handled:
+                        # At most one proposal per user turn -- a model
+                        # that calls more than one tool in the same reply
+                        # has any call after the first logged and dropped,
+                        # never turned into a second proposal.
+                        logger.warning(
+                            "assistant_chat: dropping extra tool call=%s in same turn "
+                            "org_hash=%s user_hash=%s",
+                            event.name,
+                            org_hash,
+                            user_hash,
+                        )
+                        continue
+                    tool_call_handled = True
+                    yield from _handle_tool_invocation(event)
+
             duration = time.monotonic() - start
             usage = getattr(ai_provider, "last_usage", None)
             logger.info(
@@ -161,15 +306,15 @@ def assistant_chat(
         except AIProviderTimeoutError:
             # Can only happen once streaming has already started (the
             # eager check above catches the common case); the best a
-            # streaming response can do at this point is append a plain
-            # explanation to what's already been sent.
+            # streaming response can do at this point is append an error
+            # event to what's already been sent.
             logger.warning(
                 "assistant_chat: timeout mid-stream org_hash=%s user_hash=%s duration=%.2fs",
                 org_hash,
                 user_hash,
                 time.monotonic() - start,
             )
-            yield f"\n\n{GENERIC_TIMEOUT_ERROR_MESSAGE}".encode("utf-8")
+            yield _ndjson({"type": "error", "code": "ai_timeout"})
         except AIProviderError:
             logger.error(
                 "assistant_chat: provider error mid-stream org_hash=%s user_hash=%s duration=%.2fs",
@@ -177,6 +322,6 @@ def assistant_chat(
                 user_hash,
                 time.monotonic() - start,
             )
-            yield f"\n\n{GENERIC_PROVIDER_ERROR_MESSAGE}".encode("utf-8")
+            yield _ndjson({"type": "error", "code": "ai_provider_error"})
 
-    return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
+    return StreamingResponse(generate(), media_type="application/x-ndjson")

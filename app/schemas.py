@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -461,6 +461,21 @@ class AssistantChatRequest(BaseModel):
         if total_chars > AI_MAX_HISTORY_TOTAL_CHARS:
             raise ValueError("Conversation history is too large.")
         return value
+
+
+class AssistantActionConfirmResponse(BaseModel):
+    """Response from POST .../assistant/actions/{proposal_id}/confirm.
+    `summary` is the tool's safe, user-facing result -- never a raw ORM
+    object or anything containing an internal id beyond what the action
+    itself already surfaces (e.g. an invoice number)."""
+
+    status: Literal["executed"]
+    action: str
+    summary: dict[str, Any]
+
+
+class AssistantActionCancelResponse(BaseModel):
+    status: Literal["cancelled"]
 
 
 class ImportPreviewRowResult(BaseModel):

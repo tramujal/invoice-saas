@@ -17,7 +17,16 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
-from app.ai.base import AIProvider, AIProviderError, AIProviderTimeoutError, ChatMessage
+from app.ai.base import (
+    AIProvider,
+    AIProviderError,
+    AIProviderTimeoutError,
+    ChatMessage,
+    StreamEvent,
+    TextDelta,
+    ToolDefinition,
+    ToolInvocation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +54,39 @@ class GeminiProvider(AIProvider):
         # logging line never needs to know which provider produced it.
         self.last_usage: dict[str, int | None] | None = None
 
-    def stream_complete(self, system: str, messages: list[ChatMessage]) -> Iterator[str]:
+    def stream_complete(
+        self,
+        system: str,
+        messages: list[ChatMessage],
+        tools: list[ToolDefinition] = (),
+    ) -> Iterator[StreamEvent]:
         contents = [
             {"role": _to_gemini_role(m.role), "parts": [{"text": m.content}]}
             for m in messages
         ]
+        genai_tools = None
+        if tools:
+            # parameters_json_schema accepts a plain JSON Schema dict
+            # directly (Gemini API supports JSON Schema natively) --
+            # ToolDefinition.parameters (built from a Pydantic
+            # model_json_schema()) is passed through unchanged, exactly
+            # like AnthropicProvider's input_schema.
+            genai_tools = [
+                genai_types.Tool(
+                    function_declarations=[
+                        genai_types.FunctionDeclaration(
+                            name=t.name,
+                            description=t.description,
+                            parameters_json_schema=t.parameters,
+                        )
+                        for t in tools
+                    ]
+                )
+            ]
         config = genai_types.GenerateContentConfig(
             system_instruction=system,
             max_output_tokens=self.max_output_tokens,
+            tools=genai_tools,
             http_options=genai_types.HttpOptions(
                 # HttpOptions.timeout is in milliseconds.
                 timeout=int(self.timeout_seconds * 1000),
@@ -114,13 +148,13 @@ class GeminiProvider(AIProvider):
             )
             raise AIProviderError("Could not reach Gemini API") from exc
 
-        return self._iter_text_deltas(first_chunk, raw_stream)
+        return self._iter_events(first_chunk, raw_stream)
 
-    def _iter_text_deltas(
+    def _iter_events(
         self,
         first_chunk: genai_types.GenerateContentResponse | None,
         raw_stream: Iterator[genai_types.GenerateContentResponse],
-    ) -> Iterator[str]:
+    ) -> Iterator[StreamEvent]:
         def _chunks() -> Iterator[Any]:
             if first_chunk is not None:
                 yield first_chunk
@@ -134,9 +168,26 @@ class GeminiProvider(AIProvider):
                         "input_tokens": usage.prompt_token_count,
                         "output_tokens": usage.candidates_token_count,
                     }
-                text = chunk.text
-                if text:
-                    yield text
+
+                # Iterate parts directly (rather than chunk.text, which
+                # silently drops non-text parts) so a function_call part is
+                # never lost -- a single chunk's first candidate can carry
+                # a text part and a function_call part together, in order.
+                candidates = getattr(chunk, "candidates", None) or []
+                if not candidates:
+                    continue
+                content = candidates[0].content
+                parts = getattr(content, "parts", None) or []
+                for part in parts:
+                    function_call = getattr(part, "function_call", None)
+                    if function_call is not None and function_call.name:
+                        yield ToolInvocation(
+                            name=function_call.name, arguments=function_call.args or {}
+                        )
+                        continue
+                    text = getattr(part, "text", None)
+                    if text:
+                        yield TextDelta(text)
         except httpx.TimeoutException as exc:
             raise AIProviderTimeoutError("Gemini API stream timed out") from exc
         except genai_errors.APIError as exc:

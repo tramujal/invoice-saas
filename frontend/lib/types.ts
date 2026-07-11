@@ -212,3 +212,61 @@ export type DashboardAnalytics = {
   invoice_count_by_status: PaymentStatusCountPoint[];
   top_customers: TopCustomerRevenue[];
 };
+
+// --- AI assistant actions ----------------------------------------------
+//
+// The stable set of action names the backend currently registers (see
+// app/ai/tools/registry.py). Kept as a union rather than a bare `string`
+// so the proposal card can render a bespoke layout per known action while
+// still falling back generically for any future action name -- adding a
+// new backend tool never requires widening this union for the app to
+// keep working, only to get a bespoke layout.
+export type AssistantActionName =
+  | "create_invoice_draft"
+  | "update_invoice_status"
+  | "send_invoice_email";
+
+/** One NDJSON line from POST /organizations/{org}/assistant/chat. Plain
+ * prose streams as a sequence of text_delta events; a proposed action
+ * (never executed until the user confirms) streams as one action_proposal
+ * event; an ambiguous reference (e.g. two customers matching a name)
+ * streams as clarification_needed instead of guessing. */
+export type AssistantStreamEvent =
+  | { type: "text_delta"; text: string }
+  | {
+      type: "action_proposal";
+      proposal_id: string;
+      action: AssistantActionName | string;
+      summary: Record<string, unknown>;
+      expires_at: string;
+    }
+  | { type: "clarification_needed"; code: string; candidates: string[] }
+  | { type: "error"; code: string };
+
+/** Response from POST .../assistant/actions/{id}/confirm */
+export type AssistantActionConfirmResponse = {
+  status: "executed";
+  action: AssistantActionName | string;
+  summary: Record<string, unknown>;
+};
+
+/** Response from POST .../assistant/actions/{id}/cancel */
+export type AssistantActionCancelResponse = {
+  status: "cancelled";
+};
+
+/** Local, per-message shape the assistant page renders — a superset of
+ * the raw wire events above, since a proposal/clarification message also
+ * needs to track its own confirm/cancel UI state over time. */
+export type AssistantChatMessage =
+  | { kind: "text"; role: "user" | "assistant"; content: string }
+  | {
+      kind: "proposal";
+      proposalId: string;
+      action: AssistantActionName | string;
+      summary: Record<string, unknown>;
+      expiresAt: string;
+      status: "pending" | "executing" | "executed" | "cancelling" | "cancelled" | "error";
+      resultSummary?: Record<string, unknown>;
+    }
+  | { kind: "clarification"; code: string; candidates: string[] };

@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -6,15 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.currency import resolve_default_currency_code
 from app.database import get_db
 from app.deps import get_current_user, require_org_member, require_verified_email
-from app.email.base import EmailAttachment, EmailMessage, EmailSendError
-from app.email.factory import get_email_sender
-from app.email.templates import build_invoice_email
-from app.invoice_numbering import INVOICE_NUMBER_PREFIX, format_invoice_number
+from app.invoice_numbering import format_invoice_number, parse_invoice_number
 from app.invoice_pdf import render_invoice_pdf
-from app.models import Customer, Invoice, InvoiceLineItem, Organization, User
+from app.models import Customer, Invoice, User
 from app.payment_status import PaymentStatus
 from app.rate_limit import (
     SEND_INVOICE_EMAIL_RULES,
@@ -33,8 +28,17 @@ from app.schemas import (
     SendInvoiceEmailResponse,
     SortDirection,
 )
-
-logger = logging.getLogger(__name__)
+from app.services.invoices import (
+    CustomerEmailMissingError,
+    CustomerNotFoundInOrgError,
+    EmailSendFailedError,
+    InvoiceNotFoundError,
+    create_invoice_record,
+    get_customer_in_org,
+    get_invoice_in_org,
+    send_invoice_email_record,
+    update_invoice_payment_status_record,
+)
 
 router = APIRouter(prefix="/organizations/{organization_id}/invoices", tags=["invoices"])
 
@@ -46,15 +50,11 @@ _SORT_COLUMNS: dict[InvoiceSortField, ColumnElement] = {
 }
 
 
-def _invoice_number_match(search_term: str) -> int | None:
-    """Extracts an exact invoice number from a search term like "5",
-    "000005", or "INV-000005". Returns None if, after stripping an optional
-    INV- prefix, the term isn't purely numeric (e.g. it's a name search)."""
-    term = search_term.strip()
-    if term.lower().startswith(INVOICE_NUMBER_PREFIX.lower()):
-        term = term[len(INVOICE_NUMBER_PREFIX):]
-    term = term.lstrip("0") or "0"
-    return int(term) if term.isdigit() else None
+# Kept as a thin local alias (rather than importing parse_invoice_number
+# under two names) so existing call sites in this file don't need to
+# change; the actual logic lives in app.invoice_numbering, shared with the
+# AI assistant's invoice-lookup tools (see app/ai/tools/invoices.py).
+_invoice_number_match = parse_invoice_number
 
 
 def _build_invoice_query(
@@ -94,18 +94,17 @@ def _build_invoice_query(
 def _invoice_in_org(
     db: Session, organization_id: str, invoice_id: str
 ) -> Invoice:
-    invoice = db.scalar(
-        select(Invoice).where(
-            Invoice.id == invoice_id,
-            Invoice.organization_id == organization_id,
-        )
-    )
-    if invoice is None:
+    """Thin HTTP wrapper around the shared app.services.invoices lookup --
+    the actual query (and the AI assistant's identical lookup) lives there;
+    this only translates "not found" into this router's existing 404
+    shape so every call site below keeps working unchanged."""
+    try:
+        return get_invoice_in_org(db, organization_id, invoice_id)
+    except InvoiceNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",
         )
-    return invoice
 
 
 @router.get("", response_model=PaginatedInvoicesResponse)
@@ -208,68 +207,24 @@ def send_invoice_email(
     require_verified_email(current_user)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
 
-    customer = invoice.customer
-    if customer is None or not customer.email:
+    try:
+        return send_invoice_email_record(db, invoice)
+    except CustomerEmailMissingError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="This invoice has no customer email on file.",
         )
-
-    email_sender = get_email_sender()
-
-    pdf_bytes = render_invoice_pdf(invoice)
-    filename = f"{format_invoice_number(invoice.invoice_number)}.pdf"
-    subject, body = build_invoice_email(invoice, customer)
-
-    message = EmailMessage(
-        to=customer.email,
-        subject=subject,
-        text_body=body,
-        attachments=[EmailAttachment(filename=filename, content=pdf_bytes)],
-    )
-
-    logger.info(
-        "send_invoice_email: sending invoice email organization_id=%s "
-        "invoice_id=%s recipient=%s",
-        organization_id,
-        invoice_id,
-        customer.email,
-    )
-
-    try:
-        email_sender.send(message)
-    except EmailSendError as exc:
-        # Full exception detail (type, message, and — from resend_provider's
-        # own logger.exception call — a traceback plus the raw Resend
-        # status/body if one was received) is already logged at the source.
-        # This line adds the business context (which org/invoice/recipient)
-        # so the two log lines can be correlated. The client only ever gets
-        # a fixed, generic message — never str(exc), which previously
-        # leaked Resend's raw error text to the frontend.
-        logger.error(
-            "send_invoice_email: failed to send invoice email "
-            "organization_id=%s invoice_id=%s recipient=%s "
-            "exception_type=%s exception_message=%s",
-            organization_id,
-            invoice_id,
-            customer.email,
-            type(exc).__name__,
-            str(exc),
-        )
+    except EmailSendFailedError:
+        # The real failure (type, message, and — from resend_provider's own
+        # logger.exception call — a traceback plus the raw Resend
+        # status/body if one was received) is already logged inside
+        # send_invoice_email_record. The client only ever gets a fixed,
+        # generic message here — never the underlying exception text, which
+        # could leak the provider's raw error to the frontend.
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to send invoice email. Please try again later.",
-        ) from exc
-
-    logger.info(
-        "send_invoice_email: invoice email sent successfully "
-        "organization_id=%s invoice_id=%s recipient=%s",
-        organization_id,
-        invoice_id,
-        customer.email,
-    )
-
-    return SendInvoiceEmailResponse(sent=True, sent_to=customer.email)
+        )
 
 
 @router.patch("/{invoice_id}", response_model=InvoiceSummaryResponse)
@@ -282,14 +237,7 @@ def update_invoice_payment_status(
 ) -> Invoice:
     require_org_member(current_user, organization_id, db)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
-    invoice.payment_status = body.payment_status.value
-    db.commit()
-    db.refresh(invoice)
-    return invoice
-
-
-def _quantize_money(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"))
+    return update_invoice_payment_status_record(db, invoice, body.payment_status)
 
 
 @router.post("", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED)
@@ -302,77 +250,22 @@ def create_invoice(
     require_org_member(current_user, organization_id, db)
     require_verified_email(current_user)
 
-    customer_id = body.customer_id
     customer: Customer | None = None
-    if customer_id is not None:
-        customer = db.scalar(
-            select(Customer).where(
-                Customer.id == customer_id,
-                Customer.organization_id == organization_id,
-            )
-        )
-        if customer is None:
+    if body.customer_id is not None:
+        try:
+            customer = get_customer_in_org(db, organization_id, body.customer_id)
+        except CustomerNotFoundInOrgError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Customer not found in this organization",
             )
 
-    subtotal = Decimal("0")
-    line_models: list[InvoiceLineItem] = []
-    for line in body.line_items:
-        line_total = _quantize_money(line.quantity * line.unit_price)
-        subtotal += line_total
-        line_models.append(
-            InvoiceLineItem(
-                description=line.description,
-                quantity=line.quantity,
-                unit_price=_quantize_money(line.unit_price),
-                line_total=line_total,
-            )
-        )
-
-    subtotal = _quantize_money(subtotal)
-    tax_amount = _quantize_money(subtotal * body.tax_rate)
-    total = _quantize_money(subtotal + tax_amount)
-
-    # Locks the organization row so two concurrent invoice creations can't be
-    # handed the same next_invoice_number (a real row lock on Postgres; a
-    # harmless no-op on SQLite, which serializes writers itself).
-    organization = db.execute(
-        select(Organization).where(Organization.id == organization_id).with_for_update()
-    ).scalar_one()
-    invoice_number = organization.next_invoice_number
-    organization.next_invoice_number = invoice_number + 1
-
-    # Permanently pinned at creation time — an explicit currency_code
-    # overrides whatever resolve_default_currency_code() would have picked
-    # (today, always the organization's default; see that function's
-    # docstring for how a future customer preferred-currency plugs in here
-    # without touching this call site). Language has no override yet (per
-    # spec, "unless a future API explicitly overrides it"), so it always
-    # comes from the organization. Neither is ever re-derived from the
-    # organization later, so subsequent organization setting changes can't
-    # retroactively alter this invoice.
-    currency_code = (
-        body.currency_code.value
-        if body.currency_code
-        else resolve_default_currency_code(customer, organization)
+    return create_invoice_record(
+        db,
+        organization_id,
+        current_user,
+        customer,
+        body.currency_code,
+        body.line_items,
+        body.tax_rate,
     )
-    language = organization.language
-
-    invoice = Invoice(
-        organization_id=organization_id,
-        invoice_number=invoice_number,
-        created_by_user_id=current_user.id,
-        customer_id=customer_id,
-        subtotal=subtotal,
-        tax_amount=tax_amount,
-        total=total,
-        currency_code=currency_code,
-        language=language,
-        line_items=line_models,
-    )
-    db.add(invoice)
-    db.commit()
-    db.refresh(invoice)
-    return invoice
