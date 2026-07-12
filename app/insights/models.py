@@ -21,6 +21,7 @@ class InsightSeverity(str, Enum):
 class InsightCategory(str, Enum):
     revenue = "revenue"
     overdue = "overdue"
+    due_soon = "due_soon"
     pending = "pending"
     concentration = "concentration"
     inactivity = "inactivity"

@@ -58,7 +58,10 @@ from app.insights.models import (
     SEVERITY_RANK,
 )
 from app.insights.queries import (
+    DUE_SOON_WINDOW_DAYS,
     get_customers_missing_phone_count,
+    get_due_soon_invoice_details,
+    get_invoices_missing_due_date_count,
     get_invoices_without_customer_count,
     get_overdue_invoice_details,
 )
@@ -135,6 +138,7 @@ def build_insights(
     candidates: list[Insight] = []
     candidates.extend(_revenue_trend_insights(summary, language))
     candidates.extend(_overdue_insights(db, organization_id, summary, language))
+    candidates.extend(_due_soon_insights(db, organization_id, language))
     candidates.extend(_pending_insights(db, organization_id, summary, language))
     candidates.extend(_concentration_insights(summary, analytics, language))
 
@@ -384,6 +388,54 @@ def _overdue_insights(
                 ),
                 cta=InsightCta(type="view_overdue_invoices"),
                 priority_score=_severity_priority(severity, (ratio or 30.0) / 100),
+            )
+        )
+    return insights
+
+
+def _due_soon_insights(
+    db: Session, organization_id: str, language: str
+) -> list[Insight]:
+    """Unpaid invoices due within the next few days -- a distinct, lower-
+    urgency signal from _overdue_insights above, surfaced so a business can
+    follow up before something becomes overdue rather than only after."""
+    details = get_due_soon_invoice_details(db, organization_id)
+    if not details:
+        return []
+
+    by_currency: dict[str, list] = {}
+    for detail in details:
+        by_currency.setdefault(detail.currency_code, []).append(detail)
+
+    insights: list[Insight] = []
+    for code, rows in by_currency.items():
+        count = len(rows)
+        amount = sum((r.total for r in rows), Decimal("0"))
+        soonest = rows[0]  # already ordered soonest-first by the query
+
+        insights.append(
+            Insight(
+                id=f"due_soon:{code}",
+                category=InsightCategory.due_soon,
+                severity=InsightSeverity.info,
+                title=t(language, "insight_due_soon_title").format(count=count, currency=code),
+                message=t(language, "insight_due_soon_message").format(
+                    count=count,
+                    currency=code,
+                    amount=str(amount),
+                    days=DUE_SOON_WINDOW_DAYS,
+                    soonest_invoice=format_invoice_number(soonest.invoice_number),
+                    soonest_due_date=soonest.due_date.isoformat(),
+                ),
+                suggestion=t(language, "insight_due_soon_suggestion"),
+                metric=InsightMetric(currency_code=code, value=amount, percentage=None),
+                related_entity=InsightRelatedEntity(
+                    type="invoice",
+                    id=soonest.invoice_id,
+                    label=format_invoice_number(soonest.invoice_number),
+                ),
+                cta=InsightCta(type="view_due_soon_invoices"),
+                priority_score=_severity_priority(InsightSeverity.info, 0.2),
             )
         )
     return insights
@@ -681,6 +733,7 @@ def _data_quality_insight(
     invoices_without_customer = get_invoices_without_customer_count(db, organization_id)
     customers_missing_phone = get_customers_missing_phone_count(db, organization_id)
     never_invoiced = max(total_customers - len(last_invoice_at), 0)
+    invoices_missing_due_date = get_invoices_missing_due_date_count(db, organization_id)
 
     parts: list[tuple[str, int]] = []
     if invoices_without_customer > 0:
@@ -689,6 +742,8 @@ def _data_quality_insight(
         parts.append(("customers_missing_phone", customers_missing_phone))
     if never_invoiced > 0:
         parts.append(("customers_never_invoiced", never_invoiced))
+    if invoices_missing_due_date > 0:
+        parts.append(("invoices_missing_due_date", invoices_missing_due_date))
 
     if not parts:
         return None

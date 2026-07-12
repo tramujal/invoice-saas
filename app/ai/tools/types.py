@@ -75,3 +75,19 @@ class InvoiceNotFoundError(ActionToolError):
 
 class CustomerEmailMissingError(ActionToolError):
     code = "customer_email_missing"
+
+
+class RemindersDisabledError(ActionToolError):
+    code = "reminders_disabled"
+
+
+class InvoiceAlreadyPaidError(ActionToolError):
+    code = "invoice_already_paid"
+
+
+class InvoiceDueDateMissingError(ActionToolError):
+    code = "invoice_due_date_missing"
+
+
+class ReminderAlreadySentError(ActionToolError):
+    code = "reminder_already_sent"

@@ -1,11 +1,14 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     CHAR,
+    Boolean,
+    Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -18,6 +21,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
 from app.payment_status import PaymentStatus
+from app.reminder_status import ReminderStatus
+from app.reminder_type import ReminderType
 from app.schema_migrations import run_startup_migrations
 
 
@@ -49,6 +54,32 @@ class Organization(Base):
     )
     tax_label: Mapped[str] = mapped_column(
         String(32), nullable=False, default="Tax ID", server_default="Tax ID"
+    )
+    # IANA timezone identifier (e.g. "America/Montevideo") -- every due-date
+    # comparison in the app uses this, via app.org_time.get_organization_today,
+    # rather than the server's UTC date. Defaults to UTC, the only default
+    # that makes no assumption about where a business actually is.
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="UTC", server_default="UTC"
+    )
+    # Automatic payment reminders default OFF for every organization,
+    # including new ones -- automatically emailing a business's customers is
+    # exactly the kind of thing that should never turn on silently; see
+    # app/jobs/send_due_invoice_reminders.py.
+    reminders_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    # Comma-separated day-offset lists (e.g. "7,3,1") -- see
+    # app/reminder_settings.py for why this is a validated string rather
+    # than a native array column (SQLite has no portable array type).
+    reminder_before_due_days: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="3", server_default="3"
+    )
+    reminder_on_due_date: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    reminder_after_due_days: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="7", server_default="7"
     )
 
     members: Mapped[list["OrganizationMember"]] = relationship(
@@ -214,16 +245,39 @@ class Invoice(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # Nullable, never backfilled for pre-existing invoices (see
+    # app/effective_status.py's fallback rule for exactly why that's safe).
+    # A plain calendar date -- no time-of-day component, so comparisons
+    # against "today" are never ambiguous the way a datetime would be.
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="invoices")
     customer: Mapped["Customer | None"] = relationship(back_populates="invoices")
     line_items: Mapped[list["InvoiceLineItem"]] = relationship(
         back_populates="invoice", cascade="all, delete-orphan"
     )
+    reminders: Mapped[list["InvoiceReminder"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan"
+    )
 
     @property
     def customer_name(self) -> str | None:
         return self.customer.name if self.customer is not None else None
+
+    @property
+    def effective_payment_status(self) -> "PaymentStatus":
+        """The single source of truth every surface (API, PDF, email,
+        dashboard, insights, assistant) displays -- see
+        app.effective_status.get_effective_payment_status. Computed here,
+        as a plain property alongside customer_name, so it's included
+        automatically wherever an Invoice is serialized via
+        from_attributes, with no separate computation step at each call
+        site."""
+        from app.effective_status import get_effective_payment_status
+        from app.org_time import get_organization_today
+
+        today_local = get_organization_today(self.organization)
+        return get_effective_payment_status(self, today_local)
 
 
 class InvoiceLineItem(Base):
@@ -241,6 +295,74 @@ class InvoiceLineItem(Base):
     line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
 
     invoice: Mapped["Invoice"] = relationship(back_populates="line_items")
+
+
+class InvoiceReminder(Base):
+    """One reminder-delivery attempt -- this row's existence, keyed by the
+    unique constraint below, IS the idempotency guarantee: claiming a
+    reminder is inserting this row, and a conflicting insert (someone else
+    already claimed the same invoice/type/date) is how double-sends are
+    prevented under concurrency, not an in-memory check. See
+    app/services/invoices.py's claim/revalidate/send/update sequence and
+    app/jobs/send_due_invoice_reminders.py.
+
+    No email body is stored here -- only metadata needed for the audit
+    trail and for preventing duplicates. Never contains API keys.
+    """
+
+    __tablename__ = "invoice_reminders"
+    __table_args__ = (
+        UniqueConstraint(
+            "invoice_id",
+            "reminder_type",
+            "scheduled_for_date",
+            name="uq_invoice_reminder_idempotency",
+        ),
+        Index("ix_invoice_reminders_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+    reminder_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # e.g. 3 for "3 days before due", 7 for "7 days overdue"; null for
+    # due_today and manual reminders, where a day count isn't meaningful.
+    days_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Part of the uniqueness key -- the calendar date (organization-local)
+    # this reminder logically belongs to, not when it was actually sent.
+    scheduled_for_date: Mapped[date] = mapped_column(Date, nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=ReminderStatus.pending.value,
+        server_default=ReminderStatus.pending.value,
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Who initiated this reminder -- distinct from reminder_type (which
+    # describes *when* relative to the due date). "scheduled" for the
+    # nightly job; "manual_button"/"assistant" both use reminder_type
+    # "manual" and therefore share one idempotency slot per invoice per day.
+    triggered_by: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Reserved for future use -- EmailSender.send() doesn't currently
+    # return a provider message id, so this is always NULL today. Kept as
+    # a column now so a future EmailSender extension doesn't need a new
+    # migration.
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    organization: Mapped["Organization"] = relationship()
+    invoice: Mapped["Invoice"] = relationship(back_populates="reminders")
 
 
 class AssistantAction(Base):

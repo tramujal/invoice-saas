@@ -21,6 +21,7 @@ function titleForAction(t: TranslateFn, action: string): string {
   if (action === "create_invoice_draft") return t("assistant.action.createInvoiceDraft.title");
   if (action === "update_invoice_status") return t("assistant.action.updateInvoiceStatus.title");
   if (action === "send_invoice_email") return t("assistant.action.sendInvoiceEmail.title");
+  if (action === "send_payment_reminder") return t("assistant.action.sendPaymentReminder.title");
   return t("assistant.action.genericTitle");
 }
 
@@ -28,6 +29,7 @@ function confirmLabelForAction(t: TranslateFn, action: string): string {
   if (action === "create_invoice_draft") return t("assistant.action.confirmCreate");
   if (action === "update_invoice_status") return t("assistant.action.confirmChange");
   if (action === "send_invoice_email") return t("assistant.action.confirmSend");
+  if (action === "send_payment_reminder") return t("assistant.action.confirmSend");
   return t("assistant.action.genericConfirm");
 }
 
@@ -111,6 +113,34 @@ function renderSummary(t: TranslateFn, action: string, summary: Record<string, u
           label={t("assistant.action.recipientLabel")}
           value={String(summary.recipient_email ?? "")}
         />
+      </>
+    );
+  }
+
+  if (action === "send_payment_reminder") {
+    const daysUntilDue = summary.days_until_due;
+    const daysOverdue = summary.days_overdue;
+    return (
+      <>
+        <SummaryRow label={t("invoices.colInvoice")} value={String(summary.invoice_number ?? "")} />
+        <SummaryRow label={t("invoices.colCustomer")} value={String(summary.customer_name ?? "")} />
+        <SummaryRow
+          label={t("assistant.action.recipientLabel")}
+          value={String(summary.recipient_email ?? "")}
+        />
+        <SummaryRow label={t("invoices.colDueDate")} value={String(summary.due_date ?? "")} />
+        {typeof daysOverdue === "number" ? (
+          <SummaryRow
+            label={t("invoices.dueDate.overdueBy", { days: daysOverdue })}
+            value=""
+          />
+        ) : typeof daysUntilDue === "number" ? (
+          <SummaryRow
+            label={t("invoices.dueDate.inDays", { days: daysUntilDue })}
+            value=""
+          />
+        ) : null}
+        <SummaryRow label={t("invoices.colTotal")} value={String(summary.total ?? "")} bold />
       </>
     );
   }

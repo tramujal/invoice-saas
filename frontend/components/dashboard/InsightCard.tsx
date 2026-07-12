@@ -26,6 +26,8 @@ function ctaLabel(t: TranslateFn, cta: InsightCta): string {
   switch (cta.type) {
     case "view_overdue_invoices":
       return t("dashboard.insights.cta.viewOverdueInvoices");
+    case "view_due_soon_invoices":
+      return t("dashboard.insights.cta.viewDueSoonInvoices");
     case "review_pending_invoices":
       return t("dashboard.insights.cta.reviewPendingInvoices");
     case "create_invoice":

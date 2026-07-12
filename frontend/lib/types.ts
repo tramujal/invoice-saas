@@ -8,13 +8,19 @@ export type InvoiceSummary = {
   subtotal: string;
   tax_amount: string;
   total: string;
+  /** The raw, editable Pending/Paid toggle — see effective_payment_status
+   * for what to actually display. */
   payment_status: PaymentStatus;
+  /** Derived, read-only (due-date-aware) — the single source of truth to
+   * display everywhere (badge, list, dashboard). Never computed client-side. */
+  effective_payment_status: PaymentStatus;
   /** Permanently pinned at creation — never re-derived from the
    * organization's current currency. */
   currency_code: string;
   /** Permanently pinned at creation — never re-derived from the
    * organization's current language. */
   language: string;
+  due_date: string | null;
   created_at: string;
 };
 
@@ -103,9 +109,18 @@ export type InvoiceCreatedResponse = {
   tax_amount: string;
   total: string;
   payment_status: PaymentStatus;
+  effective_payment_status: PaymentStatus;
   currency_code: string;
   language: string;
+  due_date: string | null;
   line_items: InvoiceLineItemResponse[];
+};
+
+/** Response from POST /organizations/{org}/invoices/{id}/send-reminder */
+export type SendInvoiceReminderResponse = {
+  sent: boolean;
+  sent_to: string;
+  reminder_type: "before_due" | "due_today" | "after_due" | "manual";
 };
 
 export type AuthUser = {
@@ -153,6 +168,11 @@ export type OrganizationProfile = {
   language: string;
   currency_code: string;
   tax_label: string;
+  timezone: string;
+  reminders_enabled: boolean;
+  reminder_before_due_days: number[];
+  reminder_on_due_date: boolean;
+  reminder_after_due_days: number[];
 };
 
 /** Revenue figures for one currency — never combine across currencies
@@ -224,6 +244,7 @@ export type InsightTier = "primary" | "secondary";
 
 export type InsightCtaType =
   | "view_overdue_invoices"
+  | "view_due_soon_invoices"
   | "review_pending_invoices"
   | "create_invoice"
   | "ask_assistant";
@@ -279,7 +300,8 @@ export type DashboardInsightsResponse = {
 export type AssistantActionName =
   | "create_invoice_draft"
   | "update_invoice_status"
-  | "send_invoice_email";
+  | "send_invoice_email"
+  | "send_payment_reminder";
 
 /** One NDJSON line from POST /organizations/{org}/assistant/chat. Plain
  * prose streams as a sequence of text_delta events; a proposed action

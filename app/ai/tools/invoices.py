@@ -25,12 +25,17 @@ from app.ai.tools.types import (
     CustomerEmailMissingError,
     CustomerNotFoundError,
     ExecutionResult,
+    InvoiceAlreadyPaidError,
+    InvoiceDueDateMissingError,
     InvoiceNotFoundError,
     ProposalResult,
+    ReminderAlreadySentError,
+    RemindersDisabledError,
 )
-from app.currency import resolve_default_currency_code
+from app.currency import format_amount, get_currency_code, resolve_default_currency_code
 from app.invoice_numbering import format_invoice_number
 from app.models import Customer, Organization, User
+from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.schemas import CurrencyCode, InvoiceLineItemCreate
 from app.services.invoices import (
@@ -43,7 +48,22 @@ from app.services.invoices import (
     EmailSendFailedError as ServiceEmailSendFailedError,
 )
 from app.services.invoices import (
+    InvoiceAlreadyPaidError as ServiceInvoiceAlreadyPaidError,
+)
+from app.services.invoices import (
+    InvoiceDueDateMissingError as ServiceInvoiceDueDateMissingError,
+)
+from app.services.invoices import (
     InvoiceNotFoundError as ServiceInvoiceNotFoundError,
+)
+from app.services.invoices import (
+    ReminderAlreadySentError as ServiceReminderAlreadySentError,
+)
+from app.services.invoices import (
+    ReminderSendFailedError as ServiceReminderSendFailedError,
+)
+from app.services.invoices import (
+    RemindersDisabledError as ServiceRemindersDisabledError,
 )
 from app.services.invoices import (
     compute_invoice_totals,
@@ -51,6 +71,7 @@ from app.services.invoices import (
     get_customer_in_org,
     get_invoice_in_org,
     send_invoice_email_record,
+    send_manual_invoice_reminder,
     update_invoice_payment_status_record,
 )
 
@@ -328,6 +349,103 @@ class SendInvoiceEmailTool(ActionTool):
             raise CustomerEmailMissingError(resolved.invoice_id)
         except ServiceEmailSendFailedError as exc:
             raise ActionToolError("Failed to send invoice email.") from exc
+
+        return ExecutionResult(
+            summary={
+                "invoice_number": format_invoice_number(invoice.invoice_number),
+                "recipient_email": result.sent_to,
+            }
+        )
+
+
+# --- send_payment_reminder ---------------------------------------------------
+
+
+class SendPaymentReminderInput(BaseModel):
+    invoice_reference: str = Field(
+        min_length=1,
+        max_length=32,
+        description='The invoice number as shown to the user, e.g. "INV-000023", or its raw id.',
+    )
+
+
+class SendPaymentReminderResolved(BaseModel):
+    invoice_id: str
+
+
+class SendPaymentReminderTool(ActionTool):
+    name = "send_payment_reminder"
+    description = (
+        "Propose sending a payment reminder email for an existing, unpaid invoice "
+        "that has a due date on file, to its customer. The recipient is always the "
+        "email already on file for that invoice's customer -- there is no way to "
+        "choose a different recipient. Shares the same one-per-day limit as the "
+        "'Send reminder' button; nothing is sent until the user explicitly confirms."
+    )
+    input_schema = SendPaymentReminderInput
+    resolved_schema = SendPaymentReminderResolved
+
+    def build_proposal(
+        self, db: Session, organization_id: str, current_user: User, raw_input: dict[str, Any]
+    ) -> ProposalResult:
+        data = SendPaymentReminderInput.model_validate(raw_input)
+        invoice = _resolve_invoice(db, organization_id, data.invoice_reference)
+
+        organization = db.get(Organization, organization_id)
+        if organization is None or not organization.reminders_enabled:
+            raise RemindersDisabledError(organization_id)
+
+        if invoice.effective_payment_status == PaymentStatus.paid:
+            raise InvoiceAlreadyPaidError(invoice.id)
+
+        if invoice.due_date is None:
+            raise InvoiceDueDateMissingError(invoice.id)
+
+        customer = invoice.customer
+        if customer is None or not customer.email:
+            raise CustomerEmailMissingError(invoice.id)
+
+        today_local = get_organization_today(organization)
+        days_from_due = (invoice.due_date - today_local).days
+        currency_code = get_currency_code(invoice)
+
+        resolved = SendPaymentReminderResolved(invoice_id=invoice.id)
+        summary = {
+            "invoice_number": format_invoice_number(invoice.invoice_number),
+            "customer_name": customer.name,
+            "recipient_email": customer.email,
+            "due_date": invoice.due_date.isoformat(),
+            "days_until_due": days_from_due if days_from_due >= 0 else None,
+            "days_overdue": -days_from_due if days_from_due < 0 else None,
+            "total": format_amount(invoice.total, currency_code),
+        }
+        return ProposalResult(resolved_input=resolved.model_dump(mode="json"), summary=summary)
+
+    def execute(
+        self, db: Session, organization_id: str, current_user: User, resolved: BaseModel
+    ) -> ExecutionResult:
+        assert isinstance(resolved, SendPaymentReminderResolved)
+        try:
+            invoice = get_invoice_in_org(db, organization_id, resolved.invoice_id)
+        except ServiceInvoiceNotFoundError:
+            raise InvoiceNotFoundError(resolved.invoice_id)
+
+        try:
+            result = send_manual_invoice_reminder(
+                db, organization_id, invoice, triggered_by="assistant"
+            )
+        except ServiceRemindersDisabledError:
+            raise RemindersDisabledError(organization_id)
+        except ServiceInvoiceAlreadyPaidError:
+            raise InvoiceAlreadyPaidError(resolved.invoice_id)
+        except ServiceInvoiceDueDateMissingError:
+            raise InvoiceDueDateMissingError(resolved.invoice_id)
+        except ServiceCustomerEmailMissingError:
+            raise CustomerEmailMissingError(resolved.invoice_id)
+        except ServiceReminderAlreadySentError:
+            raise ReminderAlreadySentError(resolved.invoice_id)
+        except ServiceReminderSendFailedError as exc:
+            raise ActionToolError("Failed to send payment reminder.") from exc
 
         return ExecutionResult(
             summary={

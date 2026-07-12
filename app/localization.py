@@ -39,6 +39,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "email_greeting": "Hello {name},",
         "email_intro": "Please find your invoice attached.",
         "email_invoice_number_label": "Invoice Number:",
+        "email_due_date_label": "Due Date:",
         "email_total_label": "Total:",
         "email_payment_status_label": "Payment Status:",
         "email_thanks": "Thank you.",
@@ -76,6 +77,11 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_recent_invoices_heading": "Recent Invoices",
         "assistant_overdue_invoices_heading": "Overdue Invoices",
         "assistant_no_overdue_invoices": "No overdue invoices.",
+        "assistant_due_soon_invoices_heading": "Invoices Due Soon",
+        "assistant_no_due_soon_invoices": "No invoices due soon.",
+        "assistant_reminders_sent_label": (
+            "{count} payment reminders sent in the last {days} days"
+        ),
         "assistant_top_customers_heading": "Top Customers by Revenue",
         "assistant_stale_customers_heading": "Customers Not Invoiced Recently",
         "assistant_no_stale_customers": "All customers have been invoiced recently.",
@@ -199,6 +205,39 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "insight_data_quality_customers_never_invoiced_message": (
             "{count} customers have never been invoiced."
         ),
+        "insight_data_quality_invoices_missing_due_date_message": (
+            "{count} invoices have no due date on file."
+        ),
+        "insight_due_soon_title": "{count} invoices due soon in {currency}",
+        "insight_due_soon_message": (
+            "{count} invoices totaling {currency} {amount} are due within the next "
+            "{days} days. The soonest, {soonest_invoice}, is due {soonest_due_date}."
+        ),
+        "insight_due_soon_suggestion": (
+            "Consider sending a payment reminder before these come due."
+        ),
+        "payment_terms_label": "Payment Terms",
+        "payment_terms_on_receipt": "Due on receipt",
+        "payment_terms_net_days": "Net {days} days",
+        "payment_terms_none": "—",
+        "reminder_before_due_subject": "Reminder: Invoice {invoice_number} due soon",
+        "reminder_before_due_greeting": "Hello {name},",
+        "reminder_before_due_intro": (
+            "This is a friendly reminder that your invoice is due in {days} day(s)."
+        ),
+        "reminder_due_today_subject": "Reminder: Invoice {invoice_number} due today",
+        "reminder_due_today_greeting": "Hello {name},",
+        "reminder_due_today_intro": "This is a friendly reminder that your invoice is due today.",
+        "reminder_after_due_subject": "Overdue: Invoice {invoice_number}",
+        "reminder_after_due_greeting": "Hello {name},",
+        "reminder_after_due_intro": (
+            "Our records show this invoice is now {days} day(s) past its due date."
+        ),
+        "reminder_invoice_number_label": "Invoice Number:",
+        "reminder_due_date_label": "Due Date:",
+        "reminder_total_label": "Amount Due:",
+        "reminder_closing": "Please let us know if you have any questions.",
+        "reminder_thanks": "Thank you.",
     },
     "es": {
         "invoice_title": "Factura",
@@ -223,6 +262,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "email_greeting": "Hola {name},",
         "email_intro": "Adjuntamos su factura.",
         "email_invoice_number_label": "Número de factura:",
+        "email_due_date_label": "Fecha de vencimiento:",
         "email_total_label": "Total:",
         "email_payment_status_label": "Estado de pago:",
         "email_thanks": "Gracias.",
@@ -260,6 +300,11 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_recent_invoices_heading": "Facturas recientes",
         "assistant_overdue_invoices_heading": "Facturas vencidas",
         "assistant_no_overdue_invoices": "No hay facturas vencidas.",
+        "assistant_due_soon_invoices_heading": "Facturas que vencen pronto",
+        "assistant_no_due_soon_invoices": "No hay facturas que venzan pronto.",
+        "assistant_reminders_sent_label": (
+            "{count} recordatorios de pago enviados en los últimos {days} días"
+        ),
         "assistant_top_customers_heading": "Mejores clientes por ingresos",
         "assistant_stale_customers_heading": "Clientes sin facturar recientemente",
         "assistant_no_stale_customers": "Todos los clientes han sido facturados recientemente.",
@@ -388,6 +433,39 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "insight_data_quality_customers_never_invoiced_message": (
             "{count} clientes nunca han sido facturados."
         ),
+        "insight_data_quality_invoices_missing_due_date_message": (
+            "{count} facturas no tienen una fecha de vencimiento registrada."
+        ),
+        "insight_due_soon_title": "{count} facturas vencen pronto en {currency}",
+        "insight_due_soon_message": (
+            "{count} facturas por un total de {currency} {amount} vencen dentro de los "
+            "próximos {days} días. La más próxima, {soonest_invoice}, vence el {soonest_due_date}."
+        ),
+        "insight_due_soon_suggestion": (
+            "Considera enviar un recordatorio de pago antes de que venzan."
+        ),
+        "payment_terms_label": "Términos de pago",
+        "payment_terms_on_receipt": "Pago al recibir",
+        "payment_terms_net_days": "Neto {days} días",
+        "payment_terms_none": "—",
+        "reminder_before_due_subject": "Recordatorio: Factura {invoice_number} vence pronto",
+        "reminder_before_due_greeting": "Hola {name},",
+        "reminder_before_due_intro": (
+            "Este es un recordatorio de que su factura vence en {days} día(s)."
+        ),
+        "reminder_due_today_subject": "Recordatorio: Factura {invoice_number} vence hoy",
+        "reminder_due_today_greeting": "Hola {name},",
+        "reminder_due_today_intro": "Este es un recordatorio de que su factura vence hoy.",
+        "reminder_after_due_subject": "Vencida: Factura {invoice_number}",
+        "reminder_after_due_greeting": "Hola {name},",
+        "reminder_after_due_intro": (
+            "Nuestros registros muestran que esta factura lleva {days} día(s) vencida."
+        ),
+        "reminder_invoice_number_label": "Número de factura:",
+        "reminder_due_date_label": "Fecha de vencimiento:",
+        "reminder_total_label": "Monto adeudado:",
+        "reminder_closing": "No dude en contactarnos si tiene alguna pregunta.",
+        "reminder_thanks": "Gracias.",
     },
 }
 

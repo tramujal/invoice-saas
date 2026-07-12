@@ -16,15 +16,43 @@ import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error"
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   CURRENCY_CODES,
+  REMINDER_DAY_LIST_MAX_LENGTH,
+  REMINDER_DAY_MAX,
+  REMINDER_DAY_MIN,
+  TAX_LABEL_OPTIONS,
   getCurrencyLabel,
+  getTimezoneOptions,
   LANGUAGES,
   LANGUAGE_LABELS,
-  TAX_LABEL_OPTIONS,
   type CurrencyCode,
   type Language,
   type TaxLabelOption,
 } from "@/lib/organization-settings";
 import type { MeResponse, OrganizationProfile } from "@/lib/types";
+
+/** Parses a comma-separated day-list input (e.g. "7, 3, 1") into a
+ * validated number[], or null if it's malformed/out of bounds -- mirrors
+ * the backend's own bounds (app.reminder_settings) so the user gets
+ * immediate feedback rather than a round-trip 422. Blank input is valid
+ * and means "no reminders at this offset" (an empty list). */
+function parseDayListInput(raw: string): number[] | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const parts = trimmed.split(",").map((p) => p.trim());
+  const days: number[] = [];
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const value = Number(part);
+    if (value < REMINDER_DAY_MIN || value > REMINDER_DAY_MAX) return null;
+    days.push(value);
+  }
+  if (days.length > REMINDER_DAY_LIST_MAX_LENGTH) return null;
+  return days;
+}
+
+function formatDayList(days: number[]): string {
+  return days.join(", ");
+}
 
 const LIMITS = {
   name: 255,
@@ -47,6 +75,11 @@ type FormState = {
   language: Language;
   currency_code: CurrencyCode;
   tax_label: TaxLabelOption;
+  timezone: string;
+  reminders_enabled: boolean;
+  reminder_before_due_days: string;
+  reminder_on_due_date: boolean;
+  reminder_after_due_days: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -60,6 +93,11 @@ const EMPTY_FORM: FormState = {
   language: "en",
   currency_code: "USD",
   tax_label: "Tax ID",
+  timezone: "UTC",
+  reminders_enabled: false,
+  reminder_before_due_days: "3",
+  reminder_on_due_date: true,
+  reminder_after_due_days: "7",
 };
 
 function toFormState(profile: OrganizationProfile): FormState {
@@ -80,6 +118,11 @@ function toFormState(profile: OrganizationProfile): FormState {
     tax_label: (TAX_LABEL_OPTIONS as readonly string[]).includes(profile.tax_label)
       ? (profile.tax_label as TaxLabelOption)
       : "Tax ID",
+    timezone: profile.timezone,
+    reminders_enabled: profile.reminders_enabled,
+    reminder_before_due_days: formatDayList(profile.reminder_before_due_days),
+    reminder_on_due_date: profile.reminder_on_due_date,
+    reminder_after_due_days: formatDayList(profile.reminder_after_due_days),
   };
 }
 
@@ -95,6 +138,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [reminderDaysError, setReminderDaysError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Hydration-safe: read only after mount, like organizationName elsewhere.
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -151,6 +195,14 @@ export default function SettingsPage() {
     }
     setNameError(null);
 
+    const beforeDueDays = parseDayListInput(form.reminder_before_due_days);
+    const afterDueDays = parseDayListInput(form.reminder_after_due_days);
+    if (beforeDueDays === null || afterDueDays === null) {
+      setReminderDaysError(t("settings.invalidReminderDays"));
+      return;
+    }
+    setReminderDaysError(null);
+
     const loadingId = toast.loading(t("settings.toastSaving"));
     setIsSubmitting(true);
     try {
@@ -167,6 +219,11 @@ export default function SettingsPage() {
           language: form.language,
           currency_code: form.currency_code,
           tax_label: form.tax_label,
+          timezone: form.timezone,
+          reminders_enabled: form.reminders_enabled,
+          reminder_before_due_days: beforeDueDays,
+          reminder_on_due_date: form.reminder_on_due_date,
+          reminder_after_due_days: afterDueDays,
         }),
       });
       setForm(toFormState(updated));
@@ -390,7 +447,7 @@ export default function SettingsPage() {
             {t("settings.localizationSubtitle")}
           </p>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label htmlFor="org-language" className="text-sm font-medium text-slate-700">
                 {t("settings.languageFieldLabel")}
@@ -448,7 +505,107 @@ export default function SettingsPage() {
               </select>
               <p className="mt-1 text-xs text-slate-500">{t("settings.taxLabelHelp")}</p>
             </div>
+
+            <div>
+              <label htmlFor="org-timezone" className="text-sm font-medium text-slate-700">
+                {t("settings.timezoneFieldLabel")}
+              </label>
+              <select
+                id="org-timezone"
+                value={form.timezone}
+                onChange={(e) => update("timezone", e.target.value)}
+                disabled={disabled}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              >
+                {getTimezoneOptions(form.timezone).map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">{t("settings.timezoneHelp")}</p>
+            </div>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            {t("settings.reminderSectionTitle")}
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {t("settings.reminderSectionSubtitle")}
+          </p>
+
+          <div className="mt-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.reminders_enabled}
+                onChange={(e) => update("reminders_enabled", e.target.checked)}
+                disabled={disabled}
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+              />
+              {t("settings.remindersEnabledLabel")}
+            </label>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="reminder-before-days"
+                className="text-sm font-medium text-slate-700"
+              >
+                {t("settings.reminderBeforeDueLabel")}
+              </label>
+              <input
+                id="reminder-before-days"
+                type="text"
+                value={form.reminder_before_due_days}
+                onChange={(e) => update("reminder_before_due_days", e.target.value)}
+                disabled={disabled || !form.reminders_enabled}
+                placeholder={t("settings.reminderDaysPlaceholder")}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="reminder-after-days"
+                className="text-sm font-medium text-slate-700"
+              >
+                {t("settings.reminderAfterDueLabel")}
+              </label>
+              <input
+                id="reminder-after-days"
+                type="text"
+                value={form.reminder_after_due_days}
+                onChange={(e) => update("reminder_after_due_days", e.target.value)}
+                disabled={disabled || !form.reminders_enabled}
+                placeholder={t("settings.reminderDaysPlaceholder")}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.reminder_on_due_date}
+                  onChange={(e) => update("reminder_on_due_date", e.target.checked)}
+                  disabled={disabled || !form.reminders_enabled}
+                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                />
+                {t("settings.reminderOnDueDateLabel")}
+              </label>
+            </div>
+          </div>
+          {reminderDaysError ? (
+            <p className="mt-2 text-xs text-red-600" role="alert">
+              {reminderDaysError}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-slate-500">{t("settings.reminderDaysHelp")}</p>
+          )}
         </section>
 
         <div className="flex justify-end">

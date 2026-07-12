@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Literal
+from zoneinfo import available_timezones
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -19,7 +20,16 @@ from app.insights.limits import (
 )
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
+from app.reminder_settings import (
+    REMINDER_DAY_LIST_MAX_LENGTH,
+    REMINDER_DAY_MAX,
+    REMINDER_DAY_MIN,
+    parse_day_list,
+)
+from app.reminder_type import ReminderType
 from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
+
+_VALID_TIMEZONES = available_timezones()
 
 
 class SortDirection(str, Enum):
@@ -32,6 +42,16 @@ class InvoiceSortField(str, Enum):
     created_at = "created_at"
     total = "total"
     customer_name = "customer_name"
+
+
+class InvoiceDueFilter(str, Enum):
+    """A due-date bucket, distinct from and combinable with the existing
+    payment_status filter -- see app.effective_status for the same
+    due-date-driven definition of "overdue" used everywhere else."""
+
+    overdue = "overdue"
+    due_soon = "due_soon"
+    no_due_date = "no_due_date"
 
 
 class CustomerSortField(str, Enum):
@@ -189,6 +209,25 @@ class MeResponse(BaseModel):
     organizations: list[OrganizationSummary]
 
 
+def _check_timezone(value: str) -> str:
+    if value not in _VALID_TIMEZONES:
+        raise ValueError("Invalid IANA timezone identifier")
+    return value
+
+
+def _check_reminder_day_list(value: list[int]) -> list[int]:
+    if len(value) > REMINDER_DAY_LIST_MAX_LENGTH:
+        raise ValueError(
+            f"At most {REMINDER_DAY_LIST_MAX_LENGTH} reminder days may be configured"
+        )
+    for day in value:
+        if not (REMINDER_DAY_MIN <= day <= REMINDER_DAY_MAX):
+            raise ValueError(
+                f"Reminder days must be between {REMINDER_DAY_MIN} and {REMINDER_DAY_MAX}"
+            )
+    return value
+
+
 class OrganizationProfileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -203,6 +242,23 @@ class OrganizationProfileResponse(BaseModel):
     language: str
     currency_code: str
     tax_label: str
+    timezone: str
+    reminders_enabled: bool
+    reminder_before_due_days: list[int]
+    reminder_on_due_date: bool
+    reminder_after_due_days: list[int]
+
+    @field_validator(
+        "reminder_before_due_days", "reminder_after_due_days", mode="before"
+    )
+    @classmethod
+    def _parse_stored_day_list(cls, value: str | list[int]) -> list[int]:
+        # The ORM column is a comma-separated string (see
+        # app.reminder_settings) -- converted to a list here so API
+        # responses are a normal JSON array, never a raw stored string.
+        if isinstance(value, str):
+            return parse_day_list(value)
+        return value
 
 
 class OrganizationUpdateRequest(BaseModel):
@@ -216,6 +272,15 @@ class OrganizationUpdateRequest(BaseModel):
     language: OrganizationLanguage | None = None
     currency_code: CurrencyCode | None = None
     tax_label: TaxLabelOption | None = None
+    timezone: str | None = None
+    reminders_enabled: bool | None = None
+    reminder_before_due_days: list[int] | None = Field(
+        default=None, max_length=REMINDER_DAY_LIST_MAX_LENGTH
+    )
+    reminder_on_due_date: bool | None = None
+    reminder_after_due_days: list[int] | None = Field(
+        default=None, max_length=REMINDER_DAY_LIST_MAX_LENGTH
+    )
 
     @field_validator(
         "business_name", "tax_id", "address", "phone", "email", "logo_url",
@@ -224,6 +289,18 @@ class OrganizationUpdateRequest(BaseModel):
     @classmethod
     def _normalize_blank(cls, value: str | None) -> str | None:
         return _blank_to_none(value)
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone_value(cls, value: str) -> str:
+        return _check_timezone(value)
+
+    @field_validator("reminder_before_due_days", "reminder_after_due_days")
+    @classmethod
+    def _check_day_list_value(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return value
+        return _check_reminder_day_list(value)
 
 
 class InvoiceLineItemCreate(BaseModel):
@@ -245,6 +322,11 @@ class InvoiceCreateRequest(BaseModel):
     # creation time (see create_invoice). Once set, permanent — see
     # Invoice.currency_code.
     currency_code: CurrencyCode | None = None
+    # None => no due date (matches every historical invoice). Validated
+    # against the organization's local "today" server-side (see
+    # create_invoice_record / due_date_before_issue_date), not here --
+    # this schema has no access to the organization's timezone.
+    due_date: date | None = None
 
 
 class InvoiceLineItemResponse(BaseModel):
@@ -270,8 +352,13 @@ class InvoiceResponse(BaseModel):
     tax_amount: Decimal
     total: Decimal
     payment_status: PaymentStatus
+    # Derived, read-only -- the single source of truth every surface
+    # displays (see app.effective_status / Invoice.effective_payment_status).
+    # payment_status above stays the raw, editable pending/paid toggle.
+    effective_payment_status: PaymentStatus
     currency_code: str
     language: str
+    due_date: date | None
     line_items: list[InvoiceLineItemResponse]
 
     @field_validator("invoice_number", mode="before")
@@ -291,8 +378,10 @@ class InvoiceSummaryResponse(BaseModel):
     tax_amount: Decimal
     total: Decimal
     payment_status: PaymentStatus
+    effective_payment_status: PaymentStatus
     currency_code: str
     language: str
+    due_date: date | None
     created_at: datetime
 
     @field_validator("invoice_number", mode="before")
@@ -302,12 +391,23 @@ class InvoiceSummaryResponse(BaseModel):
 
 
 class InvoicePaymentStatusUpdate(BaseModel):
+    # Overdue is a derived, read-only label (see effective_payment_status)
+    # -- no longer a value a user can set directly. Still accepted here at
+    # the type level only insofar as PaymentStatus itself still declares
+    # it, but the frontend's PaymentStatusSelect no longer offers it, and
+    # nothing server-side relies on it ever being submitted this way.
     payment_status: PaymentStatus
 
 
 class SendInvoiceEmailResponse(BaseModel):
     sent: bool
     sent_to: str
+
+
+class SendInvoiceReminderResponse(BaseModel):
+    sent: bool
+    sent_to: str
+    reminder_type: ReminderType
 
 
 class PaginatedInvoicesResponse(BaseModel):
@@ -433,7 +533,11 @@ class InsightRelatedEntityResponse(BaseModel):
 
 class InsightCtaResponse(BaseModel):
     type: Literal[
-        "view_overdue_invoices", "review_pending_invoices", "create_invoice", "ask_assistant"
+        "view_overdue_invoices",
+        "view_due_soon_invoices",
+        "review_pending_invoices",
+        "create_invoice",
+        "ask_assistant",
     ]
     # Only set for type == "ask_assistant" -- a deterministic, already-
     # localized prefill question, never AI-generated.

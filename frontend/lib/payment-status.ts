@@ -4,6 +4,12 @@ export const PAYMENT_STATUSES = ["pending", "paid", "overdue"] as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
+/** Overdue is a derived, read-only label (see effective_payment_status) --
+ * no longer something a user picks directly. PaymentStatusSelect's
+ * dropdown offers only these two; PaymentStatusBadge still renders all
+ * three via PAYMENT_STATUSES/PAYMENT_STATUS_BADGE_CLASS above. */
+export const EDITABLE_PAYMENT_STATUSES = ["pending", "paid"] as const;
+
 export function isPaymentStatus(value: string): value is PaymentStatus {
   return (PAYMENT_STATUSES as readonly string[]).includes(value);
 }

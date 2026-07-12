@@ -22,6 +22,10 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_email_verification_tokens_table(engine)
     _add_customer_tax_id(engine)
     _add_assistant_actions_table(engine)
+    _add_invoice_due_date(engine)
+    _add_organization_timezone_and_reminders(engine)
+    _add_invoice_reminders_table(engine)
+    _add_due_date_and_status_indexes(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -310,6 +314,100 @@ def _add_assistant_actions_table(engine: Engine) -> None:
                 "expires_at TIMESTAMP NOT NULL, "
                 "executed_at TIMESTAMP NULL"
                 ")"
+            )
+        )
+
+
+def _add_invoice_due_date(engine: Engine) -> None:
+    """Adds invoices.due_date, nullable, no backfill -- per the plan, a NULL
+    due_date is what keeps historical invoices' displayed status frozen
+    exactly as it was (see app/effective_status.py)."""
+    inspector = inspect(engine)
+    if "invoices" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("invoices")}
+    if "due_date" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE invoices ADD COLUMN due_date DATE NULL"))
+
+
+def _add_organization_timezone_and_reminders(engine: Engine) -> None:
+    """Adds Organization.timezone + the 4 reminder-settings columns, each
+    with a safe default so every existing organization keeps working
+    unchanged (reminders_enabled defaults to FALSE -- opt-in only)."""
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("organizations")}
+    new_columns = {
+        "timezone": "VARCHAR(64) NOT NULL DEFAULT 'UTC'",
+        "reminders_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "reminder_before_due_days": "VARCHAR(64) NOT NULL DEFAULT '3'",
+        "reminder_on_due_date": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "reminder_after_due_days": "VARCHAR(64) NOT NULL DEFAULT '7'",
+    }
+    missing = {name: ddl for name, ddl in new_columns.items() if name not in columns}
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for name, ddl in missing.items():
+            conn.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} {ddl}"))
+
+
+def _add_invoice_reminders_table(engine: Engine) -> None:
+    """Creates invoice_reminders if it's missing -- same idempotent safety
+    net as _add_assistant_actions_table. The unique constraint is the sole
+    idempotency/concurrency guarantee for scheduled, manual, and AI-agent
+    reminder sends (see app/models.py InvoiceReminder)."""
+    inspector = inspect(engine)
+    if "invoice_reminders" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS invoice_reminders ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "invoice_id CHAR(36) NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, "
+                "reminder_type VARCHAR(16) NOT NULL, "
+                "days_offset INTEGER NULL, "
+                "scheduled_for_date DATE NOT NULL, "
+                "recipient_email VARCHAR(255) NOT NULL, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                "attempt_count INTEGER NOT NULL DEFAULT 0, "
+                "triggered_by VARCHAR(16) NOT NULL, "
+                "provider_message_id VARCHAR(255) NULL, "
+                "failure_code VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "sent_at TIMESTAMP NULL, "
+                "CONSTRAINT uq_invoice_reminder_idempotency "
+                "UNIQUE (invoice_id, reminder_type, scheduled_for_date)"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_invoice_reminders_org_status "
+                "ON invoice_reminders (organization_id, status)"
+            )
+        )
+
+
+def _add_due_date_and_status_indexes(engine: Engine) -> None:
+    """Idempotent indexes backing the reminder job's and insights' bounded
+    queries on due_date/payment_status -- never a full-table scan."""
+    inspector = inspect(engine)
+    if "invoices" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_invoices_due_date ON invoices (due_date)")
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_invoices_payment_status "
+                "ON invoices (payment_status)"
             )
         )
 

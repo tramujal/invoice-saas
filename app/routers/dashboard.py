@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_user, require_org_member
-from app.models import Customer, Invoice, User
+from app.effective_status import get_effective_payment_status
+from app.models import Customer, Invoice, Organization, User
+from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.schemas import (
     CurrencyRevenueSummary,
@@ -71,6 +73,32 @@ def _month_key(dt: datetime) -> str:
     return dt.strftime("%Y-%m")
 
 
+def _effective_status_counts(db: Session, organization_id: str) -> dict[str, int]:
+    """Invoice counts by EFFECTIVE status (due-date-derived, via
+    app.effective_status), not the raw stored payment_status column -- the
+    dashboard must agree with every other surface (PDF, email, insights,
+    assistant) on what's actually overdue. Fetches just the two columns
+    get_effective_payment_status needs (a SQLAlchemy Row already exposes
+    them as .payment_status/.due_date, so the exact same helper function
+    applies with no separate ORM Invoice object required) and counts in
+    Python -- same "simple, portable query" preference as this file's
+    other status/currency groupings, rather than a per-database CASE
+    expression.
+    """
+    organization = db.get(Organization, organization_id)
+    today_local = get_organization_today(organization)
+    rows = db.execute(
+        select(Invoice.payment_status, Invoice.due_date).where(
+            Invoice.organization_id == organization_id
+        )
+    ).all()
+    counts: dict[str, int] = {}
+    for row in rows:
+        effective = get_effective_payment_status(row, today_local)
+        counts[effective.value] = counts.get(effective.value, 0) + 1
+    return counts
+
+
 def get_dashboard_summary(db: Session, organization_id: str) -> DashboardResponse:
     """The actual dashboard computation, factored out of the route below so
     app.assistant_context can reuse the exact same numbers the dashboard UI
@@ -91,13 +119,7 @@ def get_dashboard_summary(db: Session, organization_id: str) -> DashboardRespons
         )
         or 0
     )
-    status_counts = dict(
-        db.execute(
-            select(Invoice.payment_status, func.count())
-            .where(org_filter)
-            .group_by(Invoice.payment_status)
-        ).all()
-    )
+    status_counts = _effective_status_counts(db, organization_id)
 
     last_month_start, this_month_start = _month_bounds(datetime.now(timezone.utc))
 
@@ -259,14 +281,8 @@ def get_dashboard_analytics_data(db: Session, organization_id: str) -> Dashboard
         for (month, currency_code), revenue in sorted(revenue_buckets.items())
     ]
 
-    # --- invoice count by payment status, all-time ---
-    status_counts = dict(
-        db.execute(
-            select(Invoice.payment_status, func.count())
-            .where(org_filter)
-            .group_by(Invoice.payment_status)
-        ).all()
-    )
+    # --- invoice count by effective payment status, all-time ---
+    status_counts = _effective_status_counts(db, organization_id)
     invoice_count_by_status = [
         PaymentStatusCountPoint(
             status=status, count=status_counts.get(status.value, 0)

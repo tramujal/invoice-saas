@@ -16,25 +16,28 @@ this module produces.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.ai.limits import AI_MAX_CONTEXT_CHARS
 from app.currency import format_amount
 from app.customer_activity import get_last_invoice_at_by_customer
+from app.insights.queries import get_due_soon_invoice_details, get_overdue_invoice_details
 from app.invoice_numbering import format_invoice_number
 from app.localization import get_language, t
-from app.models import Customer, Invoice, Organization
-from app.payment_status import PaymentStatus
+from app.models import Customer, InvoiceReminder, Organization
+from app.reminder_status import ReminderStatus
 from app.routers.dashboard import get_dashboard_analytics_data, get_dashboard_summary
 from app.schemas import DashboardAnalyticsResponse, DashboardResponse
 
 OVERDUE_INVOICES_LIMIT = 10
+DUE_SOON_INVOICES_LIMIT = 10
 STALE_CUSTOMERS_LIMIT = 10
 STALE_CUSTOMER_DAYS = 60
+REMINDER_SUMMARY_DAYS = 30
 
 
 @dataclass
@@ -44,6 +47,15 @@ class OverdueInvoiceInfo:
     total: Decimal
     currency_code: str
     created_at: datetime
+
+
+@dataclass
+class DueSoonInvoiceInfo:
+    invoice_number: str
+    customer_name: str | None
+    total: Decimal
+    currency_code: str
+    due_date: date
 
 
 @dataclass
@@ -59,30 +71,59 @@ class BusinessContext:
     dashboard: DashboardResponse
     analytics: DashboardAnalyticsResponse
     overdue_invoice_list: list[OverdueInvoiceInfo]
+    due_soon_invoice_list: list[DueSoonInvoiceInfo]
     stale_customers: list[StaleCustomerInfo]
+    reminders_sent_recently: int
 
 
 def _overdue_invoice_list(db: Session, organization_id: str) -> list[OverdueInvoiceInfo]:
-    rows = db.scalars(
-        select(Invoice)
-        .options(selectinload(Invoice.customer))
-        .where(
-            Invoice.organization_id == organization_id,
-            Invoice.payment_status == PaymentStatus.overdue.value,
-        )
-        .order_by(Invoice.created_at.asc())
-        .limit(OVERDUE_INVOICES_LIMIT)
-    ).all()
+    """Due-date-derived, via app.insights.queries -- the same source of
+    truth the dashboard insights use, never a separate re-check of the
+    raw stored payment_status column (see app.effective_status)."""
+    details = get_overdue_invoice_details(db, organization_id)[:OVERDUE_INVOICES_LIMIT]
     return [
         OverdueInvoiceInfo(
-            invoice_number=format_invoice_number(inv.invoice_number),
-            customer_name=inv.customer_name,
-            total=inv.total,
-            currency_code=inv.currency_code,
-            created_at=inv.created_at,
+            invoice_number=format_invoice_number(d.invoice_number),
+            customer_name=d.customer_name,
+            total=d.total,
+            currency_code=d.currency_code,
+            created_at=d.created_at,
         )
-        for inv in rows
+        for d in details
     ]
+
+
+def _due_soon_invoice_list(db: Session, organization_id: str) -> list[DueSoonInvoiceInfo]:
+    details = get_due_soon_invoice_details(db, organization_id)[:DUE_SOON_INVOICES_LIMIT]
+    return [
+        DueSoonInvoiceInfo(
+            invoice_number=format_invoice_number(d.invoice_number),
+            customer_name=d.customer_name,
+            total=d.total,
+            currency_code=d.currency_code,
+            due_date=d.due_date,
+        )
+        for d in details
+    ]
+
+
+def _reminders_sent_recently(db: Session, organization_id: str, now: datetime) -> int:
+    """One aggregate count only -- never itemized audit rows or email
+    content -- matching this module's existing "bounded, compact summary,
+    never a raw data export" contract."""
+    cutoff = now - timedelta(days=REMINDER_SUMMARY_DAYS)
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(InvoiceReminder)
+            .where(
+                InvoiceReminder.organization_id == organization_id,
+                InvoiceReminder.status == ReminderStatus.sent.value,
+                InvoiceReminder.sent_at >= cutoff,
+            )
+        )
+        or 0
+    )
 
 
 def _stale_customers(db: Session, organization_id: str, now: datetime) -> list[StaleCustomerInfo]:
@@ -124,7 +165,9 @@ def build_business_context(db: Session, organization_id: str) -> BusinessContext
         dashboard=get_dashboard_summary(db, organization_id),
         analytics=get_dashboard_analytics_data(db, organization_id),
         overdue_invoice_list=_overdue_invoice_list(db, organization_id),
+        due_soon_invoice_list=_due_soon_invoice_list(db, organization_id),
         stale_customers=_stale_customers(db, organization_id, now),
+        reminders_sent_recently=_reminders_sent_recently(db, organization_id, now),
     )
 
 
@@ -189,6 +232,25 @@ def format_business_context_as_text(context: BusinessContext) -> str:
             f"{format_amount(inv.total, inv.currency_code)} | "
             f"{inv.created_at.date().isoformat()}"
         )
+
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_due_soon_invoices_heading')} (max {DUE_SOON_INVOICES_LIMIT}):")
+    if not context.due_soon_invoice_list:
+        lines.append(f"- {t(language, 'assistant_no_due_soon_invoices')}")
+    for inv in context.due_soon_invoice_list:
+        customer = inv.customer_name or t(language, "no_customer")
+        lines.append(
+            f"- {inv.invoice_number} | {customer} | "
+            f"{format_amount(inv.total, inv.currency_code)} | "
+            f"{inv.due_date.isoformat()}"
+        )
+
+    lines.append("")
+    lines.append(
+        t(language, "assistant_reminders_sent_label").format(
+            count=context.reminders_sent_recently, days=REMINDER_SUMMARY_DAYS
+        )
+    )
 
     lines.append("")
     lines.append(f"{t(language, 'assistant_recent_invoices_heading')}:")

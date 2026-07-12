@@ -32,6 +32,21 @@ export function isRateLimitedError(err: unknown): boolean {
   return hasDetailCode(err, 429, "rate_limit_exceeded");
 }
 
+/** Extracts the backend's stable `detail.code` from a structured error
+ * response, or null if this error doesn't use that shape -- shared by any
+ * call site that needs to branch on a specific machine-readable code
+ * (e.g. the reminder endpoint's reminders_disabled/invoice_already_paid/
+ * reminder_already_sent codes) rather than just showing raw text. */
+export function getApiErrorCode(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object" || !("detail" in body)) return null;
+  const detail = (body as { detail: unknown }).detail;
+  if (!detail || typeof detail !== "object") return null;
+  const code = (detail as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
 export function formatApiError(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     const body = err.body;

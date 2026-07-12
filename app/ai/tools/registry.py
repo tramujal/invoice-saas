@@ -13,6 +13,7 @@ from app.ai.tools.base import ActionTool
 from app.ai.tools.invoices import (
     CreateInvoiceDraftTool,
     SendInvoiceEmailTool,
+    SendPaymentReminderTool,
     UpdateInvoiceStatusTool,
 )
 
@@ -22,6 +23,7 @@ TOOL_REGISTRY: dict[str, ActionTool] = {
         CreateInvoiceDraftTool(),
         UpdateInvoiceStatusTool(),
         SendInvoiceEmailTool(),
+        SendPaymentReminderTool(),
     )
 }
 

@@ -4,7 +4,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user, require_org_member, require_verified_email
 from app.models import Organization, User
+from app.reminder_settings import format_day_list
 from app.schemas import OrganizationProfileResponse, OrganizationUpdateRequest
+
+# The ORM columns for these two are comma-separated strings (see
+# app.reminder_settings), but the API's wire shape for them is a plain
+# JSON array of ints -- these need converting before the generic setattr
+# loop below, unlike every other field on this request.
+_DAY_LIST_FIELDS = {"reminder_before_due_days", "reminder_after_due_days"}
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["organizations"])
 
@@ -43,6 +50,8 @@ def update_organization(
     # written as their plain string .value rather than the Enum member
     # itself, matching how every other field on this model is persisted.
     for key, value in body.model_dump(exclude_unset=True, mode="json").items():
+        if key in _DAY_LIST_FIELDS:
+            value = format_day_list(value)
         setattr(organization, key, value)
     db.commit()
     db.refresh(organization)

@@ -63,3 +63,28 @@ services:
         sync: false
       - key: AI_MODEL
         sync: false
+
+# Payment reminders (app/jobs/send_due_invoice_reminders.py) run as a
+# standalone CLI job, deliberately never inside the web service above and
+# never exposed as an HTTP endpoint. This repo's concrete trigger is a
+# scheduled GitHub Actions workflow instead (see
+# .github/workflows/send-invoice-reminders.yml), since Render Cron Jobs
+# require a paid plan and the web service above targets the free tier.
+# If you upgrade, a Render Cron Job is an equally valid alternative -- add
+# it as its own top-level resource alongside `services`, e.g.:
+#
+# cronJobs:
+#   - type: cron
+#     name: send-invoice-reminders
+#     runtime: python
+#     plan: starter
+#     schedule: "0 12 * * *"  # once daily; adjust to your users' timezones
+#     buildCommand: pip install -r requirements.txt
+#     startCommand: python -m app.jobs.send_due_invoice_reminders
+#     envVars:
+#       - key: DATABASE_URL
+#         sync: false
+#       - key: RESEND_API_KEY
+#         sync: false
+#       - key: EMAIL_FROM
+#         sync: false

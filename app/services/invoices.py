@@ -15,22 +15,38 @@ HTTP status codes, and a tool, which maps them to assistant error codes)
 can translate them independently.
 """
 
+import hashlib
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.currency import resolve_default_currency_code
 from app.email.base import EmailAttachment, EmailMessage, EmailSendError
 from app.email.factory import get_email_sender
+from app.email.reminder_templates import (
+    build_after_due_reminder_email,
+    build_before_due_reminder_email,
+    build_due_today_reminder_email,
+)
 from app.email.templates import build_invoice_email
 from app.invoice_numbering import format_invoice_number, parse_invoice_number
 from app.invoice_pdf import render_invoice_pdf
-from app.models import Customer, Invoice, InvoiceLineItem, Organization, User
+from app.models import Customer, Invoice, InvoiceLineItem, InvoiceReminder, Organization, User
+from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
-from app.schemas import CurrencyCode, InvoiceLineItemCreate, SendInvoiceEmailResponse
+from app.reminder_status import ReminderStatus
+from app.reminder_type import ReminderType
+from app.schemas import (
+    CurrencyCode,
+    InvoiceLineItemCreate,
+    SendInvoiceEmailResponse,
+    SendInvoiceReminderResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +66,42 @@ class CustomerEmailMissingError(Exception):
 class EmailSendFailedError(Exception):
     """The configured email provider failed to send. Wraps the original
     EmailSendError so callers never need to import app.email.base directly."""
+
+
+class DueDateBeforeIssueDateError(Exception):
+    """The requested due_date is before the organization's local today at
+    creation time."""
+
+
+class RemindersDisabledError(Exception):
+    """The organization has not opted into the reminders feature
+    (Organization.reminders_enabled == False) -- gates manual/AI-agent
+    sends too, not just the scheduled job, so this one toggle is a
+    complete kill switch for the whole feature."""
+
+
+class InvoiceAlreadyPaidError(Exception):
+    """The invoice is already paid -- no reminder is ever sent for it."""
+
+
+class InvoiceDueDateMissingError(Exception):
+    """The invoice has no due_date on file, so there is nothing to remind
+    about (every historical invoice, and any new invoice created without
+    one)."""
+
+
+class ReminderAlreadySentError(Exception):
+    """The unique constraint on (invoice_id, reminder_type,
+    scheduled_for_date) already has a row -- this exact reminder slot was
+    already claimed, by a scheduled run, an earlier manual click, or the
+    AI agent. This is the sole idempotency/concurrency guarantee; nothing
+    here is a pre-check race."""
+
+
+class ReminderSendFailedError(Exception):
+    """The configured email provider failed to send this reminder. Wraps
+    the original EmailSendError so callers never need to import
+    app.email.base directly."""
 
 
 def _quantize_money(value: Decimal) -> Decimal:
@@ -107,12 +159,19 @@ def create_invoice_record(
     currency_code: CurrencyCode | None,
     line_items: list[InvoiceLineItemCreate],
     tax_rate: Decimal,
+    due_date: date | None = None,
 ) -> Invoice:
     """The actual DB write: numbering-locked, currency/language pinned at
     creation time. Totals are always recomputed here from `line_items` --
     never accepted as a parameter -- so nothing upstream (including a
     confirmed AI proposal) can hand this function a pre-computed total to
-    trust."""
+    trust.
+
+    due_date defaults to None (no due date), matching every historical
+    invoice -- see Invoice.due_date / app.effective_status. When given, it
+    must not be before the organization's local today (see
+    app.org_time.get_organization_today); this is the only validation
+    performed here, since a due date has no other constraints."""
     totals = compute_invoice_totals(line_items, tax_rate)
     line_models = [
         InvoiceLineItem(
@@ -130,6 +189,10 @@ def create_invoice_record(
     organization = db.execute(
         select(Organization).where(Organization.id == organization_id).with_for_update()
     ).scalar_one()
+
+    if due_date is not None and due_date < get_organization_today(organization):
+        raise DueDateBeforeIssueDateError(due_date)
+
     invoice_number = organization.next_invoice_number
     organization.next_invoice_number = invoice_number + 1
 
@@ -152,6 +215,7 @@ def create_invoice_record(
         total=totals.total,
         currency_code=resolved_currency_code,
         language=language,
+        due_date=due_date,
         line_items=line_models,
     )
     db.add(invoice)
@@ -247,3 +311,170 @@ def send_invoice_email_record(db: Session, invoice: Invoice) -> SendInvoiceEmail
         invoice.id,
     )
     return SendInvoiceEmailResponse(sent=True, sent_to=customer.email)
+
+
+def _hash_for_log(value: str) -> str:
+    """Same convention as app.assistant/app.rate_limit -- logs a short,
+    non-reversible fingerprint instead of a raw id/email, so log lines are
+    correlatable across a run without ever containing PII."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def claim_and_send_reminder(
+    db: Session,
+    organization: Organization,
+    invoice: Invoice,
+    reminder_type: ReminderType,
+    days_offset: int | None,
+    scheduled_for_date: date,
+    triggered_by: str,
+) -> SendInvoiceReminderResponse:
+    """Claim -> re-validate -> send -> update. Shared by the scheduled job
+    (app.jobs.send_due_invoice_reminders), the manual "Send reminder"
+    button, and the AI agent's propose_send_payment_reminder action --
+    exactly one implementation of what counts as an eligible reminder
+    send.
+
+    The INSERT below is the entire concurrency/idempotency guarantee: the
+    unique constraint on (invoice_id, reminder_type, scheduled_for_date)
+    means a conflict (IntegrityError) is proof someone else already
+    claimed this exact slot, portable across SQLite and Postgres with no
+    dialect-specific ON CONFLICT SQL needed. Manual/AI-agent sends always
+    pass reminder_type=manual, scheduled_for_date=today_local, so they
+    share one slot per invoice per organization-local calendar day with
+    each other -- a second manual click (or agent confirmation) the same
+    day always hits this same conflict, not a UI debounce trick.
+
+    Eligibility (not paid, has a due date, customer has an email) is
+    re-checked fresh immediately after the claim succeeds, every time --
+    never trusted from an earlier lookup -- so a human marking an invoice
+    paid a moment before this runs is always respected.
+    """
+    customer = invoice.customer
+    if customer is None or not customer.email:
+        raise CustomerEmailMissingError(invoice.id)
+
+    reminder = InvoiceReminder(
+        organization_id=organization.id,
+        invoice_id=invoice.id,
+        reminder_type=reminder_type.value,
+        days_offset=days_offset,
+        scheduled_for_date=scheduled_for_date,
+        recipient_email=customer.email,
+        status=ReminderStatus.pending.value,
+        triggered_by=triggered_by,
+    )
+    db.add(reminder)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ReminderAlreadySentError(invoice.id)
+    db.refresh(reminder)
+
+    # Fresh re-check, right after the claim -- see the decision this
+    # module documents above. Never computed from a stale copy.
+    db.refresh(invoice)
+    today_local = get_organization_today(organization)
+
+    if invoice.payment_status == PaymentStatus.paid.value:
+        reminder.status = ReminderStatus.skipped.value
+        reminder.failure_code = "invoice_already_paid"
+        db.commit()
+        raise InvoiceAlreadyPaidError(invoice.id)
+
+    if invoice.due_date is None:
+        reminder.status = ReminderStatus.skipped.value
+        reminder.failure_code = "invoice_due_date_missing"
+        db.commit()
+        raise InvoiceDueDateMissingError(invoice.id)
+
+    days_from_due = (invoice.due_date - today_local).days
+
+    if reminder_type == ReminderType.before_due or (
+        reminder_type == ReminderType.manual and days_from_due > 0
+    ):
+        subject, body = build_before_due_reminder_email(invoice, customer, days_from_due)
+    elif reminder_type == ReminderType.after_due or (
+        reminder_type == ReminderType.manual and days_from_due < 0
+    ):
+        subject, body = build_after_due_reminder_email(invoice, customer, -days_from_due)
+    else:
+        subject, body = build_due_today_reminder_email(invoice, customer)
+
+    email_sender = get_email_sender()
+    pdf_bytes = render_invoice_pdf(invoice)
+    filename = f"{format_invoice_number(invoice.invoice_number)}.pdf"
+    message = EmailMessage(
+        to=customer.email,
+        subject=subject,
+        text_body=body,
+        attachments=[EmailAttachment(filename=filename, content=pdf_bytes)],
+    )
+
+    logger.info(
+        "claim_and_send_reminder: sending organization_id=%s invoice_id=%s "
+        "reminder_type=%s triggered_by=%s",
+        organization.id,
+        invoice.id,
+        reminder_type.value,
+        triggered_by,
+    )
+
+    try:
+        email_sender.send(message)
+    except EmailSendError as exc:
+        reminder.status = ReminderStatus.failed.value
+        reminder.failure_code = "reminder_send_failed"
+        reminder.attempt_count += 1
+        db.commit()
+        logger.error(
+            "claim_and_send_reminder: failed to send organization_id=%s "
+            "invoice_id=%s exception_type=%s exception_message=%s",
+            organization.id,
+            invoice.id,
+            type(exc).__name__,
+            str(exc),
+        )
+        raise ReminderSendFailedError(invoice.id) from exc
+
+    reminder.status = ReminderStatus.sent.value
+    reminder.sent_at = datetime.now(timezone.utc)
+    db.commit()
+
+    logger.info(
+        "claim_and_send_reminder: sent successfully organization_id=%s invoice_id=%s "
+        "reminder_type=%s recipient_hash=%s",
+        organization.id,
+        invoice.id,
+        reminder_type.value,
+        _hash_for_log(customer.email),
+    )
+    return SendInvoiceReminderResponse(
+        sent=True, sent_to=customer.email, reminder_type=reminder_type
+    )
+
+
+def send_manual_invoice_reminder(
+    db: Session, organization_id: str, invoice: Invoice, triggered_by: str
+) -> SendInvoiceReminderResponse:
+    """The manual "Send reminder" button and the AI agent's
+    propose_send_payment_reminder action both call this -- never the
+    scheduled job directly, and never claim_and_send_reminder directly --
+    so both share identical gating (reminders_enabled) and the identical
+    "manual" idempotency slot for the current organization-local day.
+    """
+    organization = db.get(Organization, organization_id)
+    if organization is None or not organization.reminders_enabled:
+        raise RemindersDisabledError(organization_id)
+
+    today_local = get_organization_today(organization)
+    return claim_and_send_reminder(
+        db,
+        organization=organization,
+        invoice=invoice,
+        reminder_type=ReminderType.manual,
+        days_offset=None,
+        scheduled_for_date=today_local,
+        triggered_by=triggered_by,
+    )

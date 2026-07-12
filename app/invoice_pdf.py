@@ -20,7 +20,6 @@ from app.currency import format_amount, get_currency_code
 from app.invoice_numbering import format_invoice_number
 from app.localization import get_language, payment_status_label, t
 from app.models import Invoice
-from app.payment_status import PaymentStatus
 
 
 def _money(value) -> str:
@@ -75,11 +74,29 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     elements.append(Paragraph(t(language, "invoice_title"), title_style))
     elements.append(Spacer(1, 4))
 
-    status_label = payment_status_label(language, PaymentStatus(invoice.payment_status))
+    # The effective status (derived from due_date, not the raw stored
+    # value) -- the same source of truth every other surface displays.
+    # See Invoice.effective_payment_status / app.effective_status.
+    status_label = payment_status_label(language, invoice.effective_payment_status)
+
+    if invoice.due_date is None:
+        payment_terms_label = t(language, "payment_terms_none")
+        due_date_text = t(language, "payment_terms_none")
+    else:
+        due_date_text = invoice.due_date.strftime("%B %d, %Y")
+        terms_days = (invoice.due_date - invoice.created_at.date()).days
+        payment_terms_label = (
+            t(language, "payment_terms_on_receipt")
+            if terms_days <= 0
+            else t(language, "payment_terms_net_days").format(days=terms_days)
+        )
+
     meta_table = Table(
         [
             [t(language, "invoice_no_label"), invoice_number],
             [t(language, "created_label"), invoice.created_at.strftime("%B %d, %Y")],
+            [t(language, "due_date_label"), due_date_text],
+            [t(language, "payment_terms_label"), payment_terms_label],
             [t(language, "payment_status_label"), status_label],
         ],
         colWidths=[1.4 * inch, 4.6 * inch],

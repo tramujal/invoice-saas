@@ -291,8 +291,8 @@ export default function DashboardPage() {
                       </tr>
                     ) : (
                       data?.recent_invoices.map((row) => {
-                        const status = isPaymentStatus(row.payment_status)
-                          ? row.payment_status
+                        const status = isPaymentStatus(row.effective_payment_status)
+                          ? row.effective_payment_status
                           : "pending";
 
                         return (

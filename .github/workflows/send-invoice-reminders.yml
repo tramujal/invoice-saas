@@ -1,0 +1,31 @@
+name: Send invoice payment reminders
+
+on:
+  schedule:
+    # Once daily at 12:00 UTC. Each organization's own reminder day-offsets
+    # are computed against ITS configured timezone (app.org_time), not this
+    # trigger time -- this only needs to run after every organization's
+    # local midnight has already passed for the day, which 12:00 UTC
+    # comfortably covers for all IANA timezones.
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send due invoice reminders
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python -m app.jobs.send_due_invoice_reminders

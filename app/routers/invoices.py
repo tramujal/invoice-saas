@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.deps import get_current_user, require_org_member, require_verified_email
+from app.insights.queries import DUE_SOON_WINDOW_DAYS
 from app.invoice_numbering import format_invoice_number, parse_invoice_number
 from app.invoice_pdf import render_invoice_pdf
-from app.models import Customer, Invoice, User
+from app.models import Customer, Invoice, Organization, User
+from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.rate_limit import (
     SEND_INVOICE_EMAIL_RULES,
@@ -20,23 +22,32 @@ from app.rate_limit import (
 )
 from app.schemas import (
     InvoiceCreateRequest,
+    InvoiceDueFilter,
     InvoicePaymentStatusUpdate,
     InvoiceResponse,
     InvoiceSortField,
     InvoiceSummaryResponse,
     PaginatedInvoicesResponse,
     SendInvoiceEmailResponse,
+    SendInvoiceReminderResponse,
     SortDirection,
 )
 from app.services.invoices import (
     CustomerEmailMissingError,
     CustomerNotFoundInOrgError,
+    DueDateBeforeIssueDateError,
     EmailSendFailedError,
+    InvoiceAlreadyPaidError,
+    InvoiceDueDateMissingError,
     InvoiceNotFoundError,
+    RemindersDisabledError,
+    ReminderAlreadySentError,
+    ReminderSendFailedError,
     create_invoice_record,
     get_customer_in_org,
     get_invoice_in_org,
     send_invoice_email_record,
+    send_manual_invoice_reminder,
     update_invoice_payment_status_record,
 )
 
@@ -64,6 +75,8 @@ def _build_invoice_query(
     created_after: datetime | None,
     min_total: Decimal | None,
     max_total: Decimal | None,
+    due_filter: InvoiceDueFilter | None = None,
+    today_local=None,
 ):
     query = (
         select(Invoice)
@@ -87,6 +100,27 @@ def _build_invoice_query(
         query = query.where(Invoice.total >= min_total)
     if max_total is not None:
         query = query.where(Invoice.total <= max_total)
+
+    # A separate, combinable due-date bucket -- distinct from
+    # payment_status, and (for overdue/due_soon) driven by due_date, not
+    # the raw stored status, matching app.effective_status everywhere
+    # else. today_local is always provided by the caller when due_filter
+    # is set.
+    if due_filter == InvoiceDueFilter.overdue:
+        query = query.where(
+            Invoice.due_date.is_not(None),
+            Invoice.due_date < today_local,
+            Invoice.payment_status != PaymentStatus.paid.value,
+        )
+    elif due_filter == InvoiceDueFilter.due_soon:
+        query = query.where(
+            Invoice.due_date.is_not(None),
+            Invoice.due_date >= today_local,
+            Invoice.due_date <= today_local + timedelta(days=DUE_SOON_WINDOW_DAYS),
+            Invoice.payment_status != PaymentStatus.paid.value,
+        )
+    elif due_filter == InvoiceDueFilter.no_due_date:
+        query = query.where(Invoice.due_date.is_(None))
 
     return query
 
@@ -119,13 +153,26 @@ def list_organization_invoices(
     created_after: datetime | None = Query(default=None),
     min_total: Decimal | None = Query(default=None, ge=0),
     max_total: Decimal | None = Query(default=None, ge=0),
+    due_filter: InvoiceDueFilter | None = Query(default=None),
     sort_by: InvoiceSortField = Query(default=InvoiceSortField.created_at),
     sort_dir: SortDirection = Query(default=SortDirection.desc),
 ) -> PaginatedInvoicesResponse:
     require_org_member(current_user, organization_id, db)
 
+    today_local = None
+    if due_filter is not None:
+        organization = db.get(Organization, organization_id)
+        today_local = get_organization_today(organization)
+
     base_query = _build_invoice_query(
-        organization_id, search, payment_status, created_after, min_total, max_total
+        organization_id,
+        search,
+        payment_status,
+        created_after,
+        min_total,
+        max_total,
+        due_filter,
+        today_local,
     )
 
     total = db.scalar(
@@ -260,12 +307,108 @@ def create_invoice(
                 detail="Customer not found in this organization",
             )
 
-    return create_invoice_record(
-        db,
-        organization_id,
-        current_user,
-        customer,
-        body.currency_code,
-        body.line_items,
-        body.tax_rate,
+    try:
+        return create_invoice_record(
+            db,
+            organization_id,
+            current_user,
+            customer,
+            body.currency_code,
+            body.line_items,
+            body.tax_rate,
+            body.due_date,
+        )
+    except DueDateBeforeIssueDateError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "due_date_before_issue_date",
+                "message": "Due date cannot be before the issue date.",
+            },
+        )
+
+
+@router.post(
+    "/{invoice_id}/send-reminder", response_model=SendInvoiceReminderResponse
+)
+def send_invoice_reminder(
+    organization_id: str,
+    invoice_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SendInvoiceReminderResponse:
+    # Shares the exact same rate-limit budget as send-email (not a fresh
+    # one) -- both are "manually trigger an outbound email about this
+    # invoice" actions, so they're rate limited together.
+    enforce_rate_limit(
+        [
+            RateLimitCheck(
+                scope="invoices:send_email:user",
+                identity=user_identity(current_user.id),
+                rules=SEND_INVOICE_EMAIL_RULES,
+            ),
+            RateLimitCheck(
+                scope="invoices:send_email:user_ip",
+                identity=user_ip_identity(request, current_user.id),
+                rules=SEND_INVOICE_EMAIL_RULES,
+            ),
+        ]
     )
+
+    require_org_member(current_user, organization_id, db)
+    require_verified_email(current_user)
+    invoice = _invoice_in_org(db, organization_id, invoice_id)
+
+    try:
+        return send_manual_invoice_reminder(
+            db, organization_id, invoice, triggered_by="manual_button"
+        )
+    except RemindersDisabledError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "reminders_disabled",
+                "message": "Reminders are not enabled for this organization.",
+            },
+        )
+    except InvoiceAlreadyPaidError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "invoice_already_paid",
+                "message": "This invoice is already paid.",
+            },
+        )
+    except InvoiceDueDateMissingError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "invoice_due_date_missing",
+                "message": "This invoice has no due date on file.",
+            },
+        )
+    except CustomerEmailMissingError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "customer_email_missing",
+                "message": "This invoice has no customer email on file.",
+            },
+        )
+    except ReminderAlreadySentError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "reminder_already_sent",
+                "message": "A reminder for this invoice has already been sent today.",
+            },
+        )
+    except ReminderSendFailedError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "reminder_send_failed",
+                "message": "Failed to send the reminder. Please try again later.",
+            },
+        )

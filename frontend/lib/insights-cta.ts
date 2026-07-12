@@ -10,6 +10,8 @@ export function insightCtaHref(cta: InsightCta): string {
   switch (cta.type) {
     case "view_overdue_invoices":
       return "/invoices?status=overdue";
+    case "view_due_soon_invoices":
+      return "/invoices?due_filter=due_soon";
     case "review_pending_invoices":
       return "/invoices?status=pending";
     case "create_invoice":

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 
 import { PaymentStatusSelect } from "@/components/invoices/PaymentStatusSelect";
+import { SendReminderButton } from "@/components/invoices/SendReminderButton";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
@@ -14,6 +15,7 @@ import {
   isRateLimitedError,
 } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { formatDueDateRelative } from "@/lib/invoice-due-date";
 import { formatCurrency } from "@/lib/money";
 import {
   PAYMENT_STATUSES,
@@ -37,6 +39,7 @@ const GENERIC_LOAD_ERROR = "__generic_load_error__";
 
 type PaymentStatusFilter = PaymentStatus | "all";
 type DateRangePreset = "all" | "today" | "week" | "month" | "year";
+type DueFilter = "all" | "overdue" | "due_soon" | "no_due_date";
 type InvoiceSortBy = "invoice_number" | "created_at" | "total" | "customer_name";
 
 const selectClass =
@@ -94,6 +97,7 @@ function InvoicesContent() {
   const debouncedSearch = useDebouncedValue(search, 300);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatusFilter>("all");
   const [dateRange, setDateRange] = useState<DateRangePreset>("all");
+  const [dueFilter, setDueFilter] = useState<DueFilter>("all");
   const [minTotal, setMinTotal] = useState("");
   const [maxTotal, setMaxTotal] = useState("");
   const [sortBy, setSortBy] = useState<InvoiceSortBy>("created_at");
@@ -110,6 +114,7 @@ function InvoicesContent() {
     debouncedSearch.trim() !== "" ||
     paymentStatus !== "all" ||
     dateRange !== "all" ||
+    dueFilter !== "all" ||
     minTotal.trim() !== "" ||
     maxTotal.trim() !== "";
   const isDefaultState =
@@ -136,6 +141,7 @@ function InvoicesContent() {
       if (paymentStatus !== "all") q.set("payment_status", paymentStatus);
       const createdAfter = computeCreatedAfter(dateRange);
       if (createdAfter) q.set("created_after", createdAfter);
+      if (dueFilter !== "all") q.set("due_filter", dueFilter);
       if (minTotal.trim()) q.set("min_total", minTotal.trim());
       if (maxTotal.trim()) q.set("max_total", maxTotal.trim());
 
@@ -154,6 +160,7 @@ function InvoicesContent() {
     debouncedSearch,
     paymentStatus,
     dateRange,
+    dueFilter,
     minTotal,
     maxTotal,
     sortBy,
@@ -165,14 +172,23 @@ function InvoicesContent() {
   }, [load]);
 
   // A dashboard insight's "View overdue invoices" / "Review pending
-  // invoices" CTA links here with ?status=overdue|pending prefilled --
-  // read it once on mount, then strip it from the URL so a later manual
-  // refresh of this page doesn't keep re-applying it over a filter the
-  // user has since changed.
+  // invoices" CTA links here with ?status=overdue|pending or
+  // ?due_filter=due_soon prefilled -- read it once on mount, then strip it
+  // from the URL so a later manual refresh of this page doesn't keep
+  // re-applying it over a filter the user has since changed.
   useEffect(() => {
     const status = searchParams.get("status");
+    const due = searchParams.get("due_filter");
+    let shouldReplace = false;
     if (status && isPaymentStatus(status)) {
       resetToFirstPage(setPaymentStatus)(status);
+      shouldReplace = true;
+    }
+    if (due && ["overdue", "due_soon", "no_due_date"].includes(due)) {
+      resetToFirstPage(setDueFilter)(due as DueFilter);
+      shouldReplace = true;
+    }
+    if (shouldReplace) {
       router.replace("/invoices");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,6 +198,7 @@ function InvoicesContent() {
     setSearch("");
     setPaymentStatus("all");
     setDateRange("all");
+    setDueFilter("all");
     setMinTotal("");
     setMaxTotal("");
     setSortBy("created_at");
@@ -195,7 +212,19 @@ function InvoicesContent() {
       return {
         ...prev,
         items: prev.items.map((row) =>
-          row.id === invoiceId ? { ...row, payment_status } : row
+          row.id === invoiceId
+            ? {
+                ...row,
+                payment_status,
+                // Optimistic-only: paid always wins immediately; the real,
+                // authoritative value comes back on next load() (e.g. after
+                // reverting to pending, whether that's still "pending" or
+                // has since become "overdue" depends on due_date, which
+                // this optimistic update can't recompute client-side).
+                effective_payment_status:
+                  payment_status === "paid" ? "paid" : row.effective_payment_status,
+              }
+            : row
         ),
       };
     });
@@ -316,6 +345,20 @@ function InvoicesContent() {
               <option value="year">{t("invoices.dateYear")}</option>
             </select>
 
+            <select
+              value={dueFilter}
+              onChange={(e) =>
+                resetToFirstPage(setDueFilter)(e.target.value as DueFilter)
+              }
+              className={selectClass}
+              aria-label={t("invoices.dueFilterAriaLabel")}
+            >
+              <option value="all">{t("invoices.dueFilterAll")}</option>
+              <option value="overdue">{t("invoices.dueFilterOverdue")}</option>
+              <option value="due_soon">{t("invoices.dueFilterDueSoon")}</option>
+              <option value="no_due_date">{t("invoices.dueFilterNoDueDate")}</option>
+            </select>
+
             <input
               type="number"
               inputMode="decimal"
@@ -388,6 +431,9 @@ function InvoicesContent() {
                 <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
                   {t("invoices.colCreated")}
                 </th>
+                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                  {t("invoices.colDueDate")}
+                </th>
                 <th className="px-4 py-3 sm:px-6">
                   <span className="sr-only">{t("invoices.colActions")}</span>
                 </th>
@@ -397,7 +443,7 @@ function InvoicesContent() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-8 text-center text-slate-500 sm:px-6"
                   >
                     {t("invoices.loading")}
@@ -406,7 +452,7 @@ function InvoicesContent() {
               ) : showEmpty ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-8 text-center text-slate-500 sm:px-6"
                   >
                     {hasActiveFilters ? (
@@ -430,6 +476,11 @@ function InvoicesContent() {
                   const status = isPaymentStatus(row.payment_status)
                     ? row.payment_status
                     : "pending";
+                  const effectiveStatus = isPaymentStatus(row.effective_payment_status)
+                    ? row.effective_payment_status
+                    : status;
+                  const canRemind =
+                    effectiveStatus !== "paid" && row.due_date !== null && row.customer_id !== null;
 
                   return (
                     <tr key={row.id} className="hover:bg-slate-50/80">
@@ -445,6 +496,7 @@ function InvoicesContent() {
                         <PaymentStatusSelect
                           invoiceId={row.id}
                           value={status}
+                          effectiveValue={effectiveStatus}
                           onUpdated={(next) =>
                             updateInvoiceStatus(row.id, next)
                           }
@@ -461,6 +513,9 @@ function InvoicesContent() {
                       </td>
                       <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
                         {new Date(row.created_at).toLocaleString()}
+                      </td>
+                      <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                        {formatDueDateRelative(row.due_date, effectiveStatus, t)}
                       </td>
                       <td className="px-4 py-3 sm:px-6">
                         <div className="flex flex-wrap gap-2">
@@ -492,6 +547,13 @@ function InvoicesContent() {
                               ? t("invoices.sending")
                               : t("invoices.sendEmail")}
                           </button>
+                          {canRemind ? (
+                            <SendReminderButton
+                              invoiceId={row.id}
+                              invoiceNumber={row.invoice_number}
+                              customerName={row.customer_name}
+                            />
+                          ) : null}
                         </div>
                       </td>
                     </tr>

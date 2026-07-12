@@ -15,7 +15,6 @@ from app.localization import (
     t,
 )
 from app.models import Customer, Invoice
-from app.payment_status import PaymentStatus
 
 
 def build_invoice_email(invoice: Invoice, customer: Customer) -> tuple[str, str]:
@@ -29,7 +28,16 @@ def build_invoice_email(invoice: Invoice, customer: Customer) -> tuple[str, str]
     currency_code = get_currency_code(invoice)
 
     invoice_number = format_invoice_number(invoice.invoice_number)
-    status_label = payment_status_label(language, PaymentStatus(invoice.payment_status))
+    # The derived status (due_date-aware), same source of truth every
+    # other surface displays -- see Invoice.effective_payment_status.
+    status_label = payment_status_label(language, invoice.effective_payment_status)
+    due_date_line = (
+        f"{t(language, 'email_due_date_label')}\n"
+        f"{invoice.due_date.strftime('%B %d, %Y')}\n"
+        "\n"
+        if invoice.due_date is not None
+        else ""
+    )
 
     subject = t(language, "email_subject").format(invoice_number=invoice_number)
     body = (
@@ -40,6 +48,7 @@ def build_invoice_email(invoice: Invoice, customer: Customer) -> tuple[str, str]
         f"{t(language, 'email_invoice_number_label')}\n"
         f"{invoice_number}\n"
         "\n"
+        f"{due_date_line}"
         f"{t(language, 'email_total_label')}\n"
         f"{format_amount(invoice.total, currency_code)}\n"
         "\n"
