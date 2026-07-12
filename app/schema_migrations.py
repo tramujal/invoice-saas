@@ -26,6 +26,8 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_organization_timezone_and_reminders(engine)
     _add_invoice_reminders_table(engine)
     _add_due_date_and_status_indexes(engine)
+    _add_products_table(engine)
+    _add_invoice_line_item_product_id(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -408,6 +410,68 @@ def _add_due_date_and_status_indexes(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_invoices_payment_status "
                 "ON invoices (payment_status)"
+            )
+        )
+
+
+def _add_products_table(engine: Engine) -> None:
+    """Creates products if it's missing -- same idempotent safety net as
+    _add_assistant_actions_table/_add_invoice_reminders_table (Base.metadata.
+    create_all() already creates this table on a fresh database since
+    Product is a declared model)."""
+    inspector = inspect(engine)
+    if "products" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS products ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "name VARCHAR(255) NOT NULL, "
+                "description VARCHAR(1024) NOT NULL DEFAULT '', "
+                "type VARCHAR(16) NOT NULL DEFAULT 'service', "
+                "sku VARCHAR(64) NOT NULL DEFAULT '', "
+                "default_unit_price NUMERIC(14, 2) NOT NULL DEFAULT 0, "
+                "currency_code VARCHAR(8) NOT NULL DEFAULT 'USD', "
+                "default_tax_rate NUMERIC(5, 4) NOT NULL DEFAULT 0, "
+                "active BOOLEAN NOT NULL DEFAULT TRUE, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_products_org_active "
+                "ON products (organization_id, active)"
+            )
+        )
+
+
+def _add_invoice_line_item_product_id(engine: Engine) -> None:
+    """Adds invoice_line_items.product_id, nullable -- a pure analytics
+    tag (see InvoiceLineItem.product_id's docstring in app/models.py),
+    never read back to reconstruct a line's snapshot values. Requires the
+    products table to already exist (see run_startup_migrations' call
+    order: _add_products_table always runs first)."""
+    inspector = inspect(engine)
+    if "invoice_line_items" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("invoice_line_items")}
+    if "product_id" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE invoice_line_items ADD COLUMN product_id CHAR(36) "
+                "NULL REFERENCES products(id) ON DELETE SET NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_invoice_line_items_product_id "
+                "ON invoice_line_items (product_id)"
             )
         )
 

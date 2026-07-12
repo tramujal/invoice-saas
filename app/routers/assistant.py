@@ -15,7 +15,7 @@ from app.ai.factory import get_ai_provider
 from app.ai.limits import ASSISTANT_ACTION_TTL_SECONDS
 from app.ai.prompts import ASSISTANT_SYSTEM_PROMPT
 from app.ai.tools.registry import TOOL_REGISTRY, tool_definitions
-from app.ai.tools.types import ActionToolError, AmbiguousCustomerError
+from app.ai.tools.types import ActionToolError, AmbiguousCustomerError, AmbiguousProductError
 from app.assistant_action_status import AssistantActionStatus
 from app.assistant_context import build_business_context, format_business_context_as_text
 from app.database import get_db
@@ -208,6 +208,15 @@ def assistant_chat(
         try:
             proposal = tool.build_proposal(db, organization_id, current_user, event.arguments)
         except AmbiguousCustomerError as exc:
+            yield _ndjson(
+                {
+                    "type": "clarification_needed",
+                    "code": exc.code,
+                    "candidates": exc.candidate_names,
+                }
+            )
+            return
+        except AmbiguousProductError as exc:
             yield _ndjson(
                 {
                     "type": "clarification_needed",

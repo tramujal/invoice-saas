@@ -21,6 +21,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
 from app.payment_status import PaymentStatus
+from app.product_type import ProductType
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
 from app.schema_migrations import run_startup_migrations
@@ -87,6 +88,7 @@ class Organization(Base):
     )
     customers: Mapped[list["Customer"]] = relationship(back_populates="organization")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="organization")
+    products: Mapped[list["Product"]] = relationship(back_populates="organization")
 
 
 class User(Base):
@@ -282,6 +284,7 @@ class Invoice(Base):
 
 class InvoiceLineItem(Base):
     __tablename__ = "invoice_line_items"
+    __table_args__ = (Index("ix_invoice_line_items_product_id", "product_id"),)
 
     id: Mapped[str] = mapped_column(
         CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -293,8 +296,89 @@ class InvoiceLineItem(Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Purely an analytics tag ("which catalog item generated this line") --
+    # NEVER read back to reconstruct description/unit_price/line_total.
+    # Nullable and ON DELETE SET NULL so a hypothetical product removal
+    # can never cascade into deleting invoice history; description/
+    # quantity/unit_price/line_total above are already a full, permanent
+    # snapshot regardless of what this FK points to (see app.services.
+    # products / app.services.invoices for why this is never re-derived).
+    product_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )
 
     invoice: Mapped["Invoice"] = relationship(back_populates="line_items")
+    product: Mapped["Product | None"] = relationship()
+
+
+class Product(Base):
+    """A reusable catalog entry ("template") for invoice line items --
+    NOT inventory: no stock, no suppliers, no purchase orders. Selecting a
+    product prefills a new invoice line's description/unit_price/currency,
+    but the line always stores its own snapshot (see InvoiceLineItem
+    above) -- changing or archiving a product here can never alter a
+    previously issued invoice.
+    """
+
+    __tablename__ = "products"
+    __table_args__ = (Index("ix_products_org_active", "organization_id", "active"),)
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    type: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=ProductType.service.value,
+        server_default=ProductType.service.value,
+    )
+    # App-level, per-organization soft key only -- no DB uniqueness,
+    # matching Customer.tax_id's exact precedent (duplicate detection is
+    # an application concern; see app.services.products / app.imports.products).
+    sku: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    default_unit_price: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    # Resolved from the organization's current currency at creation time
+    # (see app.currency.get_currency_code) and editable afterward via
+    # PATCH -- it does not silently track the org's default the way
+    # nothing else pinned in this app does either.
+    currency_code: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="USD", server_default="USD"
+    )
+    # A fraction (0..1), matching InvoiceCreateRequest.tax_rate's own
+    # bounds -- stored on the catalog item as a convenience default only;
+    # invoices remain single, invoice-level-tax_rate (see
+    # app.services.invoices.compute_invoice_totals, which never reads
+    # this column). The frontend may prefill a new invoice's tax field
+    # from this value; nothing server-side depends on it.
+    default_tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), nullable=False, default=0, server_default="0"
+    )
+    # The only "removal" mechanism -- there is no DELETE endpoint for
+    # products. Archiving just hides a product from the default catalog
+    # view and the invoice-line autocomplete; it is never actually
+    # removed, so a product referenced by an invoice can never be
+    # physically deleted out from under that invoice's history.
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="products")
 
 
 class InvoiceReminder(Base):

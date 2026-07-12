@@ -11,6 +11,7 @@ from app.effective_status import get_effective_payment_status
 from app.models import Customer, Invoice, Organization, User
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
+from app.product_analytics import get_revenue_by_product
 from app.schemas import (
     CurrencyRevenueSummary,
     DashboardAnalyticsResponse,
@@ -19,6 +20,7 @@ from app.schemas import (
     MonthlySummaryPoint,
     PaymentStatusCountPoint,
     TopCustomerRevenue,
+    TopProductRevenue,
 )
 
 router = APIRouter(
@@ -28,6 +30,7 @@ router = APIRouter(
 RECENT_INVOICES_LIMIT = 5
 MONTHLY_SUMMARY_MONTHS = 6
 TOP_CUSTOMERS_LIMIT = 5
+TOP_PRODUCTS_LIMIT = 5
 
 
 def _quantize_money(value: Decimal) -> Decimal:
@@ -327,11 +330,41 @@ def get_dashboard_analytics_data(db: Session, organization_id: str) -> Dashboard
                 )
             )
 
+    # Ranked top-N independently within each (currency, type) pair -- a
+    # single "top 5 by currency" cut would let a business's many services
+    # crowd out its one product entirely, leaving "top products" empty
+    # even though it sold fine. Same ranked-in-Python approach as
+    # top_customers above, for the same reason.
+    product_revenue_rows = get_revenue_by_product(db, organization_id)
+    rows_by_currency_and_type: dict[tuple[str, str], list] = {}
+    for row in product_revenue_rows:
+        rows_by_currency_and_type.setdefault(
+            (row.currency_code, row.product_type), []
+        ).append(row)
+
+    top_products_and_services: list[TopProductRevenue] = []
+    for key in sorted(rows_by_currency_and_type):
+        ranked = sorted(
+            rows_by_currency_and_type[key], key=lambda r: r.revenue, reverse=True
+        )
+        for row in ranked[:TOP_PRODUCTS_LIMIT]:
+            top_products_and_services.append(
+                TopProductRevenue(
+                    product_id=row.product_id,
+                    product_name=row.product_name,
+                    product_type=row.product_type,
+                    currency_code=row.currency_code,
+                    revenue=_quantize_money(row.revenue),
+                    invoice_count=row.invoice_count,
+                )
+            )
+
     return DashboardAnalyticsResponse(
         monthly_summary=monthly_summary,
         monthly_revenue_by_currency=monthly_revenue_by_currency,
         invoice_count_by_status=invoice_count_by_status,
         top_customers=top_customers,
+        top_products_and_services=top_products_and_services,
     )
 
 

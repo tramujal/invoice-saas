@@ -16,6 +16,8 @@ export function insightCtaHref(cta: InsightCta): string {
       return "/invoices?status=pending";
     case "create_invoice":
       return "/invoices/new";
+    case "view_products":
+      return "/products";
     case "ask_assistant":
       return `/assistant?q=${encodeURIComponent(cta.question ?? "")}`;
     default:

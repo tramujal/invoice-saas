@@ -20,6 +20,7 @@ from app.insights.limits import (
 )
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
+from app.product_type import ProductType
 from app.reminder_settings import (
     REMINDER_DAY_LIST_MAX_LENGTH,
     REMINDER_DAY_MAX,
@@ -58,6 +59,12 @@ class CustomerSortField(str, Enum):
     name = "name"
     email = "email"
     created_at = "created_at"
+
+
+class ProductSortField(str, Enum):
+    name = "name"
+    created_at = "created_at"
+    default_unit_price = "default_unit_price"
 
 
 class OrganizationLanguage(str, Enum):
@@ -307,6 +314,11 @@ class InvoiceLineItemCreate(BaseModel):
     description: str = Field(min_length=1, max_length=512)
     quantity: Decimal = Field(gt=0, decimal_places=4, max_digits=14)
     unit_price: Decimal = Field(ge=0, decimal_places=2, max_digits=14)
+    # Purely an analytics tag ("this line came from this catalog item") --
+    # validated to resolve within the organization at creation time (see
+    # create_invoice_record), but never used to re-derive description/
+    # unit_price/line_total, which always come from this request as-is.
+    product_id: str | None = None
 
 
 class InvoiceCreateRequest(BaseModel):
@@ -337,6 +349,7 @@ class InvoiceLineItemResponse(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     line_total: Decimal
+    product_id: str | None
 
 
 class InvoiceResponse(BaseModel):
@@ -454,6 +467,60 @@ class CustomerUpdateRequest(BaseModel):
         return _check_customer_email_format(value)
 
 
+class ProductCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=1024)
+    type: ProductType = ProductType.service
+    sku: str = Field(default="", max_length=64)
+    default_unit_price: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=14)
+    # None => falls back to the organization's current currency_code at
+    # creation time (see create_product_record) -- same convention as
+    # InvoiceCreateRequest.currency_code.
+    currency_code: CurrencyCode | None = None
+    default_tax_rate: Decimal = Field(
+        default=Decimal("0"), ge=0, le=1, decimal_places=4, max_digits=5
+    )
+
+
+class ProductUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1024)
+    type: ProductType | None = None
+    sku: str | None = Field(default=None, max_length=64)
+    default_unit_price: Decimal | None = Field(
+        default=None, ge=0, decimal_places=2, max_digits=14
+    )
+    currency_code: CurrencyCode | None = None
+    default_tax_rate: Decimal | None = Field(
+        default=None, ge=0, le=1, decimal_places=4, max_digits=5
+    )
+    # Archiving/restoring have their own dedicated endpoints (POST
+    # .../archive, .../restore) rather than this field -- kept off this
+    # schema so a plain profile-edit PATCH can never accidentally flip it.
+
+
+class ProductResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    name: str
+    description: str
+    type: ProductType
+    sku: str
+    default_unit_price: Decimal
+    currency_code: str
+    default_tax_rate: Decimal
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class PaginatedProductsResponse(BaseModel):
+    total: int
+    items: list[ProductResponse]
+
+
 class CurrencyRevenueSummary(BaseModel):
     """Revenue figures for one currency, never combined with any other —
     see the dashboard router for why summing across currencies never
@@ -508,6 +575,21 @@ class TopCustomerRevenue(BaseModel):
     revenue: Decimal
 
 
+class TopProductRevenue(BaseModel):
+    """One catalog item's ranking within one currency -- mirrors
+    TopCustomerRevenue's exact per-currency-safe shape. `product_type`
+    lets the frontend split this single flat list into "top products" vs
+    "top services" client-side, the same way it already filters
+    top_customers by currency."""
+
+    product_id: str
+    product_name: str
+    product_type: str
+    currency_code: str
+    revenue: Decimal
+    invoice_count: int
+
+
 class DashboardAnalyticsResponse(BaseModel):
     monthly_summary: list[MonthlySummaryPoint]
     monthly_revenue_by_currency: list[MonthlyRevenuePoint]
@@ -517,6 +599,9 @@ class DashboardAnalyticsResponse(BaseModel):
     # tagged with currency_code so the frontend can filter to one
     # currency at a time without ever summing revenue across currencies.
     top_customers: list[TopCustomerRevenue]
+    # Same independent-per-currency ranking, for catalog items -- see
+    # TopProductRevenue.
+    top_products_and_services: list[TopProductRevenue]
 
 
 class InsightMetricResponse(BaseModel):
@@ -538,6 +623,7 @@ class InsightCtaResponse(BaseModel):
         "review_pending_invoices",
         "create_invoice",
         "ask_assistant",
+        "view_products",
     ]
     # Only set for type == "ask_assistant" -- a deterministic, already-
     # localized prefill question, never AI-generated.

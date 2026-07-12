@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.limits import AI_MAX_LINE_ITEMS
 from app.ai.tools.base import ActionTool
+from app.ai.tools.products import resolve_product_by_name
 from app.ai.tools.types import (
     ActionToolError,
     AmbiguousCustomerError,
@@ -28,6 +29,7 @@ from app.ai.tools.types import (
     InvoiceAlreadyPaidError,
     InvoiceDueDateMissingError,
     InvoiceNotFoundError,
+    LineItemIncompleteError,
     ProposalResult,
     ReminderAlreadySentError,
     RemindersDisabledError,
@@ -115,17 +117,95 @@ def _resolve_invoice(db: Session, organization_id: str, invoice_reference: str):
 # --- create_invoice_draft ---------------------------------------------------
 
 
+class AiInvoiceLineItemInput(BaseModel):
+    """What the model supplies per line -- looser than
+    schemas.InvoiceLineItemCreate: either `product_name` (resolved
+    server-side, active products only, exactly like customer_name above)
+    or an explicit `description`+`unit_price`, never both required. Lets
+    "Create an invoice with Hosting Premium" work without the model
+    needing to know or invent a price, while still supporting a plain
+    manual line with no catalog item behind it, exactly like today."""
+
+    product_name: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "A catalog product/service name, or a distinctive part of it, exactly as "
+            "known to this business. Omit for a one-off line item with no catalog entry."
+        ),
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=512,
+        description=(
+            "Required only when product_name is omitted. If given alongside "
+            "product_name, overrides the product's own name for this line."
+        ),
+    )
+    quantity: Decimal = Field(default=Decimal("1"), gt=0, decimal_places=4, max_digits=14)
+    unit_price: Decimal | None = Field(
+        default=None,
+        ge=0,
+        decimal_places=2,
+        max_digits=14,
+        description=(
+            "Required only when product_name is omitted. If given alongside "
+            "product_name, overrides the product's default price for this line."
+        ),
+    )
+
+
+def _resolve_line_items(
+    db: Session, organization_id: str, lines: list[AiInvoiceLineItemInput]
+) -> list[InvoiceLineItemCreate]:
+    """Resolves each model-supplied line into an ordinary
+    InvoiceLineItemCreate (now carrying product_id) -- the exact same
+    shape the direct HTTP create-invoice endpoint uses, so execute() and
+    create_invoice_record need no special-casing for the AI path."""
+    resolved: list[InvoiceLineItemCreate] = []
+    for line in lines:
+        if line.product_name:
+            product = resolve_product_by_name(db, organization_id, line.product_name)
+            description = line.description or product.name
+            unit_price = (
+                line.unit_price if line.unit_price is not None else product.default_unit_price
+            )
+            resolved.append(
+                InvoiceLineItemCreate(
+                    description=description,
+                    quantity=line.quantity,
+                    unit_price=unit_price,
+                    product_id=product.id,
+                )
+            )
+        else:
+            if line.description is None or line.unit_price is None:
+                raise LineItemIncompleteError(
+                    "Each line needs either a product name, or both a description and unit price."
+                )
+            resolved.append(
+                InvoiceLineItemCreate(
+                    description=line.description,
+                    quantity=line.quantity,
+                    unit_price=line.unit_price,
+                    product_id=None,
+                )
+            )
+    return resolved
+
+
 class CreateInvoiceDraftInput(BaseModel):
-    """What the model calls the tool with. No customer_id/invoice_id field
-    exists anywhere in this schema -- the model has no way to inject a raw
-    id; only a free-text name it does not control the resolution of."""
+    """What the model calls the tool with. No customer_id/invoice_id/
+    product_id field exists anywhere in this schema -- the model has no
+    way to inject a raw id; only free-text names it does not control the
+    resolution of."""
 
     customer_name: str = Field(
         min_length=1,
         max_length=255,
         description="The customer's name, or a distinctive part of it, exactly as known to this business.",
     )
-    line_items: list[InvoiceLineItemCreate] = Field(min_length=1, max_length=AI_MAX_LINE_ITEMS)
+    line_items: list[AiInvoiceLineItemInput] = Field(min_length=1, max_length=AI_MAX_LINE_ITEMS)
     tax_rate: Decimal = Field(
         default=Decimal("0"),
         ge=0,
@@ -164,12 +244,13 @@ class CreateInvoiceDraftTool(ActionTool):
     ) -> ProposalResult:
         data = CreateInvoiceDraftInput.model_validate(raw_input)
         customer = _resolve_customer_by_name(db, organization_id, data.customer_name)
+        resolved_line_items = _resolve_line_items(db, organization_id, data.line_items)
 
         # Preview totals only -- never a DB write, never consumes the
         # invoice-number sequence. execute() recomputes these again from
         # the same resolved line items; this preview is never trusted as
         # authoritative.
-        totals = compute_invoice_totals(data.line_items, data.tax_rate)
+        totals = compute_invoice_totals(resolved_line_items, data.tax_rate)
 
         organization = db.get(Organization, organization_id)
         currency_code = (
@@ -180,7 +261,7 @@ class CreateInvoiceDraftTool(ActionTool):
 
         resolved = CreateInvoiceDraftResolved(
             customer_id=customer.id,
-            line_items=data.line_items,
+            line_items=resolved_line_items,
             tax_rate=data.tax_rate,
             currency_code=data.currency_code,
         )
@@ -195,7 +276,7 @@ class CreateInvoiceDraftTool(ActionTool):
                     "unit_price": str(line.unit_price),
                     "line_total": str(line_total),
                 }
-                for line, line_total in zip(data.line_items, totals.line_totals)
+                for line, line_total in zip(resolved_line_items, totals.line_totals)
             ],
             "tax_rate": str(data.tax_rate),
             "subtotal": str(totals.subtotal),

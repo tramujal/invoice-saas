@@ -29,6 +29,7 @@ from app.insights.queries import get_due_soon_invoice_details, get_overdue_invoi
 from app.invoice_numbering import format_invoice_number
 from app.localization import get_language, t
 from app.models import Customer, InvoiceReminder, Organization
+from app.product_analytics import get_dormant_products
 from app.reminder_status import ReminderStatus
 from app.routers.dashboard import get_dashboard_analytics_data, get_dashboard_summary
 from app.schemas import DashboardAnalyticsResponse, DashboardResponse
@@ -38,6 +39,8 @@ DUE_SOON_INVOICES_LIMIT = 10
 STALE_CUSTOMERS_LIMIT = 10
 STALE_CUSTOMER_DAYS = 60
 REMINDER_SUMMARY_DAYS = 30
+DORMANT_PRODUCTS_LIMIT = 10
+DORMANT_PRODUCTS_DAYS = 90
 
 
 @dataclass
@@ -65,6 +68,13 @@ class StaleCustomerInfo:
 
 
 @dataclass
+class DormantProductInfo:
+    name: str
+    product_type: str
+    days_since_last_sale: int
+
+
+@dataclass
 class BusinessContext:
     organization_name: str
     language: str
@@ -74,6 +84,7 @@ class BusinessContext:
     due_soon_invoice_list: list[DueSoonInvoiceInfo]
     stale_customers: list[StaleCustomerInfo]
     reminders_sent_recently: int
+    dormant_products: list[DormantProductInfo]
 
 
 def _overdue_invoice_list(db: Session, organization_id: str) -> list[OverdueInvoiceInfo]:
@@ -151,6 +162,18 @@ def _stale_customers(db: Session, organization_id: str, now: datetime) -> list[S
     return stale[:STALE_CUSTOMERS_LIMIT]
 
 
+def _dormant_products(db: Session, organization_id: str, now: datetime) -> list[DormantProductInfo]:
+    """Products that have sold before but not recently -- "stopped
+    selling," bounded the same way every other list in this module is.
+    Reuses app.product_analytics.get_dormant_products, the same query the
+    insights engine's dormant-product data-quality signal uses."""
+    dormant = get_dormant_products(db, organization_id, now, DORMANT_PRODUCTS_DAYS)
+    return [
+        DormantProductInfo(name=product.name, product_type=product.type, days_since_last_sale=days)
+        for product, days in dormant[:DORMANT_PRODUCTS_LIMIT]
+    ]
+
+
 def build_business_context(db: Session, organization_id: str) -> BusinessContext:
     """Assumes the caller has already authorized the request (require_org_member
     + require_verified_email) — this function does not re-check
@@ -168,6 +191,7 @@ def build_business_context(db: Session, organization_id: str) -> BusinessContext
         due_soon_invoice_list=_due_soon_invoice_list(db, organization_id),
         stale_customers=_stale_customers(db, organization_id, now),
         reminders_sent_recently=_reminders_sent_recently(db, organization_id, now),
+        dormant_products=_dormant_products(db, organization_id, now),
     )
 
 
@@ -279,6 +303,40 @@ def format_business_context_as_text(context: BusinessContext) -> str:
             lines.append(f"- {t(language, 'assistant_no_data_note')}")
         for currency_code in sorted(by_currency):
             lines.append(f"- {currency_code}: " + "; ".join(by_currency[currency_code]))
+
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_top_products_heading')} (max 5 per currency):")
+    products_by_currency: dict[str, list[str]] = {}
+    services_by_currency: dict[str, list[str]] = {}
+    for row in context.analytics.top_products_and_services:
+        target = products_by_currency if row.product_type == "product" else services_by_currency
+        target.setdefault(row.currency_code, []).append(
+            f"{row.product_name} ({format_amount(row.revenue, row.currency_code)}, "
+            f"{row.invoice_count} invoices)"
+        )
+    if not products_by_currency and not services_by_currency:
+        lines.append(f"- {t(language, 'assistant_no_data_note')}")
+    else:
+        for currency_code in sorted(products_by_currency):
+            lines.append(
+                f"- {t(language, 'assistant_products_label')} {currency_code}: "
+                + "; ".join(products_by_currency[currency_code])
+            )
+        for currency_code in sorted(services_by_currency):
+            lines.append(
+                f"- {t(language, 'assistant_services_label')} {currency_code}: "
+                + "; ".join(services_by_currency[currency_code])
+            )
+
+    lines.append("")
+    lines.append(
+        f"{t(language, 'assistant_dormant_products_heading')} "
+        f"({DORMANT_PRODUCTS_DAYS}+ days, max {DORMANT_PRODUCTS_LIMIT}):"
+    )
+    if not context.dormant_products:
+        lines.append(f"- {t(language, 'assistant_no_dormant_products')}")
+    for dormant in context.dormant_products:
+        lines.append(f"- {dormant.name} — {t(language, 'assistant_days_since_last_sale').format(days=dormant.days_since_last_sale)}")
 
     lines.append("")
     lines.append(

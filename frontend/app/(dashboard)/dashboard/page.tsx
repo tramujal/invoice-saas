@@ -12,6 +12,8 @@ import { PaymentStatusChart } from "@/components/dashboard/PaymentStatusChart";
 import { RevenueTrendCard } from "@/components/dashboard/RevenueTrendCard";
 import { RevenueTrendLineChart } from "@/components/dashboard/RevenueTrendLineChart";
 import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
+import { TopProductsChart } from "@/components/dashboard/TopProductsChart";
+import { TopServicesChart } from "@/components/dashboard/TopServicesChart";
 import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
@@ -114,6 +116,9 @@ export default function DashboardPage() {
     (point) => point.currency_code === effectiveCurrency
   );
   const filteredTopCustomers = (analytics?.top_customers ?? []).filter(
+    (row) => row.currency_code === effectiveCurrency
+  );
+  const filteredTopProductsAndServices = (analytics?.top_products_and_services ?? []).filter(
     (row) => row.currency_code === effectiveCurrency
   );
 
@@ -238,6 +243,14 @@ export default function DashboardPage() {
               />
               <TopCustomersChart
                 data={filteredTopCustomers}
+                loading={loading}
+              />
+              <TopProductsChart
+                data={filteredTopProductsAndServices}
+                loading={loading}
+              />
+              <TopServicesChart
+                data={filteredTopProductsAndServices}
                 loading={loading}
               />
             </div>

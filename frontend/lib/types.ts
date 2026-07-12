@@ -1,4 +1,5 @@
 import type { PaymentStatus } from "@/lib/payment-status";
+import type { ProductType } from "@/lib/product-type";
 
 export type InvoiceSummary = {
   id: string;
@@ -95,6 +96,10 @@ export type InvoiceLineItemResponse = {
   quantity: string;
   unit_price: string;
   line_total: string;
+  /** Purely an analytics tag ("this line came from this catalog item") --
+   * never used to re-derive description/unit_price/line_total, which are
+   * always this line's own permanent snapshot. */
+  product_id: string | null;
 };
 
 /** Response from POST /organizations/{org}/invoices */
@@ -225,12 +230,49 @@ export type TopCustomerRevenue = {
   revenue: string;
 };
 
+/** Same independent-per-currency ranking, for catalog items -- ranked
+ * independently per (currency_code, product_type) pair, so "top products"
+ * and "top services" never crowd each other out. Filter this one flat
+ * list by product_type client-side, the same way top_customers is
+ * already filtered by currency. */
+export type TopProductRevenue = {
+  product_id: string;
+  product_name: string;
+  product_type: ProductType;
+  currency_code: string;
+  revenue: string;
+  invoice_count: number;
+};
+
 /** Response from GET /organizations/{org}/dashboard/analytics */
 export type DashboardAnalytics = {
   monthly_summary: MonthlySummaryPoint[];
   monthly_revenue_by_currency: MonthlyRevenuePoint[];
   invoice_count_by_status: PaymentStatusCountPoint[];
   top_customers: TopCustomerRevenue[];
+  top_products_and_services: TopProductRevenue[];
+};
+
+/** Response from GET/POST/PATCH .../products, .../products/{id}/archive,
+ * .../products/{id}/restore */
+export type Product = {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string;
+  type: ProductType;
+  sku: string;
+  default_unit_price: string;
+  currency_code: string;
+  default_tax_rate: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PaginatedProducts = {
+  total: number;
+  items: Product[];
 };
 
 // --- Dashboard business insights -----------------------------------------
@@ -247,7 +289,8 @@ export type InsightCtaType =
   | "view_due_soon_invoices"
   | "review_pending_invoices"
   | "create_invoice"
-  | "ask_assistant";
+  | "ask_assistant"
+  | "view_products";
 
 export type InsightMetric = {
   currency_code: string | null;

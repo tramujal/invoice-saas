@@ -1,0 +1,85 @@
+"use client";
+
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type TooltipValueType,
+} from "recharts";
+
+import { useTranslation } from "@/lib/i18n/useTranslation";
+import { formatMoney } from "@/lib/money";
+import type { TopProductRevenue } from "@/lib/types";
+
+type TopServicesChartProps = {
+  /** The full top_products_and_services list -- filtered to type ===
+   * "service" internally; see TopProductsChart's own note. */
+  data: TopProductRevenue[];
+  loading?: boolean;
+};
+
+export function TopServicesChart({ data, loading = false }: TopServicesChartProps) {
+  const { t } = useTranslation();
+  const chartData = data
+    .filter((row) => row.product_type === "service")
+    .map((row) => ({
+      name: row.product_name,
+      revenue: Number.parseFloat(row.revenue),
+    }));
+
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {t("dashboard.topServicesTitle")}
+      </h2>
+
+      {loading ? (
+        <div className="mt-5 h-56 w-full animate-pulse rounded-lg bg-slate-100" />
+      ) : chartData.length === 0 ? (
+        <p className="mt-5 text-sm text-slate-500">{t("dashboard.topServicesEmpty")}</p>
+      ) : (
+        <div className="mt-4 h-56 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+              <XAxis
+                type="number"
+                tick={{ fontSize: 12, fill: "#64748b" }}
+                axisLine={{ stroke: "#e2e8f0" }}
+                tickLine={false}
+                tickFormatter={(value: number) => formatMoney(value)}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 12, fill: "#64748b" }}
+                axisLine={false}
+                tickLine={false}
+                width={100}
+              />
+              <Tooltip
+                formatter={(value: TooltipValueType | undefined) => formatMoney(Number(value))}
+                contentStyle={{ borderRadius: 8, borderColor: "#e2e8f0", fontSize: 12 }}
+              />
+              <Bar
+                dataKey="revenue"
+                name={t("dashboard.revenueLabel")}
+                fill="#7c3aed"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={24}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </article>
+  );
+}

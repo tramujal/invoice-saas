@@ -28,7 +28,7 @@ import {
   resolveDefaultInvoiceCurrency,
   type CurrencyCode,
 } from "@/lib/organization-settings";
-import type { Customer, InvoiceCreatedResponse } from "@/lib/types";
+import type { Customer, InvoiceCreatedResponse, PaginatedProducts, Product } from "@/lib/types";
 
 function todayDateString(): string {
   return new Date().toISOString().slice(0, 10);
@@ -39,6 +39,11 @@ type LineDraft = {
   description: string;
   quantity: string;
   unit_price: string;
+  // A pure analytics tag ("this line came from this catalog item") -- see
+  // InvoiceLineItemCreate.product_id. Cleared the moment the description
+  // no longer matches the linked product's name, since at that point it's
+  // effectively a different, manually-described line.
+  product_id: string | null;
 };
 
 function newLineId(): string {
@@ -57,6 +62,17 @@ export default function NewInvoicePage() {
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customerId, setCustomerId] = useState<string>("");
   const [taxPercent, setTaxPercent] = useState<string>("0");
+  // Once the user edits tax by hand, auto-prefilling from a selected
+  // product's default_tax_rate stops -- same "manually set" gating already
+  // used for currencyManuallySet below.
+  const [taxManuallySet, setTaxManuallySet] = useState(false);
+
+  const [products, setProducts] = useState<Product[]>([]);
+  useEffect(() => {
+    apiFetch<PaginatedProducts>(`${orgPath("products")}?active=true&limit=100`)
+      .then((res) => setProducts(res.items))
+      .catch(() => setProducts([]));
+  }, []);
 
   // Read on the client only, after hydration — see invoices/page.tsx for why.
   const [orgCurrency, setOrgCurrency] = useState<string | null>(null);
@@ -86,6 +102,7 @@ export default function NewInvoicePage() {
       description: "",
       quantity: "1",
       unit_price: "0",
+      product_id: null,
     },
   ]);
 
@@ -166,6 +183,60 @@ export default function NewInvoicePage() {
     );
   }
 
+  // Only products in the invoice's own currency are ever offered -- this
+  // app never mixes currencies, and picking a customer never changes the
+  // invoice's currency either, so a product picker in a different
+  // currency simply isn't a match for this invoice (see the plan's
+  // "products are single-currency, like invoices" decision).
+  const productsForCurrency = useMemo(
+    () => products.filter((p) => p.currency_code === currencyCode),
+    [products, currencyCode]
+  );
+
+  // Prefills the invoice's single tax-rate field from a product's
+  // default_tax_rate, but only while every product line added so far
+  // shares one rate and the user hasn't touched tax manually -- the
+  // moment either stops being true, this simply does nothing further,
+  // leaving tax as a normal editable field (see the plan's tax decision).
+  function maybePrefillTaxFromLines(candidateLines: LineDraft[]) {
+    if (taxManuallySet) return;
+    const rates = new Set(
+      candidateLines
+        .map((l) => products.find((p) => p.id === l.product_id)?.default_tax_rate)
+        .filter((r): r is string => r !== undefined)
+    );
+    if (rates.size === 1) {
+      const rate = Number(Array.from(rates)[0]);
+      if (Number.isFinite(rate)) setTaxPercent(String(rate * 100));
+    }
+  }
+
+  function selectProduct(lineId: string, product: Product) {
+    setLines((prev) => {
+      const next = prev.map((row) =>
+        row.id === lineId
+          ? {
+              ...row,
+              description: product.name,
+              unit_price: product.default_unit_price,
+              product_id: product.id,
+            }
+          : row
+      );
+      maybePrefillTaxFromLines(next);
+      return next;
+    });
+  }
+
+  function handleDescriptionChange(lineId: string, value: string) {
+    const matched = productsForCurrency.find((p) => p.name === value);
+    if (matched) {
+      selectProduct(lineId, matched);
+    } else {
+      updateLine(lineId, { description: value, product_id: null });
+    }
+  }
+
   function addLine() {
     setLines((prev) => [
       ...prev,
@@ -174,6 +245,7 @@ export default function NewInvoicePage() {
         description: "",
         quantity: "1",
         unit_price: "0",
+        product_id: null,
       },
     ]);
   }
@@ -190,7 +262,7 @@ export default function NewInvoicePage() {
       const description = line.description.trim();
       const quantity = parseQuantity(line.quantity);
       const unit_price = parseUnitPrice(line.unit_price);
-      return { description, quantity, unit_price };
+      return { description, quantity, unit_price, product_id: line.product_id };
     });
 
     for (const row of parsedLines) {
@@ -218,6 +290,7 @@ export default function NewInvoicePage() {
         description: r.description,
         quantity: r.quantity,
         unit_price: r.unit_price,
+        product_id: r.product_id,
       })),
       tax_rate: taxRateFraction,
       currency_code: currencyCode,
@@ -421,15 +494,24 @@ export default function NewInvoicePage() {
                     </label>
                     <input
                       type="text"
+                      list={`product-options-${line.id}`}
                       value={line.description}
-                      onChange={(e) =>
-                        updateLine(line.id, { description: e.target.value })
-                      }
+                      onChange={(e) => handleDescriptionChange(line.id, e.target.value)}
                       disabled={isSubmitting}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
                       placeholder={t("invoiceForm.descriptionPlaceholder")}
                       autoComplete="off"
                     />
+                    <datalist id={`product-options-${line.id}`}>
+                      {productsForCurrency.map((p) => (
+                        <option key={p.id} value={p.name} />
+                      ))}
+                    </datalist>
+                    {line.product_id ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        {t("invoiceForm.productLinkedNote")}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="grid grid-cols-2 gap-3 sm:col-span-4 sm:grid-cols-2">
                     <div>
@@ -497,7 +579,10 @@ export default function NewInvoicePage() {
                 max="100"
                 step="0.01"
                 value={taxPercent}
-                onChange={(e) => setTaxPercent(e.target.value)}
+                onChange={(e) => {
+                  setTaxPercent(e.target.value);
+                  setTaxManuallySet(true);
+                }}
                 disabled={isSubmitting}
                 className="mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 sm:max-w-none"
               />

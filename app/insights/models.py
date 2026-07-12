@@ -30,6 +30,7 @@ class InsightCategory(str, Enum):
     new_business = "new_business"
     multi_currency = "multi_currency"
     data_quality = "data_quality"
+    product_revenue = "product_revenue"
 
 
 # Higher = shown first. "positive" ranks above plain "info" since a strong

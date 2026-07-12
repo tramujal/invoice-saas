@@ -40,6 +40,7 @@ from app.services.invoices import (
     InvoiceAlreadyPaidError,
     InvoiceDueDateMissingError,
     InvoiceNotFoundError,
+    ProductNotFoundInOrgError,
     RemindersDisabledError,
     ReminderAlreadySentError,
     ReminderSendFailedError,
@@ -324,6 +325,14 @@ def create_invoice(
             detail={
                 "code": "due_date_before_issue_date",
                 "message": "Due date cannot be before the issue date.",
+            },
+        )
+    except ProductNotFoundInOrgError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "product_not_found",
+                "message": "One of the selected products was not found in this organization.",
             },
         )
 

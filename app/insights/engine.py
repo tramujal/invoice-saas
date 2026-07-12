@@ -68,6 +68,12 @@ from app.insights.queries import (
 from app.invoice_numbering import format_invoice_number
 from app.localization import t
 from app.models import Customer
+from app.product_analytics import (
+    get_dormant_products,
+    get_product_revenue_this_and_last_month,
+    get_products_never_invoiced,
+    get_revenue_by_product,
+)
 from app.routers.dashboard import (
     get_dashboard_analytics_data,
     get_dashboard_summary,
@@ -97,6 +103,16 @@ INACTIVITY_WARNING_DAYS = 90
 MOST_PAID_THRESHOLD = 0.8
 HIGH_OVERDUE_SHARE_THRESHOLD = 0.3
 VOLUME_CHANGE_NOTABLE_THRESHOLD = 10.0  # percent
+
+# A single product's month-to-month revenue is naturally noisier than a
+# whole currency's total (fewer invoices to average over), so these bars
+# are deliberately higher than VOLUME_CHANGE_NOTABLE_THRESHOLD/the
+# org-wide revenue trend's +-10% -- otherwise nearly every product would
+# trigger a "decline" or "growth" insight every single month.
+PRODUCT_DECLINE_WARNING_THRESHOLD = -30.0  # percent
+PRODUCT_DECLINE_CRITICAL_THRESHOLD = -50.0  # percent
+PRODUCT_GROWTH_NOTABLE_THRESHOLD = 50.0  # percent
+PRODUCT_DORMANT_DAYS = 90  # matches INACTIVITY_WARNING_DAYS's own bar
 
 
 def _severity_priority(severity: InsightSeverity, magnitude: float) -> float:
@@ -141,6 +157,7 @@ def build_insights(
     candidates.extend(_due_soon_insights(db, organization_id, language))
     candidates.extend(_pending_insights(db, organization_id, summary, language))
     candidates.extend(_concentration_insights(summary, analytics, language))
+    candidates.extend(_product_revenue_insights(db, organization_id, analytics, now, language))
 
     inactivity = _inactivity_insight(last_invoice_at, customers, now, language)
     if inactivity is not None:
@@ -162,7 +179,7 @@ def build_insights(
         candidates.append(multi_currency)
 
     data_quality = _data_quality_insight(
-        db, organization_id, last_invoice_at, len(customers), language
+        db, organization_id, last_invoice_at, len(customers), now, language
     )
     if data_quality is not None:
         candidates.append(data_quality)
@@ -530,6 +547,135 @@ def _concentration_insights(summary, analytics, language: str) -> list[Insight]:
     return insights
 
 
+def _product_revenue_insights(
+    db: Session, organization_id: str, analytics, now: datetime, language: str
+) -> list[Insight]:
+    """Top revenue product/service (one per currency) plus, where the
+    data actually supports it, the single most notable product-level
+    decline or growth per currency -- reapplies the exact month-over-month
+    growth-percent formula _revenue_trend_insights already uses, just
+    grouped by product instead of currency. Never one insight per product
+    -- only the most extreme signal per currency, matching every other
+    category's "at most one insight per currency" rule."""
+    insights: list[Insight] = []
+
+    # --- top revenue product/service ---
+    # analytics.top_products_and_services is already ranked+capped
+    # independently per (currency, type) by get_dashboard_analytics_data;
+    # here we just pick the single highest-revenue entry per currency
+    # across both types.
+    top_by_currency: dict[str, object] = {}
+    for row in analytics.top_products_and_services:
+        current = top_by_currency.get(row.currency_code)
+        if current is None or row.revenue > current.revenue:
+            top_by_currency[row.currency_code] = row
+
+    for code, top in top_by_currency.items():
+        insights.append(
+            Insight(
+                id=f"top_product:{code}",
+                category=InsightCategory.product_revenue,
+                severity=InsightSeverity.positive,
+                title=t(language, "insight_top_product_title").format(
+                    product=top.product_name, currency=code
+                ),
+                message=t(language, "insight_top_product_message").format(
+                    product=top.product_name,
+                    currency=code,
+                    amount=str(top.revenue),
+                    count=top.invoice_count,
+                ),
+                suggestion=None,
+                metric=InsightMetric(currency_code=code, value=top.revenue, percentage=None),
+                related_entity=None,
+                cta=InsightCta(type="view_products"),
+                priority_score=_severity_priority(InsightSeverity.positive, 0.25),
+            )
+        )
+
+    # --- product-level decline / unusual growth ---
+    growth_map = get_product_revenue_this_and_last_month(db, organization_id, now)
+    name_by_id = {
+        row.product_id: row.product_name for row in get_revenue_by_product(db, organization_id)
+    }
+
+    best_decline: dict[str, tuple[float, str, Decimal, Decimal]] = {}
+    best_growth: dict[str, tuple[float, str, Decimal, Decimal]] = {}
+    for (product_id, currency_code), (this_month, last_month) in growth_map.items():
+        if last_month <= 0:
+            continue  # no real prior baseline -- a first sale, not a trend
+        name = name_by_id.get(product_id)
+        if name is None:
+            continue
+        growth_percent = float((this_month - last_month) / last_month * 100)
+
+        if growth_percent <= PRODUCT_DECLINE_WARNING_THRESHOLD:
+            current = best_decline.get(currency_code)
+            if current is None or growth_percent < current[0]:
+                best_decline[currency_code] = (growth_percent, name, this_month, last_month)
+        elif growth_percent >= PRODUCT_GROWTH_NOTABLE_THRESHOLD:
+            current = best_growth.get(currency_code)
+            if current is None or growth_percent > current[0]:
+                best_growth[currency_code] = (growth_percent, name, this_month, last_month)
+
+    for code, (growth_percent, name, this_month, last_month) in best_decline.items():
+        severity = (
+            InsightSeverity.critical
+            if growth_percent <= PRODUCT_DECLINE_CRITICAL_THRESHOLD
+            else InsightSeverity.warning
+        )
+        insights.append(
+            Insight(
+                id=f"product_decline:{code}",
+                category=InsightCategory.product_revenue,
+                severity=severity,
+                title=t(language, "insight_product_decline_title").format(
+                    product=name, percentage=f"{abs(growth_percent):.0f}"
+                ),
+                message=t(language, "insight_product_decline_message").format(
+                    product=name,
+                    currency=code,
+                    this_month=str(this_month),
+                    last_month=str(last_month),
+                    percentage=f"{abs(growth_percent):.0f}",
+                ),
+                suggestion=t(language, "insight_product_decline_suggestion").format(product=name),
+                metric=InsightMetric(currency_code=code, value=this_month, percentage=growth_percent),
+                related_entity=None,
+                cta=InsightCta(type="view_products"),
+                priority_score=_severity_priority(severity, min(abs(growth_percent) / 100, 1.0)),
+            )
+        )
+
+    for code, (growth_percent, name, this_month, last_month) in best_growth.items():
+        insights.append(
+            Insight(
+                id=f"product_growth:{code}",
+                category=InsightCategory.product_revenue,
+                severity=InsightSeverity.positive,
+                title=t(language, "insight_product_growth_title").format(
+                    product=name, percentage=f"{growth_percent:.0f}"
+                ),
+                message=t(language, "insight_product_growth_message").format(
+                    product=name,
+                    currency=code,
+                    this_month=str(this_month),
+                    last_month=str(last_month),
+                    percentage=f"{growth_percent:.0f}",
+                ),
+                suggestion=None,
+                metric=InsightMetric(currency_code=code, value=this_month, percentage=growth_percent),
+                related_entity=None,
+                cta=None,
+                priority_score=_severity_priority(
+                    InsightSeverity.positive, min(growth_percent / 100, 1.0)
+                ),
+            )
+        )
+
+    return insights
+
+
 def _inactivity_insight(
     last_invoice_at: dict[str, datetime],
     customers: list[Customer],
@@ -728,12 +874,22 @@ def _data_quality_insight(
     organization_id: str,
     last_invoice_at: dict[str, datetime],
     total_customers: int,
+    now: datetime,
     language: str,
 ) -> Insight | None:
     invoices_without_customer = get_invoices_without_customer_count(db, organization_id)
     customers_missing_phone = get_customers_missing_phone_count(db, organization_id)
     never_invoiced = max(total_customers - len(last_invoice_at), 0)
     invoices_missing_due_date = get_invoices_missing_due_date_count(db, organization_id)
+    # Both catalog-hygiene signals only ever consider currently-active
+    # products -- an insight about an already-archived product isn't
+    # actionable (see app.product_analytics's own module docstring).
+    products_never_invoiced = len(
+        get_products_never_invoiced(db, organization_id, active_only=True)
+    )
+    products_dormant = len(
+        get_dormant_products(db, organization_id, now, PRODUCT_DORMANT_DAYS)
+    )
 
     parts: list[tuple[str, int]] = []
     if invoices_without_customer > 0:
@@ -744,6 +900,10 @@ def _data_quality_insight(
         parts.append(("customers_never_invoiced", never_invoiced))
     if invoices_missing_due_date > 0:
         parts.append(("invoices_missing_due_date", invoices_missing_due_date))
+    if products_never_invoiced > 0:
+        parts.append(("products_never_invoiced", products_never_invoiced))
+    if products_dormant > 0:
+        parts.append(("products_dormant", products_dormant))
 
     if not parts:
         return None

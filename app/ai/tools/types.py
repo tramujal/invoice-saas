@@ -91,3 +91,28 @@ class InvoiceDueDateMissingError(ActionToolError):
 
 class ReminderAlreadySentError(ActionToolError):
     code = "reminder_already_sent"
+
+
+class AmbiguousProductError(ActionToolError):
+    """0 matches would be ProductNotFoundError; this is 2+ matches for a
+    product_name search among this organization's active products -- the
+    caller must ask the user to clarify rather than guessing which one
+    was meant."""
+
+    code = "ambiguous_product"
+
+    def __init__(self, candidate_names: list[str]):
+        super().__init__("Multiple products match this name.")
+        self.candidate_names = candidate_names[:5]
+
+
+class ProductNotFoundError(ActionToolError):
+    code = "product_not_found"
+
+
+class LineItemIncompleteError(ActionToolError):
+    """A line item supplied neither a resolvable product_name nor an
+    explicit description+unit_price -- there's nothing to build a line
+    from."""
+
+    code = "line_item_incomplete"

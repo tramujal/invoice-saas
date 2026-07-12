@@ -41,6 +41,7 @@ from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
+from app.services.products import ProductNotFoundError, get_product_in_org
 from app.schemas import (
     CurrencyCode,
     InvoiceLineItemCreate,
@@ -57,6 +58,11 @@ class InvoiceNotFoundError(Exception):
 
 class CustomerNotFoundInOrgError(Exception):
     """customer_id doesn't reference a customer in this organization."""
+
+
+class ProductNotFoundInOrgError(Exception):
+    """A line item's product_id doesn't reference a product in this
+    organization."""
 
 
 class CustomerEmailMissingError(Exception):
@@ -172,6 +178,18 @@ def create_invoice_record(
     must not be before the organization's local today (see
     app.org_time.get_organization_today); this is the only validation
     performed here, since a due date has no other constraints."""
+    # A line's product_id is purely an analytics tag (see
+    # InvoiceLineItem.product_id's docstring) -- validated to resolve
+    # within this organization here, but description/quantity/unit_price
+    # below always come from `line_items` as given, never re-derived from
+    # the live product row.
+    for line in line_items:
+        if line.product_id is not None:
+            try:
+                get_product_in_org(db, organization_id, line.product_id)
+            except ProductNotFoundError:
+                raise ProductNotFoundInOrgError(line.product_id)
+
     totals = compute_invoice_totals(line_items, tax_rate)
     line_models = [
         InvoiceLineItem(
@@ -179,6 +197,7 @@ def create_invoice_record(
             quantity=line.quantity,
             unit_price=_quantize_money(line.unit_price),
             line_total=line_total,
+            product_id=line.product_id,
         )
         for line, line_total in zip(line_items, totals.line_totals)
     ]

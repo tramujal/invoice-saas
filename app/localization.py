@@ -83,6 +83,12 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "{count} payment reminders sent in the last {days} days"
         ),
         "assistant_top_customers_heading": "Top Customers by Revenue",
+        "assistant_top_products_heading": "Top Products & Services by Revenue",
+        "assistant_products_label": "Products",
+        "assistant_services_label": "Services",
+        "assistant_dormant_products_heading": "Products That Stopped Selling",
+        "assistant_no_dormant_products": "No products have stopped selling recently.",
+        "assistant_days_since_last_sale": "{days} days since last sale",
         "assistant_stale_customers_heading": "Customers Not Invoiced Recently",
         "assistant_no_stale_customers": "All customers have been invoiced recently.",
         "assistant_never_invoiced": "never invoiced",
@@ -100,6 +106,19 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "import_template_example_phone": "+1 555 0100",
         "import_template_example_address": "123 Main St, Springfield",
         "import_template_example_tax_id": "12-3456789",
+        "import_product_template_name_label": "Name",
+        "import_product_template_description_label": "Description",
+        "import_product_template_type_label": "Type",
+        "import_product_template_sku_label": "SKU",
+        "import_product_template_price_label": "Default Price",
+        "import_product_template_currency_label": "Currency",
+        "import_product_template_tax_rate_label": "Default Tax Rate",
+        "import_product_template_example_name": "Hosting - Premium",
+        "import_product_template_example_description": "Monthly premium hosting plan",
+        "import_product_template_example_type": "service",
+        "import_product_template_example_sku": "HOST-PREM",
+        "import_product_template_example_price": "49.00",
+        "import_product_template_example_tax_rate": "0.10",
         "insight_no_invoices_title": "No invoices yet",
         "insight_no_invoices_message": (
             "You haven't created any invoices yet — once you do, you'll see insights "
@@ -208,6 +227,30 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "insight_data_quality_invoices_missing_due_date_message": (
             "{count} invoices have no due date on file."
         ),
+        "insight_data_quality_products_never_invoiced_message": (
+            "{count} products have never been invoiced."
+        ),
+        "insight_data_quality_products_dormant_message": (
+            "{count} products haven't sold in over 90 days."
+        ),
+        "insight_top_product_title": "{product} is your top performer in {currency}",
+        "insight_top_product_message": (
+            "{product} generated {currency} {amount} in total revenue across "
+            "{count} invoices."
+        ),
+        "insight_product_decline_title": "{product} revenue down {percentage}%",
+        "insight_product_decline_message": (
+            "{product} generated {currency} {this_month} this month, down from "
+            "{currency} {last_month} last month ({percentage}%)."
+        ),
+        "insight_product_decline_suggestion": (
+            "Consider checking in with customers who used to buy {product}."
+        ),
+        "insight_product_growth_title": "{product} revenue up {percentage}%",
+        "insight_product_growth_message": (
+            "{product} generated {currency} {this_month} this month, up from "
+            "{currency} {last_month} last month ({percentage}%)."
+        ),
         "insight_due_soon_title": "{count} invoices due soon in {currency}",
         "insight_due_soon_message": (
             "{count} invoices totaling {currency} {amount} are due within the next "
@@ -306,6 +349,12 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "{count} recordatorios de pago enviados en los últimos {days} días"
         ),
         "assistant_top_customers_heading": "Mejores clientes por ingresos",
+        "assistant_top_products_heading": "Mejores productos y servicios por ingresos",
+        "assistant_products_label": "Productos",
+        "assistant_services_label": "Servicios",
+        "assistant_dormant_products_heading": "Productos que dejaron de venderse",
+        "assistant_no_dormant_products": "Ningún producto ha dejado de venderse recientemente.",
+        "assistant_days_since_last_sale": "{days} días desde la última venta",
         "assistant_stale_customers_heading": "Clientes sin facturar recientemente",
         "assistant_no_stale_customers": "Todos los clientes han sido facturados recientemente.",
         "assistant_never_invoiced": "nunca facturado",
@@ -323,6 +372,19 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "import_template_example_phone": "+598 99 123 456",
         "import_template_example_address": "Av. Principal 123, Montevideo",
         "import_template_example_tax_id": "12345678-9",
+        "import_product_template_name_label": "Nombre",
+        "import_product_template_description_label": "Descripción",
+        "import_product_template_type_label": "Tipo",
+        "import_product_template_sku_label": "SKU",
+        "import_product_template_price_label": "Precio predeterminado",
+        "import_product_template_currency_label": "Moneda",
+        "import_product_template_tax_rate_label": "Impuesto predeterminado",
+        "import_product_template_example_name": "Hosting - Premium",
+        "import_product_template_example_description": "Plan de hosting premium mensual",
+        "import_product_template_example_type": "servicio",
+        "import_product_template_example_sku": "HOST-PREM",
+        "import_product_template_example_price": "49.00",
+        "import_product_template_example_tax_rate": "0.10",
         "insight_no_invoices_title": "Aún no hay facturas",
         "insight_no_invoices_message": (
             "Todavía no has creado ninguna factura — cuando lo hagas, aquí verás "
@@ -435,6 +497,30 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         ),
         "insight_data_quality_invoices_missing_due_date_message": (
             "{count} facturas no tienen una fecha de vencimiento registrada."
+        ),
+        "insight_data_quality_products_never_invoiced_message": (
+            "{count} productos nunca han sido facturados."
+        ),
+        "insight_data_quality_products_dormant_message": (
+            "{count} productos no se han vendido en más de 90 días."
+        ),
+        "insight_top_product_title": "{product} es tu producto más vendido en {currency}",
+        "insight_top_product_message": (
+            "{product} generó {currency} {amount} en ingresos totales en "
+            "{count} facturas."
+        ),
+        "insight_product_decline_title": "Los ingresos de {product} bajaron {percentage}%",
+        "insight_product_decline_message": (
+            "{product} generó {currency} {this_month} este mes, frente a "
+            "{currency} {last_month} el mes pasado ({percentage}%)."
+        ),
+        "insight_product_decline_suggestion": (
+            "Considera contactar a los clientes que solían comprar {product}."
+        ),
+        "insight_product_growth_title": "Los ingresos de {product} subieron {percentage}%",
+        "insight_product_growth_message": (
+            "{product} generó {currency} {this_month} este mes, frente a "
+            "{currency} {last_month} el mes pasado ({percentage}%)."
         ),
         "insight_due_soon_title": "{count} facturas vencen pronto en {currency}",
         "insight_due_soon_message": (
