@@ -18,6 +18,10 @@ export function insightCtaHref(cta: InsightCta): string {
       return "/invoices/new";
     case "view_products":
       return "/products";
+    case "view_pending_quotes":
+      return "/quotes?status=sent";
+    case "view_expiring_quotes":
+      return "/quotes?status=sent";
     case "ask_assistant":
       return `/assistant?q=${encodeURIComponent(cta.question ?? "")}`;
     default:

@@ -18,6 +18,8 @@ from app.routers import (
     organizations,
     product_imports,
     products,
+    quote_public,
+    quotes,
 )
 
 # Without this, the root logger has no handler at all: WARNING+ messages
@@ -74,6 +76,8 @@ app.include_router(customers.router)
 app.include_router(customer_imports.router)
 app.include_router(products.router)
 app.include_router(product_imports.router)
+app.include_router(quotes.router)
+app.include_router(quote_public.router)
 app.include_router(dashboard.router)
 app.include_router(insights.router)
 app.include_router(organizations.router)

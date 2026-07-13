@@ -21,6 +21,8 @@ from app.insights.limits import (
 from app.invoice_numbering import format_invoice_number
 from app.payment_status import PaymentStatus
 from app.product_type import ProductType
+from app.quote_numbering import format_quote_number
+from app.quote_status import QuoteStatus
 from app.reminder_settings import (
     REMINDER_DAY_LIST_MAX_LENGTH,
     REMINDER_DAY_MAX,
@@ -43,6 +45,14 @@ class InvoiceSortField(str, Enum):
     created_at = "created_at"
     total = "total"
     customer_name = "customer_name"
+
+
+class QuoteSortField(str, Enum):
+    quote_number = "quote_number"
+    created_at = "created_at"
+    total = "total"
+    customer_name = "customer_name"
+    expiry_date = "expiry_date"
 
 
 class InvoiceDueFilter(str, Enum):
@@ -254,9 +264,16 @@ class OrganizationProfileResponse(BaseModel):
     reminder_before_due_days: list[int]
     reminder_on_due_date: bool
     reminder_after_due_days: list[int]
+    # Independent of the invoice reminder fields above -- see
+    # Organization.quote_reminders_enabled's docstring in app/models.py.
+    quote_reminders_enabled: bool
+    quote_reminder_before_expiry_days: list[int]
 
     @field_validator(
-        "reminder_before_due_days", "reminder_after_due_days", mode="before"
+        "reminder_before_due_days",
+        "reminder_after_due_days",
+        "quote_reminder_before_expiry_days",
+        mode="before",
     )
     @classmethod
     def _parse_stored_day_list(cls, value: str | list[int]) -> list[int]:
@@ -288,6 +305,10 @@ class OrganizationUpdateRequest(BaseModel):
     reminder_after_due_days: list[int] | None = Field(
         default=None, max_length=REMINDER_DAY_LIST_MAX_LENGTH
     )
+    quote_reminders_enabled: bool | None = None
+    quote_reminder_before_expiry_days: list[int] | None = Field(
+        default=None, max_length=REMINDER_DAY_LIST_MAX_LENGTH
+    )
 
     @field_validator(
         "business_name", "tax_id", "address", "phone", "email", "logo_url",
@@ -302,7 +323,11 @@ class OrganizationUpdateRequest(BaseModel):
     def _check_timezone_value(cls, value: str) -> str:
         return _check_timezone(value)
 
-    @field_validator("reminder_before_due_days", "reminder_after_due_days")
+    @field_validator(
+        "reminder_before_due_days",
+        "reminder_after_due_days",
+        "quote_reminder_before_expiry_days",
+    )
     @classmethod
     def _check_day_list_value(cls, value: list[int] | None) -> list[int] | None:
         if value is None:
@@ -428,6 +453,175 @@ class PaginatedInvoicesResponse(BaseModel):
 
     total: int
     items: list[InvoiceSummaryResponse]
+
+
+def _format_quote_number(value: int | str) -> str:
+    if isinstance(value, str):
+        return value
+    return format_quote_number(value)
+
+
+class QuoteLineItemCreate(BaseModel):
+    description: str = Field(min_length=1, max_length=512)
+    quantity: Decimal = Field(gt=0, decimal_places=4, max_digits=14)
+    unit_price: Decimal = Field(ge=0, decimal_places=2, max_digits=14)
+    # Purely an analytics tag -- see InvoiceLineItemCreate.product_id's
+    # identical docstring.
+    product_id: str | None = None
+
+
+class QuoteCreateRequest(BaseModel):
+    line_items: list[QuoteLineItemCreate] = Field(min_length=1)
+    tax_rate: Decimal = Field(
+        default=Decimal("0"),
+        ge=0,
+        le=1,
+        description="Tax rate as a fraction, e.g. 0.1 for 10%",
+    )
+    customer_id: str | None = None
+    currency_code: CurrencyCode | None = None
+    expiry_date: date | None = None
+    notes: str = Field(default="", max_length=8000)
+
+
+class QuoteUpdateRequest(BaseModel):
+    line_items: list[QuoteLineItemCreate] | None = Field(default=None, min_length=1)
+    tax_rate: Decimal | None = Field(default=None, ge=0, le=1)
+    customer_id: str | None = None
+    expiry_date: date | None = None
+    notes: str | None = Field(default=None, max_length=8000)
+
+
+class QuoteLineItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+    product_id: str | None
+
+
+class QuoteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    quote_number: str
+    organization_id: str
+    created_by_user_id: str | None
+    customer_id: str | None
+    customer_name: str | None
+    subtotal: Decimal
+    tax_rate: Decimal
+    tax_amount: Decimal
+    total: Decimal
+    status: QuoteStatus
+    # Derived, read-only -- see app.quote_effective_status /
+    # Quote.effective_status. `status` above stays the raw stored value.
+    effective_status: QuoteStatus
+    currency_code: str
+    language: str
+    issue_date: date
+    expiry_date: date | None
+    notes: str
+    active: bool
+    converted_invoice_id: str | None
+    public_url: str
+    created_at: datetime
+    updated_at: datetime
+    line_items: list[QuoteLineItemResponse]
+
+    @field_validator("quote_number", mode="before")
+    @classmethod
+    def _format_number(cls, value: int | str) -> str:
+        return _format_quote_number(value)
+
+
+class QuoteSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    quote_number: str
+    customer_id: str | None
+    customer_name: str | None
+    subtotal: Decimal
+    tax_amount: Decimal
+    total: Decimal
+    status: QuoteStatus
+    effective_status: QuoteStatus
+    currency_code: str
+    language: str
+    issue_date: date
+    expiry_date: date | None
+    active: bool
+    converted_invoice_id: str | None
+    created_at: datetime
+
+    @field_validator("quote_number", mode="before")
+    @classmethod
+    def _format_number(cls, value: int | str) -> str:
+        return _format_quote_number(value)
+
+
+class PaginatedQuotesResponse(BaseModel):
+    total: int
+    items: list[QuoteSummaryResponse]
+
+
+class SendQuoteEmailResponse(BaseModel):
+    sent: bool
+    sent_to: str
+
+
+class ConvertQuoteToInvoiceResponse(BaseModel):
+    invoice_id: str
+    invoice_number: str
+
+
+class PublicQuoteLineItemResponse(BaseModel):
+    """Same shape as QuoteLineItemResponse, minus product_id -- an
+    anonymous visitor has no reason to see an internal catalog id."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+
+
+class PublicQuoteResponse(BaseModel):
+    """What the unauthenticated public quote page renders -- deliberately
+    narrower than QuoteResponse: no organization_id, created_by_user_id,
+    converted_invoice_id, or product_id anywhere. See
+    app/routers/quote_public.py."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    quote_number: str
+    organization_name: str
+    customer_name: str | None
+    subtotal: Decimal
+    tax_rate: Decimal
+    tax_amount: Decimal
+    total: Decimal
+    effective_status: QuoteStatus
+    currency_code: str
+    language: str
+    issue_date: date
+    expiry_date: date | None
+    notes: str
+    line_items: list[PublicQuoteLineItemResponse]
+
+    @field_validator("quote_number", mode="before")
+    @classmethod
+    def _format_number(cls, value: int | str) -> str:
+        return _format_quote_number(value)
+
+
+class PublicQuoteActionResponse(BaseModel):
+    status: QuoteStatus
 
 
 def _check_customer_email_format(value: str) -> str:
@@ -590,6 +784,34 @@ class TopProductRevenue(BaseModel):
     invoice_count: int
 
 
+class QuoteStatusCountPoint(BaseModel):
+    status: QuoteStatus
+    count: int
+
+
+class QuoteCurrencyPipelineSummary(BaseModel):
+    """Quote pipeline figures for one currency, never combined with any
+    other -- same per-currency-safe rationale as CurrencyRevenueSummary."""
+
+    currency_code: str
+    revenue_in_quotes: Decimal  # total value of all non-terminal (draft/sent) quotes
+    projected_revenue: Decimal  # revenue_in_quotes weighted by this currency's acceptance rate
+    accepted_this_month: int
+    rejected_this_month: int
+    converted_this_month: int
+
+
+class QuotePipelineSummary(BaseModel):
+    counts_by_status: list[QuoteStatusCountPoint]
+    acceptance_rate_percent: float | None  # accepted / (accepted + rejected), all-time
+    by_currency: list[QuoteCurrencyPipelineSummary]
+
+
+class QuoteMonthlyConversionPoint(BaseModel):
+    month: str
+    converted_count: int
+
+
 class DashboardAnalyticsResponse(BaseModel):
     monthly_summary: list[MonthlySummaryPoint]
     monthly_revenue_by_currency: list[MonthlyRevenuePoint]
@@ -602,6 +824,8 @@ class DashboardAnalyticsResponse(BaseModel):
     # Same independent-per-currency ranking, for catalog items -- see
     # TopProductRevenue.
     top_products_and_services: list[TopProductRevenue]
+    quote_pipeline: QuotePipelineSummary
+    quote_monthly_conversions: list[QuoteMonthlyConversionPoint]
 
 
 class InsightMetricResponse(BaseModel):
@@ -624,6 +848,8 @@ class InsightCtaResponse(BaseModel):
         "create_invoice",
         "ask_assistant",
         "view_products",
+        "view_pending_quotes",
+        "view_expiring_quotes",
     ]
     # Only set for type == "ask_assistant" -- a deterministic, already-
     # localized prefill question, never AI-generated.

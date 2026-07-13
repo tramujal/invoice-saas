@@ -21,6 +21,7 @@ import type { MeResponse, MessageResponse } from "@/lib/types";
 const links = [
   { href: "/dashboard", labelKey: "nav.dashboard" },
   { href: "/invoices", labelKey: "nav.invoices" },
+  { href: "/quotes", labelKey: "nav.quotes" },
   { href: "/customers", labelKey: "nav.customers" },
   { href: "/products", labelKey: "nav.products" },
   { href: "/assistant", labelKey: "nav.assistant" },

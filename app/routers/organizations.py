@@ -11,7 +11,11 @@ from app.schemas import OrganizationProfileResponse, OrganizationUpdateRequest
 # app.reminder_settings), but the API's wire shape for them is a plain
 # JSON array of ints -- these need converting before the generic setattr
 # loop below, unlike every other field on this request.
-_DAY_LIST_FIELDS = {"reminder_before_due_days", "reminder_after_due_days"}
+_DAY_LIST_FIELDS = {
+    "reminder_before_due_days",
+    "reminder_after_due_days",
+    "quote_reminder_before_expiry_days",
+}
 
 router = APIRouter(prefix="/organizations/{organization_id}", tags=["organizations"])
 

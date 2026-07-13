@@ -116,3 +116,27 @@ class LineItemIncompleteError(ActionToolError):
     from."""
 
     code = "line_item_incomplete"
+
+
+class QuoteNotFoundError(ActionToolError):
+    code = "quote_not_found"
+
+
+class QuoteNotAcceptedError(ActionToolError):
+    """Conversion to an invoice is gated to status == accepted only -- see
+    the plan's locked decision in app.services.quotes."""
+
+    code = "quote_not_accepted"
+
+
+class QuoteAlreadyConvertedError(ActionToolError):
+    code = "quote_already_converted"
+
+
+class QuoteCustomerEmailMissingError(ActionToolError):
+    """Distinct from CustomerEmailMissingError above only in name -- kept
+    separate so a quote-tool error can never be confused with an
+    invoice-tool one in logs/telemetry, even though the underlying
+    condition is identical."""
+
+    code = "customer_email_missing"

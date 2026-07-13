@@ -9,6 +9,7 @@ import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { InvoiceVolumeChart } from "@/components/dashboard/InvoiceVolumeChart";
 import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBreakdown";
 import { PaymentStatusChart } from "@/components/dashboard/PaymentStatusChart";
+import { QuotePipelineCard } from "@/components/dashboard/QuotePipelineCard";
 import { RevenueTrendCard } from "@/components/dashboard/RevenueTrendCard";
 import { RevenueTrendLineChart } from "@/components/dashboard/RevenueTrendLineChart";
 import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
@@ -180,6 +181,17 @@ export default function DashboardPage() {
           loading={loading}
         />
       </section>
+
+      {/* Quotes precede invoices in the funnel -- a brand-new business
+          quoting its first prospective customer must still see this card
+          even with zero invoices yet, so it renders unconditionally
+          rather than being suppressed by the invoice-only empty state
+          below (mirrors the same fix applied to Business Insights). */}
+      <QuotePipelineCard
+        pipeline={analytics?.quote_pipeline ?? null}
+        currency={effectiveCurrency}
+        loading={loading}
+      />
 
       {showEmpty ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">

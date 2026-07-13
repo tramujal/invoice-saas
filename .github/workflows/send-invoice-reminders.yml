@@ -1,4 +1,4 @@
-name: Send invoice payment reminders
+name: Send invoice payment and quote expiry reminders
 
 on:
   schedule:
@@ -29,3 +29,10 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
         run: python -m app.jobs.send_due_invoice_reminders
+
+      - name: Send expiring quote reminders
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+        run: python -m app.jobs.send_expiring_quote_reminders

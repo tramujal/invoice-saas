@@ -210,6 +210,34 @@ export async function authRequest<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * Unauthenticated GET request -- the sibling of authRequest for pages
+ * that need to *read* public data before a token exists (e.g. the public
+ * quote view page). No Authorization header, same ApiError shape.
+ */
+export async function publicGet<T>(apiBaseUrl: string, path: string): Promise<T> {
+  const base = apiBaseUrl.trim().replace(/\/$/, "");
+  if (!base) throw new ApiError("API base URL is not configured", 0);
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+
+  const res = await fetch(`${base}${normalized}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    let responseBody: unknown;
+    try {
+      responseBody = await res.json();
+    } catch {
+      responseBody = await res.text();
+    }
+    throw new ApiError(`Request failed (${res.status})`, res.status, responseBody);
+  }
+
+  return (await res.json()) as T;
+}
+
 export function orgPath(segment: string = ""): string {
   const orgId = getOrganizationId();
   if (!orgId) throw new ApiError("Organization is not configured", 0);

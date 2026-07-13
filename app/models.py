@@ -22,6 +22,7 @@ from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
 from app.payment_status import PaymentStatus
 from app.product_type import ProductType
+from app.quote_status import QuoteStatus
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
 from app.schema_migrations import run_startup_migrations
@@ -82,6 +83,22 @@ class Organization(Base):
     reminder_after_due_days: Mapped[str] = mapped_column(
         String(64), nullable=False, default="7", server_default="7"
     )
+    next_quote_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    # Independent of reminders_enabled above -- a business may want
+    # automatic payment reminders without automatic expiring-quote
+    # reminders, or vice versa. Off by default for every organization,
+    # same "never opt a business into outbound email silently" rationale
+    # as reminders_enabled -- see app/jobs/send_expiring_quote_reminders.py.
+    quote_reminders_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    # Comma-separated day-offset list (e.g. "3") -- same portable-string
+    # convention as reminder_before_due_days; see app/reminder_settings.py.
+    quote_reminder_before_expiry_days: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="3", server_default="3"
+    )
 
     members: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="organization"
@@ -89,6 +106,7 @@ class Organization(Base):
     customers: Mapped[list["Customer"]] = relationship(back_populates="organization")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="organization")
     products: Mapped[list["Product"]] = relationship(back_populates="organization")
+    quotes: Mapped[list["Quote"]] = relationship(back_populates="organization")
 
 
 class User(Base):
@@ -447,6 +465,196 @@ class InvoiceReminder(Base):
 
     organization: Mapped["Organization"] = relationship()
     invoice: Mapped["Invoice"] = relationship(back_populates="reminders")
+
+
+class Quote(Base):
+    """A proposed, pre-invoice estimate -- mirrors Invoice's field/
+    relationship conventions almost exactly (see Invoice above), so it can
+    be built, PDF'd, emailed, and converted by reusing invoice
+    infrastructure rather than duplicating it. Line items snapshot their
+    own description/quantity/unit_price/line_total exactly like
+    InvoiceLineItem, for the same immutability reason.
+
+    converted_invoice_id is the ONLY link between a quote and the invoice
+    it produced -- one-directional (quote -> invoice), set once at
+    conversion time and never the other way around. The invoice created
+    from a quote never stores a reference back to it (see
+    app.services.quotes.convert_quote_to_invoice), which is what makes
+    both immutability guarantees trivial: editing the quote afterward can
+    never reach the invoice, and editing the invoice can never reach the
+    quote.
+    """
+
+    __tablename__ = "quotes"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "quote_number"),
+        Index("ix_quotes_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    quote_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    customer_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True
+    )
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Stored directly (unlike Invoice, which only keeps the resulting
+    # tax_amount) -- duplicate_quote_record and convert_quote_to_invoice
+    # both need to reproduce the exact same rate, not just its dollar
+    # result at the original subtotal.
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False, default=0, server_default="0")
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=QuoteStatus.draft.value,
+        server_default=QuoteStatus.draft.value,
+    )
+    # Permanently pinned at creation time -- same rationale as
+    # Invoice.currency_code/Invoice.language.
+    currency_code: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="USD", server_default="USD"
+    )
+    language: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="en", server_default="en"
+    )
+    issue_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    # Archive/restore flag -- mirrors Product.active exactly (hide/show,
+    # never destructive). The separate, narrower DELETE endpoint only ever
+    # applies to status == "draft" quotes (see app.services.quotes); this
+    # flag is the only "removal" mechanism for anything past draft.
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    # Deliberately stored raw, not hashed -- see app/quote_public_links.py's
+    # module docstring for why a durable, reusable share link can't use the
+    # one-time-token hash-at-rest pattern the way password reset does.
+    public_token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    converted_invoice_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="quotes")
+    customer: Mapped["Customer | None"] = relationship()
+    created_by_user: Mapped["User | None"] = relationship()
+    converted_invoice: Mapped["Invoice | None"] = relationship()
+    line_items: Mapped[list["QuoteLineItem"]] = relationship(
+        back_populates="quote", cascade="all, delete-orphan"
+    )
+    reminders: Mapped[list["QuoteReminder"]] = relationship(
+        back_populates="quote", cascade="all, delete-orphan"
+    )
+
+    @property
+    def customer_name(self) -> str | None:
+        return self.customer.name if self.customer is not None else None
+
+    @property
+    def effective_status(self) -> "QuoteStatus":
+        """The single source of truth every surface displays -- see
+        app.quote_effective_status.get_effective_quote_status. A plain
+        property, alongside customer_name, so it's included automatically
+        wherever a Quote is serialized via from_attributes."""
+        from app.org_time import get_organization_today
+        from app.quote_effective_status import get_effective_quote_status
+
+        today_local = get_organization_today(self.organization)
+        return get_effective_quote_status(self, today_local)
+
+    @property
+    def public_url(self) -> str:
+        from app.quote_public_links import build_quote_public_link
+
+        return build_quote_public_link(self.public_token)
+
+
+class QuoteLineItem(Base):
+    __tablename__ = "quote_line_items"
+    __table_args__ = (Index("ix_quote_line_items_product_id", "product_id"),)
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    quote_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
+    )
+    description: Mapped[str] = mapped_column(String(512), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Purely an analytics tag -- see InvoiceLineItem.product_id's identical
+    # docstring; never read back to reconstruct a line's snapshot values.
+    product_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )
+
+    quote: Mapped["Quote"] = relationship(back_populates="line_items")
+    product: Mapped["Product | None"] = relationship()
+
+
+class QuoteReminder(Base):
+    """One reminder-delivery attempt for a quote nearing its expiry date --
+    mirrors InvoiceReminder's exact idempotency shape (see that class's
+    docstring): this row's existence, keyed by the unique constraint below,
+    IS the idempotency guarantee. No `reminder_type` column is needed --
+    quotes only ever have one reminder kind ("before_expiry"), unlike
+    invoices' before/on/after-due variety."""
+
+    __tablename__ = "quote_reminders"
+    __table_args__ = (
+        UniqueConstraint(
+            "quote_id", "scheduled_for_date", name="uq_quote_reminder_idempotency"
+        ),
+        Index("ix_quote_reminders_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    quote_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
+    )
+    days_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scheduled_for_date: Mapped[date] = mapped_column(Date, nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=ReminderStatus.pending.value,
+        server_default=ReminderStatus.pending.value,
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    triggered_by: Mapped[str] = mapped_column(String(16), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    organization: Mapped["Organization"] = relationship()
+    quote: Mapped["Quote"] = relationship(back_populates="reminders")
 
 
 class AssistantAction(Base):

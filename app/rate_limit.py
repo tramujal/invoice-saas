@@ -273,9 +273,20 @@ RESET_PASSWORD_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 VERIFY_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 RESEND_VERIFICATION_RULES = (RateLimitRule(limit=3, window_seconds=3600),)
 SEND_INVOICE_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+SEND_QUOTE_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 
 # Each import endpoint gets its own 10/hour budget (matching this file's
 # existing one-scope-per-endpoint convention) rather than a single budget
 # shared between preview and confirm.
 IMPORT_PREVIEW_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 IMPORT_CONFIRM_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
+# Anonymous public-quote endpoints, keyed by IP (see ip_identity) since
+# there's no logged-in user to key on. The view is read-only and more
+# generously limited than accept/reject, which are one-shot, state-
+# changing actions a real customer only ever needs to use once or twice.
+PUBLIC_QUOTE_VIEW_RULES = (
+    RateLimitRule(limit=30, window_seconds=60),
+    RateLimitRule(limit=200, window_seconds=3600),
+)
+PUBLIC_QUOTE_ACTION_RULES = (RateLimitRule(limit=10, window_seconds=3600),)

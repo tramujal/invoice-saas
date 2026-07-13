@@ -30,6 +30,12 @@ from app.invoice_numbering import format_invoice_number
 from app.localization import get_language, t
 from app.models import Customer, InvoiceReminder, Organization
 from app.product_analytics import get_dormant_products
+from app.quote_numbering import format_quote_number
+from app.quote_analytics import (
+    get_quote_pipeline_summary,
+    get_quotes_expired,
+    get_quotes_pending_response,
+)
 from app.reminder_status import ReminderStatus
 from app.routers.dashboard import get_dashboard_analytics_data, get_dashboard_summary
 from app.schemas import DashboardAnalyticsResponse, DashboardResponse
@@ -41,6 +47,8 @@ STALE_CUSTOMER_DAYS = 60
 REMINDER_SUMMARY_DAYS = 30
 DORMANT_PRODUCTS_LIMIT = 10
 DORMANT_PRODUCTS_DAYS = 90
+QUOTES_PENDING_LIMIT = 10
+QUOTES_EXPIRED_LIMIT = 10
 
 
 @dataclass
@@ -75,6 +83,14 @@ class DormantProductInfo:
 
 
 @dataclass
+class QuoteInfo:
+    quote_number: str
+    customer_name: str | None
+    total: Decimal
+    currency_code: str
+
+
+@dataclass
 class BusinessContext:
     organization_name: str
     language: str
@@ -85,6 +101,9 @@ class BusinessContext:
     stale_customers: list[StaleCustomerInfo]
     reminders_sent_recently: int
     dormant_products: list[DormantProductInfo]
+    quotes_pending: list[QuoteInfo]
+    quotes_expired: list[QuoteInfo]
+    quote_acceptance_rate_percent: float | None
 
 
 def _overdue_invoice_list(db: Session, organization_id: str) -> list[OverdueInvoiceInfo]:
@@ -174,6 +193,32 @@ def _dormant_products(db: Session, organization_id: str, now: datetime) -> list[
     ]
 
 
+def _quotes_pending(db: Session, organization_id: str) -> list[QuoteInfo]:
+    details = get_quotes_pending_response(db, organization_id)[:QUOTES_PENDING_LIMIT]
+    return [
+        QuoteInfo(
+            quote_number=format_quote_number(d.quote_number),
+            customer_name=d.customer_name,
+            total=d.total,
+            currency_code=d.currency_code,
+        )
+        for d in details
+    ]
+
+
+def _quotes_expired(db: Session, organization_id: str) -> list[QuoteInfo]:
+    details = get_quotes_expired(db, organization_id)[:QUOTES_EXPIRED_LIMIT]
+    return [
+        QuoteInfo(
+            quote_number=format_quote_number(d.quote_number),
+            customer_name=d.customer_name,
+            total=d.total,
+            currency_code=d.currency_code,
+        )
+        for d in details
+    ]
+
+
 def build_business_context(db: Session, organization_id: str) -> BusinessContext:
     """Assumes the caller has already authorized the request (require_org_member
     + require_verified_email) — this function does not re-check
@@ -192,6 +237,11 @@ def build_business_context(db: Session, organization_id: str) -> BusinessContext
         stale_customers=_stale_customers(db, organization_id, now),
         reminders_sent_recently=_reminders_sent_recently(db, organization_id, now),
         dormant_products=_dormant_products(db, organization_id, now),
+        quotes_pending=_quotes_pending(db, organization_id),
+        quotes_expired=_quotes_expired(db, organization_id),
+        quote_acceptance_rate_percent=get_quote_pipeline_summary(
+            db, organization_id
+        ).acceptance_rate_percent,
     )
 
 
@@ -354,6 +404,30 @@ def format_business_context_as_text(context: BusinessContext) -> str:
             )
         )
         lines.append(f"- {stale.name} — {detail}")
+
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_quotes_pending_heading')} (max {QUOTES_PENDING_LIMIT}):")
+    if not context.quotes_pending:
+        lines.append(f"- {t(language, 'assistant_no_quotes_pending')}")
+    for quote in context.quotes_pending:
+        customer = quote.customer_name or t(language, "no_customer")
+        lines.append(f"- {quote.quote_number} | {customer} | {format_amount(quote.total, quote.currency_code)}")
+
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_quotes_expired_heading')} (max {QUOTES_EXPIRED_LIMIT}):")
+    if not context.quotes_expired:
+        lines.append(f"- {t(language, 'assistant_no_quotes_expired')}")
+    for quote in context.quotes_expired:
+        customer = quote.customer_name or t(language, "no_customer")
+        lines.append(f"- {quote.quote_number} | {customer} | {format_amount(quote.total, quote.currency_code)}")
+
+    if context.quote_acceptance_rate_percent is not None:
+        lines.append("")
+        lines.append(
+            t(language, "assistant_quote_conversion_rate_label").format(
+                percentage=f"{context.quote_acceptance_rate_percent:.0f}"
+            )
+        )
 
     lines.append("")
     lines.append(f"{t(language, 'assistant_monthly_revenue_heading')}:")

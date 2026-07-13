@@ -74,6 +74,13 @@ from app.product_analytics import (
     get_products_never_invoiced,
     get_revenue_by_product,
 )
+from app.quote_analytics import (
+    QUOTE_EXPIRING_SOON_WINDOW_DAYS,
+    get_customers_with_repeated_rejections,
+    get_quote_pipeline_summary,
+    get_quotes_expiring_soon,
+    get_quotes_pending_response,
+)
 from app.routers.dashboard import (
     get_dashboard_analytics_data,
     get_dashboard_summary,
@@ -114,6 +121,10 @@ PRODUCT_DECLINE_CRITICAL_THRESHOLD = -50.0  # percent
 PRODUCT_GROWTH_NOTABLE_THRESHOLD = 50.0  # percent
 PRODUCT_DORMANT_DAYS = 90  # matches INACTIVITY_WARNING_DAYS's own bar
 
+QUOTE_ACCEPTANCE_RATE_WARNING_THRESHOLD = 50.0  # percent, below this is a warning
+QUOTE_ACCEPTANCE_RATE_MIN_DECIDED = 3  # don't judge a rate computed from too few data points
+QUOTE_REJECTION_TREND_MIN_COUNT = 3  # rejections this month before it's worth flagging as a trend
+
 
 def _severity_priority(severity: InsightSeverity, magnitude: float) -> float:
     """`magnitude` must already be normalized to roughly [0, 1] (a ratio,
@@ -140,7 +151,16 @@ def build_insights(
     summary = get_dashboard_summary(db, organization_id)
 
     if summary.total_invoices == 0:
-        return [_new_business_no_invoices(language)]
+        # Every invoice-derived signal below needs at least one invoice to
+        # be meaningful, but quotes are meant to come BEFORE the first
+        # invoice in the funnel -- a brand-new business quoting its first
+        # prospective customer must still see quote-pipeline insights
+        # here, not just "no invoices yet" with everything else
+        # suppressed until its first sale closes.
+        return _diversity_order(
+            [_new_business_no_invoices(language)]
+            + _quote_pipeline_insights(db, organization_id, language)
+        )
 
     analytics = get_dashboard_analytics_data(db, organization_id)
     # Computed once here and passed down -- both inactivity and
@@ -158,6 +178,7 @@ def build_insights(
     candidates.extend(_pending_insights(db, organization_id, summary, language))
     candidates.extend(_concentration_insights(summary, analytics, language))
     candidates.extend(_product_revenue_insights(db, organization_id, analytics, now, language))
+    candidates.extend(_quote_pipeline_insights(db, organization_id, language))
 
     inactivity = _inactivity_insight(last_invoice_at, customers, now, language)
     if inactivity is not None:
@@ -670,6 +691,147 @@ def _product_revenue_insights(
                 priority_score=_severity_priority(
                     InsightSeverity.positive, min(growth_percent / 100, 1.0)
                 ),
+            )
+        )
+
+    return insights
+
+
+def _quote_pipeline_insights(db: Session, organization_id: str, language: str) -> list[Insight]:
+    """Quote-pipeline signals: pending-response volume and expiring-soon
+    (one insight per currency, mirroring _overdue_insights/_due_soon_insights
+    exactly), plus overall acceptance rate, a rejection-trend flag, and
+    repeated-rejection customers (each currency-agnostic, since they're
+    ratios/counts of quotes rather than money amounts)."""
+    insights: list[Insight] = []
+
+    pending = get_quotes_pending_response(db, organization_id)
+    by_currency: dict[str, list] = {}
+    for detail in pending:
+        by_currency.setdefault(detail.currency_code, []).append(detail)
+    for code, rows in by_currency.items():
+        amount = sum((r.total for r in rows), Decimal("0"))
+        insights.append(
+            Insight(
+                id=f"quotes_pending:{code}",
+                category=InsightCategory.quote_pipeline,
+                severity=InsightSeverity.info,
+                title=t(language, "insight_quotes_pending_title").format(count=len(rows), currency=code),
+                message=t(language, "insight_quotes_pending_message").format(
+                    count=len(rows), currency=code, amount=str(amount)
+                ),
+                suggestion=t(language, "insight_quotes_pending_suggestion"),
+                metric=InsightMetric(currency_code=code, value=amount, percentage=None),
+                related_entity=None,
+                cta=InsightCta(type="view_pending_quotes"),
+                priority_score=_severity_priority(InsightSeverity.info, 0.2),
+            )
+        )
+
+    expiring = get_quotes_expiring_soon(db, organization_id)
+    expiring_by_currency: dict[str, list] = {}
+    for detail in expiring:
+        expiring_by_currency.setdefault(detail.currency_code, []).append(detail)
+    for code, rows in expiring_by_currency.items():
+        amount = sum((r.total for r in rows), Decimal("0"))
+        insights.append(
+            Insight(
+                id=f"quotes_expiring:{code}",
+                category=InsightCategory.quote_pipeline,
+                severity=InsightSeverity.warning,
+                title=t(language, "insight_quotes_expiring_title").format(count=len(rows), currency=code),
+                message=t(language, "insight_quotes_expiring_message").format(
+                    count=len(rows),
+                    currency=code,
+                    amount=str(amount),
+                    days=QUOTE_EXPIRING_SOON_WINDOW_DAYS,
+                ),
+                suggestion=t(language, "insight_quotes_expiring_suggestion"),
+                metric=InsightMetric(currency_code=code, value=amount, percentage=None),
+                related_entity=None,
+                cta=InsightCta(type="view_expiring_quotes"),
+                priority_score=_severity_priority(InsightSeverity.warning, 0.4),
+            )
+        )
+
+    pipeline = get_quote_pipeline_summary(db, organization_id)
+    decided = pipeline.counts_by_status.get("accepted", 0) + pipeline.counts_by_status.get("rejected", 0)
+    if pipeline.acceptance_rate_percent is not None and decided >= QUOTE_ACCEPTANCE_RATE_MIN_DECIDED:
+        rate = pipeline.acceptance_rate_percent
+        severity = (
+            InsightSeverity.warning if rate < QUOTE_ACCEPTANCE_RATE_WARNING_THRESHOLD else InsightSeverity.positive
+        )
+        insights.append(
+            Insight(
+                id="quote_acceptance_rate",
+                category=InsightCategory.quote_pipeline,
+                severity=severity,
+                title=t(language, "insight_quote_acceptance_rate_title").format(percentage=f"{rate:.0f}"),
+                message=t(language, "insight_quote_acceptance_rate_message").format(percentage=f"{rate:.0f}"),
+                suggestion=None,
+                metric=InsightMetric(currency_code=None, value=None, percentage=rate),
+                related_entity=None,
+                cta=None,
+                priority_score=_severity_priority(severity, rate / 100),
+            )
+        )
+
+    rejected_this_month = sum(row.rejected_this_month for row in pipeline.by_currency)
+    if rejected_this_month >= QUOTE_REJECTION_TREND_MIN_COUNT:
+        insights.append(
+            Insight(
+                id="quote_rejection_trend",
+                category=InsightCategory.quote_pipeline,
+                severity=InsightSeverity.warning,
+                title=t(language, "insight_quote_rejection_trend_title"),
+                message=t(language, "insight_quote_rejection_trend_message").format(count=rejected_this_month),
+                suggestion=t(language, "insight_quote_rejection_trend_suggestion"),
+                metric=InsightMetric(currency_code=None, value=None, percentage=None),
+                related_entity=None,
+                cta=None,
+                priority_score=_severity_priority(InsightSeverity.warning, 0.3),
+            )
+        )
+
+    converted_this_month = sum(row.converted_this_month for row in pipeline.by_currency)
+    if converted_this_month > 0:
+        # One insight, currency-agnostic count -- amount is only meaningful
+        # per currency, so only the count is surfaced here to avoid a
+        # misleading cross-currency total.
+        insights.append(
+            Insight(
+                id="quotes_converted_this_month",
+                category=InsightCategory.quote_pipeline,
+                severity=InsightSeverity.positive,
+                title=t(language, "insight_quotes_converted_title").format(count=converted_this_month),
+                message=t(language, "insight_quotes_converted_message").format(count=converted_this_month),
+                suggestion=None,
+                metric=InsightMetric(currency_code=None, value=None, percentage=None),
+                related_entity=None,
+                cta=None,
+                priority_score=_severity_priority(InsightSeverity.positive, 0.25),
+            )
+        )
+
+    repeated = get_customers_with_repeated_rejections(db, organization_id)
+    if repeated:
+        top = repeated[0]
+        insights.append(
+            Insight(
+                id="repeated_rejections",
+                category=InsightCategory.quote_pipeline,
+                severity=InsightSeverity.warning,
+                title=t(language, "insight_repeated_rejections_title").format(customer=top.customer_name),
+                message=t(language, "insight_repeated_rejections_message").format(
+                    customer=top.customer_name, count=top.rejected_count
+                ),
+                suggestion=t(language, "insight_repeated_rejections_suggestion"),
+                metric=None,
+                related_entity=InsightRelatedEntity(
+                    type="customer", id=top.customer_id, label=top.customer_name
+                ),
+                cta=None,
+                priority_score=_severity_priority(InsightSeverity.warning, 0.3),
             )
         )
 

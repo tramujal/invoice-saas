@@ -16,6 +16,11 @@ from app.ai.tools.invoices import (
     SendPaymentReminderTool,
     UpdateInvoiceStatusTool,
 )
+from app.ai.tools.quotes import (
+    ConvertQuoteToInvoiceTool,
+    CreateQuoteDraftTool,
+    SendQuoteTool,
+)
 
 TOOL_REGISTRY: dict[str, ActionTool] = {
     tool.name: tool
@@ -24,6 +29,9 @@ TOOL_REGISTRY: dict[str, ActionTool] = {
         UpdateInvoiceStatusTool(),
         SendInvoiceEmailTool(),
         SendPaymentReminderTool(),
+        CreateQuoteDraftTool(),
+        ConvertQuoteToInvoiceTool(),
+        SendQuoteTool(),
     )
 }
 

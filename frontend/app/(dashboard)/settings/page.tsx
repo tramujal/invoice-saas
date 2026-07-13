@@ -80,6 +80,8 @@ type FormState = {
   reminder_before_due_days: string;
   reminder_on_due_date: boolean;
   reminder_after_due_days: string;
+  quote_reminders_enabled: boolean;
+  quote_reminder_before_expiry_days: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -98,6 +100,8 @@ const EMPTY_FORM: FormState = {
   reminder_before_due_days: "3",
   reminder_on_due_date: true,
   reminder_after_due_days: "7",
+  quote_reminders_enabled: false,
+  quote_reminder_before_expiry_days: "3",
 };
 
 function toFormState(profile: OrganizationProfile): FormState {
@@ -123,6 +127,8 @@ function toFormState(profile: OrganizationProfile): FormState {
     reminder_before_due_days: formatDayList(profile.reminder_before_due_days),
     reminder_on_due_date: profile.reminder_on_due_date,
     reminder_after_due_days: formatDayList(profile.reminder_after_due_days),
+    quote_reminders_enabled: profile.quote_reminders_enabled,
+    quote_reminder_before_expiry_days: formatDayList(profile.quote_reminder_before_expiry_days),
   };
 }
 
@@ -197,7 +203,8 @@ export default function SettingsPage() {
 
     const beforeDueDays = parseDayListInput(form.reminder_before_due_days);
     const afterDueDays = parseDayListInput(form.reminder_after_due_days);
-    if (beforeDueDays === null || afterDueDays === null) {
+    const quoteBeforeExpiryDays = parseDayListInput(form.quote_reminder_before_expiry_days);
+    if (beforeDueDays === null || afterDueDays === null || quoteBeforeExpiryDays === null) {
       setReminderDaysError(t("settings.invalidReminderDays"));
       return;
     }
@@ -224,6 +231,8 @@ export default function SettingsPage() {
           reminder_before_due_days: beforeDueDays,
           reminder_on_due_date: form.reminder_on_due_date,
           reminder_after_due_days: afterDueDays,
+          quote_reminders_enabled: form.quote_reminders_enabled,
+          quote_reminder_before_expiry_days: quoteBeforeExpiryDays,
         }),
       });
       setForm(toFormState(updated));
@@ -606,6 +615,47 @@ export default function SettingsPage() {
           ) : (
             <p className="mt-2 text-xs text-slate-500">{t("settings.reminderDaysHelp")}</p>
           )}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            {t("settings.quoteReminderSectionTitle")}
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {t("settings.quoteReminderSectionSubtitle")}
+          </p>
+
+          <div className="mt-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.quote_reminders_enabled}
+                onChange={(e) => update("quote_reminders_enabled", e.target.checked)}
+                disabled={disabled}
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+              />
+              {t("settings.quoteRemindersEnabledLabel")}
+            </label>
+          </div>
+
+          <div className="mt-4 max-w-sm">
+            <label
+              htmlFor="quote-reminder-before-expiry-days"
+              className="text-sm font-medium text-slate-700"
+            >
+              {t("settings.quoteReminderBeforeExpiryLabel")}
+            </label>
+            <input
+              id="quote-reminder-before-expiry-days"
+              type="text"
+              value={form.quote_reminder_before_expiry_days}
+              onChange={(e) => update("quote_reminder_before_expiry_days", e.target.value)}
+              disabled={disabled || !form.quote_reminders_enabled}
+              placeholder={t("settings.reminderDaysPlaceholder")}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">{t("settings.reminderDaysHelp")}</p>
         </section>
 
         <div className="flex justify-end">

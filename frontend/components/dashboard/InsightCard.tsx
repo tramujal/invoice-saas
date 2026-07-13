@@ -34,6 +34,10 @@ function ctaLabel(t: TranslateFn, cta: InsightCta): string {
       return t("dashboard.insights.cta.createInvoice");
     case "view_products":
       return t("dashboard.insights.cta.viewProducts");
+    case "view_pending_quotes":
+      return t("dashboard.insights.cta.viewPendingQuotes");
+    case "view_expiring_quotes":
+      return t("dashboard.insights.cta.viewExpiringQuotes");
     case "ask_assistant":
       return t("dashboard.insights.cta.askAssistant");
     default:

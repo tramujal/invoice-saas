@@ -1,5 +1,6 @@
 import type { PaymentStatus } from "@/lib/payment-status";
 import type { ProductType } from "@/lib/product-type";
+import type { QuoteStatus } from "@/lib/quote-status";
 
 export type InvoiceSummary = {
   id: string;
@@ -178,6 +179,10 @@ export type OrganizationProfile = {
   reminder_before_due_days: number[];
   reminder_on_due_date: boolean;
   reminder_after_due_days: number[];
+  /** Independent of the invoice reminder fields above -- see
+   * Organization.quote_reminders_enabled's docstring in app/models.py. */
+  quote_reminders_enabled: boolean;
+  quote_reminder_before_expiry_days: number[];
 };
 
 /** Revenue figures for one currency — never combine across currencies
@@ -244,6 +249,32 @@ export type TopProductRevenue = {
   invoice_count: number;
 };
 
+export type QuoteStatusCountPoint = {
+  status: QuoteStatus;
+  count: number;
+};
+
+/** Quote pipeline figures for one currency, never combined with any other. */
+export type QuoteCurrencyPipelineSummary = {
+  currency_code: string;
+  revenue_in_quotes: string;
+  projected_revenue: string;
+  accepted_this_month: number;
+  rejected_this_month: number;
+  converted_this_month: number;
+};
+
+export type QuotePipelineSummary = {
+  counts_by_status: QuoteStatusCountPoint[];
+  acceptance_rate_percent: number | null;
+  by_currency: QuoteCurrencyPipelineSummary[];
+};
+
+export type QuoteMonthlyConversionPoint = {
+  month: string;
+  converted_count: number;
+};
+
 /** Response from GET /organizations/{org}/dashboard/analytics */
 export type DashboardAnalytics = {
   monthly_summary: MonthlySummaryPoint[];
@@ -251,6 +282,8 @@ export type DashboardAnalytics = {
   invoice_count_by_status: PaymentStatusCountPoint[];
   top_customers: TopCustomerRevenue[];
   top_products_and_services: TopProductRevenue[];
+  quote_pipeline: QuotePipelineSummary;
+  quote_monthly_conversions: QuoteMonthlyConversionPoint[];
 };
 
 /** Response from GET/POST/PATCH .../products, .../products/{id}/archive,
@@ -275,6 +308,123 @@ export type PaginatedProducts = {
   items: Product[];
 };
 
+// --- Quotes ----------------------------------------------------------------
+
+export type QuoteLineItem = {
+  id: string;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  product_id: string | null;
+};
+
+export type QuoteLineItemInput = {
+  description: string;
+  quantity: string;
+  unit_price: string;
+  product_id: string | null;
+};
+
+/** Response from GET/POST/PATCH .../quotes/{id} -- the full quote,
+ * including line items. */
+export type Quote = {
+  id: string;
+  quote_number: string;
+  organization_id: string;
+  created_by_user_id: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  subtotal: string;
+  tax_rate: string;
+  tax_amount: string;
+  total: string;
+  /** The raw, stored status -- see effective_status for what to display. */
+  status: QuoteStatus;
+  /** Derived, read-only (expiry-date-aware) -- the single source of truth
+   * to display everywhere. Never computed client-side. */
+  effective_status: QuoteStatus;
+  currency_code: string;
+  language: string;
+  issue_date: string;
+  expiry_date: string | null;
+  notes: string;
+  active: boolean;
+  converted_invoice_id: string | null;
+  /** The durable, shareable public accept/reject link for this quote. */
+  public_url: string;
+  created_at: string;
+  updated_at: string;
+  line_items: QuoteLineItem[];
+};
+
+/** Row shape from GET .../quotes (list) -- no line items, matching
+ * InvoiceSummary's own narrower list-row shape. */
+export type QuoteSummary = {
+  id: string;
+  quote_number: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  subtotal: string;
+  tax_amount: string;
+  total: string;
+  status: QuoteStatus;
+  effective_status: QuoteStatus;
+  currency_code: string;
+  language: string;
+  issue_date: string;
+  expiry_date: string | null;
+  active: boolean;
+  converted_invoice_id: string | null;
+  created_at: string;
+};
+
+export type PaginatedQuotes = {
+  total: number;
+  items: QuoteSummary[];
+};
+
+export type SendQuoteEmailResponse = {
+  sent: boolean;
+  sent_to: string;
+};
+
+export type ConvertQuoteToInvoiceResponse = {
+  invoice_id: string;
+  invoice_number: string;
+};
+
+/** Narrower shape shown on the anonymous public quote page -- no
+ * organization_id, created_by_user_id, converted_invoice_id, or
+ * product_id anywhere (see app/schemas.py PublicQuoteResponse). */
+export type PublicQuoteLineItem = {
+  description: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+};
+
+export type PublicQuote = {
+  quote_number: string;
+  organization_name: string;
+  customer_name: string | null;
+  subtotal: string;
+  tax_rate: string;
+  tax_amount: string;
+  total: string;
+  effective_status: QuoteStatus;
+  currency_code: string;
+  language: string;
+  issue_date: string;
+  expiry_date: string | null;
+  notes: string;
+  line_items: PublicQuoteLineItem[];
+};
+
+export type PublicQuoteActionResponse = {
+  status: QuoteStatus;
+};
+
 // --- Dashboard business insights -----------------------------------------
 //
 // title/message/suggestion arrive already localized from the backend (see
@@ -290,7 +440,9 @@ export type InsightCtaType =
   | "review_pending_invoices"
   | "create_invoice"
   | "ask_assistant"
-  | "view_products";
+  | "view_products"
+  | "view_pending_quotes"
+  | "view_expiring_quotes";
 
 export type InsightMetric = {
   currency_code: string | null;
@@ -344,7 +496,10 @@ export type AssistantActionName =
   | "create_invoice_draft"
   | "update_invoice_status"
   | "send_invoice_email"
-  | "send_payment_reminder";
+  | "send_payment_reminder"
+  | "create_quote_draft"
+  | "convert_quote_to_invoice"
+  | "send_quote";
 
 /** One NDJSON line from POST /organizations/{org}/assistant/chat. Plain
  * prose streams as a sequence of text_delta events; a proposed action

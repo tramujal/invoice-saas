@@ -12,6 +12,7 @@ from app.models import Customer, Invoice, Organization, User
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.product_analytics import get_revenue_by_product
+from app.quote_analytics import get_quote_monthly_conversions, get_quote_pipeline_summary
 from app.schemas import (
     CurrencyRevenueSummary,
     DashboardAnalyticsResponse,
@@ -19,9 +20,14 @@ from app.schemas import (
     MonthlyRevenuePoint,
     MonthlySummaryPoint,
     PaymentStatusCountPoint,
+    QuoteCurrencyPipelineSummary,
+    QuoteMonthlyConversionPoint,
+    QuotePipelineSummary,
+    QuoteStatusCountPoint,
     TopCustomerRevenue,
     TopProductRevenue,
 )
+from app.quote_status import QuoteStatus
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/dashboard", tags=["dashboard"]
@@ -359,12 +365,38 @@ def get_dashboard_analytics_data(db: Session, organization_id: str) -> Dashboard
                 )
             )
 
+    quote_pipeline_data = get_quote_pipeline_summary(db, organization_id)
+    quote_pipeline = QuotePipelineSummary(
+        counts_by_status=[
+            QuoteStatusCountPoint(status=status, count=quote_pipeline_data.counts_by_status.get(status.value, 0))
+            for status in QuoteStatus
+        ],
+        acceptance_rate_percent=quote_pipeline_data.acceptance_rate_percent,
+        by_currency=[
+            QuoteCurrencyPipelineSummary(
+                currency_code=row.currency_code,
+                revenue_in_quotes=row.revenue_in_quotes,
+                projected_revenue=row.projected_revenue,
+                accepted_this_month=row.accepted_this_month,
+                rejected_this_month=row.rejected_this_month,
+                converted_this_month=row.converted_this_month,
+            )
+            for row in quote_pipeline_data.by_currency
+        ],
+    )
+    quote_monthly_conversions = [
+        QuoteMonthlyConversionPoint(month=point.month, converted_count=point.converted_count)
+        for point in get_quote_monthly_conversions(db, organization_id, month_starts)
+    ]
+
     return DashboardAnalyticsResponse(
         monthly_summary=monthly_summary,
         monthly_revenue_by_currency=monthly_revenue_by_currency,
         invoice_count_by_status=invoice_count_by_status,
         top_customers=top_customers,
         top_products_and_services=top_products_and_services,
+        quote_pipeline=quote_pipeline,
+        quote_monthly_conversions=quote_monthly_conversions,
     )
 
 

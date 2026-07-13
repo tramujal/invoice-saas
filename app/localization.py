@@ -8,9 +8,10 @@ call sites don't change.
 from typing import TYPE_CHECKING
 
 from app.payment_status import PaymentStatus
+from app.quote_status import QuoteStatus
 
 if TYPE_CHECKING:
-    from app.models import Invoice, Organization
+    from app.models import Invoice, Organization, Quote
 
 DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ("en", "es")
@@ -281,6 +282,68 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "reminder_total_label": "Amount Due:",
         "reminder_closing": "Please let us know if you have any questions.",
         "reminder_thanks": "Thank you.",
+        "quote_title": "Quote",
+        "quote_no_label": "Quote No.",
+        "quote_expiry_date_label": "Expiry Date",
+        "quote_status_label": "Status",
+        "status_draft": "Draft",
+        "status_sent": "Sent",
+        "status_accepted": "Accepted",
+        "status_rejected": "Rejected",
+        "status_expired": "Expired",
+        "status_converted": "Converted",
+        "quote_email_subject": "Quote {quote_number}",
+        "quote_email_intro": "Please find your quote attached.",
+        "quote_email_number_label": "Quote Number:",
+        "quote_email_expiry_date_label": "Expiry Date:",
+        "quote_email_accept_label": "Accept this quote:",
+        "quote_email_reject_label": "Reject this quote:",
+        "quote_reminder_before_expiry_subject": "Reminder: Quote {quote_number} expires soon",
+        "quote_reminder_before_expiry_greeting": "Hello {name},",
+        "quote_reminder_before_expiry_intro": (
+            "This is a friendly reminder that your quote expires in {days} day(s)."
+        ),
+        "insight_quotes_pending_title": "{count} quotes awaiting response",
+        "insight_quotes_pending_message": (
+            "{count} quotes totaling {currency} {amount} have been sent and are "
+            "still awaiting a response."
+        ),
+        "insight_quotes_pending_suggestion": "Consider following up with these customers.",
+        "insight_quotes_expiring_title": "{count} quotes expiring soon in {currency}",
+        "insight_quotes_expiring_message": (
+            "{count} quotes totaling {currency} {amount} expire within the next "
+            "{days} days."
+        ),
+        "insight_quotes_expiring_suggestion": "Follow up before these quotes expire.",
+        "insight_quote_acceptance_rate_title": "Quote acceptance rate: {percentage}%",
+        "insight_quote_acceptance_rate_message": (
+            "Of your decided quotes, {percentage}% have been accepted."
+        ),
+        "insight_quote_rejection_trend_title": "Rising quote rejections",
+        "insight_quote_rejection_trend_message": (
+            "{count} quotes were rejected this month, more than usual."
+        ),
+        "insight_quote_rejection_trend_suggestion": (
+            "Consider reviewing your recent quote pricing or terms."
+        ),
+        "insight_quotes_converted_title": "{count} quotes converted to invoices this month",
+        "insight_quotes_converted_message": (
+            "{count} accepted quotes were converted into invoices this month."
+        ),
+        "insight_repeated_rejections_title": "Repeated rejections from {customer}",
+        "insight_repeated_rejections_message": (
+            "{customer} has rejected {count} quotes."
+        ),
+        "insight_repeated_rejections_suggestion": (
+            "Consider reaching out to understand their concerns before quoting again."
+        ),
+        "assistant_quotes_pending_heading": "Quotes Awaiting Response",
+        "assistant_no_quotes_pending": "No quotes are currently awaiting a response.",
+        "assistant_quotes_expired_heading": "Expired Quotes",
+        "assistant_no_quotes_expired": "No expired quotes.",
+        "assistant_quote_conversion_rate_label": (
+            "Quote conversion rate: {percentage}% of decided quotes (accepted vs. rejected) have been accepted"
+        ),
     },
     "es": {
         "invoice_title": "Factura",
@@ -552,6 +615,69 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "reminder_total_label": "Monto adeudado:",
         "reminder_closing": "No dude en contactarnos si tiene alguna pregunta.",
         "reminder_thanks": "Gracias.",
+        "quote_title": "Presupuesto",
+        "quote_no_label": "Nº de presupuesto",
+        "quote_expiry_date_label": "Fecha de vencimiento",
+        "quote_status_label": "Estado",
+        "status_draft": "Borrador",
+        "status_sent": "Enviado",
+        "status_accepted": "Aceptado",
+        "status_rejected": "Rechazado",
+        "status_expired": "Vencido",
+        "status_converted": "Convertido",
+        "quote_email_subject": "Presupuesto {quote_number}",
+        "quote_email_intro": "Adjuntamos su presupuesto.",
+        "quote_email_number_label": "Número de presupuesto:",
+        "quote_email_expiry_date_label": "Fecha de vencimiento:",
+        "quote_email_accept_label": "Aceptar este presupuesto:",
+        "quote_email_reject_label": "Rechazar este presupuesto:",
+        "quote_reminder_before_expiry_subject": "Recordatorio: El presupuesto {quote_number} vence pronto",
+        "quote_reminder_before_expiry_greeting": "Hola {name},",
+        "quote_reminder_before_expiry_intro": (
+            "Este es un recordatorio de que su presupuesto vence en {days} día(s)."
+        ),
+        "insight_quotes_pending_title": "{count} presupuestos esperando respuesta",
+        "insight_quotes_pending_message": (
+            "{count} presupuestos por un total de {currency} {amount} fueron enviados "
+            "y siguen esperando una respuesta."
+        ),
+        "insight_quotes_pending_suggestion": "Considera dar seguimiento a estos clientes.",
+        "insight_quotes_expiring_title": "{count} presupuestos vencen pronto en {currency}",
+        "insight_quotes_expiring_message": (
+            "{count} presupuestos por un total de {currency} {amount} vencen dentro "
+            "de los próximos {days} días."
+        ),
+        "insight_quotes_expiring_suggestion": "Da seguimiento antes de que venzan estos presupuestos.",
+        "insight_quote_acceptance_rate_title": "Tasa de aceptación de presupuestos: {percentage}%",
+        "insight_quote_acceptance_rate_message": (
+            "De tus presupuestos decididos, el {percentage}% fueron aceptados."
+        ),
+        "insight_quote_rejection_trend_title": "Aumento de presupuestos rechazados",
+        "insight_quote_rejection_trend_message": (
+            "Se rechazaron {count} presupuestos este mes, más de lo habitual."
+        ),
+        "insight_quote_rejection_trend_suggestion": (
+            "Considera revisar los precios o condiciones de tus presupuestos recientes."
+        ),
+        "insight_quotes_converted_title": "{count} presupuestos convertidos a facturas este mes",
+        "insight_quotes_converted_message": (
+            "{count} presupuestos aceptados se convirtieron en facturas este mes."
+        ),
+        "insight_repeated_rejections_title": "Rechazos repetidos de {customer}",
+        "insight_repeated_rejections_message": (
+            "{customer} ha rechazado {count} presupuestos."
+        ),
+        "insight_repeated_rejections_suggestion": (
+            "Considera contactarlo para entender sus inquietudes antes de volver a cotizar."
+        ),
+        "assistant_quotes_pending_heading": "Presupuestos Esperando Respuesta",
+        "assistant_no_quotes_pending": "No hay presupuestos esperando respuesta actualmente.",
+        "assistant_quotes_expired_heading": "Presupuestos Vencidos",
+        "assistant_no_quotes_expired": "No hay presupuestos vencidos.",
+        "assistant_quote_conversion_rate_label": (
+            "Tasa de conversión de presupuestos: {percentage}% de los presupuestos decididos "
+            "(aceptados vs. rechazados) fueron aceptados"
+        ),
     },
 }
 
@@ -574,4 +700,8 @@ def t(language: str, key: str) -> str:
 
 
 def payment_status_label(language: str, status: PaymentStatus) -> str:
+    return t(language, f"status_{status.value}")
+
+
+def quote_status_label(language: str, status: QuoteStatus) -> str:
     return t(language, f"status_{status.value}")

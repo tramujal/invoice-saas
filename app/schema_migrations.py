@@ -28,6 +28,10 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_due_date_and_status_indexes(engine)
     _add_products_table(engine)
     _add_invoice_line_item_product_id(engine)
+    _add_organization_quote_fields(engine)
+    _add_quotes_table(engine)
+    _add_quote_line_items_table(engine)
+    _add_quote_reminders_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -472,6 +476,139 @@ def _add_invoice_line_item_product_id(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_invoice_line_items_product_id "
                 "ON invoice_line_items (product_id)"
+            )
+        )
+
+
+def _add_organization_quote_fields(engine: Engine) -> None:
+    """Adds next_quote_number/quote_reminders_enabled/
+    quote_reminder_before_expiry_days to organizations -- each with a safe
+    default so every existing organization keeps working unchanged
+    (quote_reminders_enabled defaults to FALSE, same opt-in-only rationale
+    as reminders_enabled)."""
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("organizations")}
+    new_columns = {
+        "next_quote_number": "INTEGER NOT NULL DEFAULT 1",
+        "quote_reminders_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "quote_reminder_before_expiry_days": "VARCHAR(64) NOT NULL DEFAULT '3'",
+    }
+    missing = {name: ddl for name, ddl in new_columns.items() if name not in columns}
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for name, ddl in missing.items():
+            conn.execute(text(f"ALTER TABLE organizations ADD COLUMN {name} {ddl}"))
+
+
+def _add_quotes_table(engine: Engine) -> None:
+    """Creates quotes if it's missing -- same idempotent safety net as
+    _add_products_table/_add_invoice_reminders_table (Base.metadata.
+    create_all() already creates this table on a fresh database since
+    Quote is a declared model)."""
+    inspector = inspect(engine)
+    if "quotes" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS quotes ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "quote_number INTEGER NOT NULL, "
+                "created_by_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "customer_id CHAR(36) NULL REFERENCES customers(id) ON DELETE SET NULL, "
+                "subtotal NUMERIC(14, 2) NOT NULL, "
+                "tax_rate NUMERIC(5, 4) NOT NULL DEFAULT 0, "
+                "tax_amount NUMERIC(14, 2) NOT NULL, "
+                "total NUMERIC(14, 2) NOT NULL, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'draft', "
+                "currency_code VARCHAR(8) NOT NULL DEFAULT 'USD', "
+                "language VARCHAR(8) NOT NULL DEFAULT 'en', "
+                "issue_date DATE NOT NULL, "
+                "expiry_date DATE NULL, "
+                "notes TEXT NOT NULL DEFAULT '', "
+                "active BOOLEAN NOT NULL DEFAULT TRUE, "
+                "public_token VARCHAR(64) NOT NULL UNIQUE, "
+                "converted_invoice_id CHAR(36) NULL REFERENCES invoices(id) ON DELETE SET NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "CONSTRAINT uq_quote_org_number UNIQUE (organization_id, quote_number)"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_quotes_org_status "
+                "ON quotes (organization_id, status)"
+            )
+        )
+
+
+def _add_quote_line_items_table(engine: Engine) -> None:
+    """Creates quote_line_items if it's missing -- requires the quotes and
+    products tables to already exist (see run_startup_migrations' call
+    order: _add_quotes_table and _add_products_table always run first)."""
+    inspector = inspect(engine)
+    if "quote_line_items" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS quote_line_items ("
+                "id CHAR(36) PRIMARY KEY, "
+                "quote_id CHAR(36) NOT NULL REFERENCES quotes(id) ON DELETE CASCADE, "
+                "description VARCHAR(512) NOT NULL, "
+                "quantity NUMERIC(14, 4) NOT NULL, "
+                "unit_price NUMERIC(14, 2) NOT NULL, "
+                "line_total NUMERIC(14, 2) NOT NULL, "
+                "product_id CHAR(36) NULL REFERENCES products(id) ON DELETE SET NULL"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_quote_line_items_product_id "
+                "ON quote_line_items (product_id)"
+            )
+        )
+
+
+def _add_quote_reminders_table(engine: Engine) -> None:
+    """Creates quote_reminders if it's missing -- same idempotent safety
+    net as _add_invoice_reminders_table. The unique constraint is the sole
+    idempotency/concurrency guarantee for scheduled quote-expiry reminder
+    sends (see app/models.py QuoteReminder)."""
+    inspector = inspect(engine)
+    if "quote_reminders" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS quote_reminders ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "quote_id CHAR(36) NOT NULL REFERENCES quotes(id) ON DELETE CASCADE, "
+                "days_offset INTEGER NULL, "
+                "scheduled_for_date DATE NOT NULL, "
+                "recipient_email VARCHAR(255) NOT NULL, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                "attempt_count INTEGER NOT NULL DEFAULT 0, "
+                "triggered_by VARCHAR(16) NOT NULL, "
+                "failure_code VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "sent_at TIMESTAMP NULL, "
+                "CONSTRAINT uq_quote_reminder_idempotency "
+                "UNIQUE (quote_id, scheduled_for_date)"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_quote_reminders_org_status "
+                "ON quote_reminders (organization_id, status)"
             )
         )
 
