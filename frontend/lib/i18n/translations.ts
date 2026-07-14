@@ -57,6 +57,9 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "nav.assistant": "Assistant",
     "nav.logout": "Log out",
     "nav.switchOrganization": "Switch organization",
+    "nav.openMenu": "Open menu",
+    "nav.closeMenu": "Close menu",
+    "nav.mobileMenuLabel": "Navigation menu",
 
     "invoices.title": "Invoices",
     "invoices.subtitle": "Newest first. Update payment status inline.",
@@ -960,6 +963,9 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "nav.assistant": "Asistente",
     "nav.logout": "Cerrar sesión",
     "nav.switchOrganization": "Cambiar de organización",
+    "nav.openMenu": "Abrir menú",
+    "nav.closeMenu": "Cerrar menú",
+    "nav.mobileMenuLabel": "Menú de navegación",
 
     "invoices.title": "Facturas",
     "invoices.subtitle": "Más recientes primero. Actualiza el estado de pago en línea.",

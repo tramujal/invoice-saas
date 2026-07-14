@@ -2,8 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import dynamic from "next/dynamic";
 
 import { ActionProposalCard } from "@/components/assistant/ActionProposalCard";
 import { useToast } from "@/components/ui/toast";
@@ -17,40 +16,18 @@ import type { AssistantChatMessage, AssistantStreamEvent } from "@/lib/types";
 // so we never even try to send more than the server will accept.
 const MAX_HISTORY_MESSAGES = 12;
 
-// No @tailwindcss/typography plugin in this project (and no other markdown
-// rendering exists to reuse) — rather than adding another dependency just
-// for "prose" styling, element-level classes are applied directly here.
-// react-markdown never renders raw HTML by default (no rehype-raw plugin
-// is used), so this stays safe regardless of what the model outputs.
-const markdownComponents: Components = {
-  p: ({ children }) => <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 pl-5">{children}</ul>,
-  ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5">{children}</ol>,
-  li: ({ children }) => <li>{children}</li>,
-  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="underline">
-      {children}
-    </a>
-  ),
-  code: ({ children }) => (
-    <code className="rounded bg-slate-200/70 px-1 py-0.5 text-xs">{children}</code>
-  ),
-  pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded-lg bg-slate-800 p-3 text-xs text-slate-100">
-      {children}
-    </pre>
-  ),
-  table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="min-w-full divide-y divide-slate-200 text-xs">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="px-2 py-1 text-left font-semibold text-slate-700">{children}</th>
-  ),
-  td: ({ children }) => <td className="px-2 py-1">{children}</td>,
-};
+// How close to the bottom (px) the user must already be scrolled for a
+// new message to auto-scroll the view -- otherwise someone scrolled up to
+// reread earlier history isn't yanked back down by every streamed token.
+const AUTO_SCROLL_THRESHOLD_PX = 120;
+
+// react-markdown + remark-gfm are only ever needed on this one route --
+// loading them dynamically (client-only, no SSR) keeps them out of this
+// route's initial JS until the first assistant reply actually renders.
+const MarkdownMessage = dynamic(
+  () => import("@/components/assistant/MarkdownMessage").then((mod) => mod.MarkdownMessage),
+  { ssr: false, loading: () => <p className="whitespace-pre-wrap opacity-70">…</p> }
+);
 
 function AssistantContent() {
   const { t } = useTranslation();
@@ -63,11 +40,29 @@ function AssistantContent() {
   const [isAwaitingFirstEvent, setIsAwaitingFirstEvent] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Only auto-scroll when the user is already near the bottom -- otherwise
+  // someone scrolled up to reread earlier messages would get yanked back
+  // down on every streamed token.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
   }, [messages]);
+
+  // Cancels any in-flight stream when navigating away mid-response --
+  // without this, the fetch/reader from sendMessage() below is simply
+  // abandoned rather than actually cancelled.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   // A dashboard insight's "Ask Assistant" CTA links here with ?q=<question>
   // prefilled -- read it once on mount, then strip it from the URL so a
@@ -263,7 +258,7 @@ function AssistantContent() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6">
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <h2 className="text-base font-semibold text-slate-900">
@@ -286,9 +281,7 @@ function AssistantContent() {
                         }`}
                       >
                         {message.role === "assistant" ? (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {message.content}
-                          </ReactMarkdown>
+                          <MarkdownMessage content={message.content} />
                         ) : (
                           <p className="whitespace-pre-wrap">{message.content}</p>
                         )}
@@ -317,10 +310,16 @@ function AssistantContent() {
               {isAwaitingFirstEvent ? (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl bg-surface-muted px-4 py-2.5 text-sm text-slate-900">
-                    <span className="inline-flex items-center gap-1 text-slate-500">
+                    <span className="inline-flex items-center gap-1 text-slate-500" aria-hidden>
                       <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.2s]" />
                       <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
                       <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0.2s]" />
+                    </span>
+                    {/* One announcement per state transition (streaming
+                        starts), not per streamed token -- this element
+                        unmounts the moment the first real event arrives. */}
+                    <span role="status" className="sr-only">
+                      {t("assistant.thinking")}
                     </span>
                   </div>
                 </div>

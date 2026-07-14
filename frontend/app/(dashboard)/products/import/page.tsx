@@ -39,6 +39,11 @@ const TARGET_FIELDS: ProductTargetField[] = [
 ];
 const ACCEPTED_EXTENSIONS = [".csv", ".xlsx"];
 const MAX_DISPLAY_SIZE = "5 MB";
+// Defense-in-depth client-side cap, mirroring the backend's
+// IMPORT_MAX_PREVIEW_ROWS (app/imports/limits.py) -- the backend already
+// never returns more than this, but rendering is capped independently
+// rather than trusting that invariant to hold forever.
+const PREVIEW_ROW_DISPLAY_CAP = 50;
 
 function targetFieldLabel(t: TranslateFn, field: ProductTargetField): string {
   if (field === "ignore") return t("import.mappingIgnore");
@@ -395,27 +400,39 @@ export default function ProductImportPage() {
               isDragging ? "border-slate-500 bg-slate-50" : "border-slate-300 hover:bg-slate-50/60"
             }`}
           >
-            <FileIcon className="h-10 w-10 text-slate-400" />
-            <p className="mt-3 text-sm font-medium text-slate-700">
-              {t("import.uploadDropzoneTitle")}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">{t("import.uploadDropzoneOr")}</p>
-            <p className="mt-1 text-sm font-medium text-slate-700 underline">
-              {t("import.uploadBrowseAction")}
-            </p>
-            <p className="mt-3 text-xs text-slate-400">
-              {t("import.uploadAcceptedTypes", { size: MAX_DISPLAY_SIZE })}
-            </p>
+            {/* Visually hidden (not display:none) so it stays tab-reachable
+                and Enter/Space opens the native file picker -- a plain
+                `hidden` input is removed from the accessibility tree
+                entirely, which previously left no keyboard path to this
+                control at all. The "Browse" label below is a peer sibling
+                so its focus-visible ring reflects this input's real
+                focus state. */}
             <input
               ref={fileInputRef}
+              id="products-import-file-input"
               type="file"
               accept=".csv,.xlsx"
-              className="hidden"
+              className="peer sr-only"
               onChange={(e) => {
                 const picked = e.target.files?.[0];
                 if (picked) pickFile(picked);
               }}
             />
+            <FileIcon className="h-10 w-10 text-slate-400" />
+            <p className="mt-3 text-sm font-medium text-slate-700">
+              {t("import.uploadDropzoneTitle")}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">{t("import.uploadDropzoneOr")}</p>
+            <label
+              htmlFor="products-import-file-input"
+              onClick={(e) => e.stopPropagation()}
+              className="mt-1 cursor-pointer rounded text-sm font-medium text-slate-700 underline peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400"
+            >
+              {t("import.uploadBrowseAction")}
+            </label>
+            <p className="mt-3 text-xs text-slate-400">
+              {t("import.uploadAcceptedTypes", { size: MAX_DISPLAY_SIZE })}
+            </p>
           </div>
 
           {file ? (
@@ -611,7 +628,7 @@ export default function ProductImportPage() {
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 {t("import.previewSubtitle", {
-                  shown: preview.preview_rows.length,
+                  shown: Math.min(preview.preview_rows.length, PREVIEW_ROW_DISPLAY_CAP),
                   total: preview.total_rows,
                 })}
               </p>
@@ -637,7 +654,7 @@ export default function ProductImportPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {preview.preview_rows.map((row: ImportPreviewRowResult) => (
+                  {preview.preview_rows.slice(0, PREVIEW_ROW_DISPLAY_CAP).map((row: ImportPreviewRowResult) => (
                     <tr key={row.row_number}>
                       <td className="px-4 py-2 font-mono text-xs text-slate-500">
                         {row.row_number}

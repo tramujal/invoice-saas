@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProductForm } from "@/components/products/ProductForm";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
@@ -81,7 +81,16 @@ export default function ProductsPage() {
     };
   }
 
+  // Aborts any still-in-flight previous load() (e.g. a fast-typing
+  // debounced search superseding an earlier request) so a slow stale
+  // response can never overwrite a newer one, and so navigating away
+  // mid-request actually cancels it instead of abandoning it.
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
@@ -95,18 +104,25 @@ export default function ProductsPage() {
       if (typeFilter !== "all") q.set("type", typeFilter);
       if (activeFilter !== "all") q.set("active", activeFilter === "active" ? "true" : "false");
 
-      const json = await apiFetch<PaginatedProducts>(`${orgPath("products")}?${q.toString()}`);
+      const json = await apiFetch<PaginatedProducts>(`${orgPath("products")}?${q.toString()}`, {
+        signal: controller.signal,
+      });
       setData(json);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setData(null);
       setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
-      setLoading(false);
+      // Only the still-current (non-superseded) call may clear the
+      // loading flag -- otherwise an aborted call's finally could turn
+      // off the spinner for a newer request that's still in flight.
+      if (abortRef.current === controller) setLoading(false);
     }
   }, [offset, debouncedSearch, typeFilter, activeFilter, sortBy, sortDir]);
 
   useEffect(() => {
     void load();
+    return () => abortRef.current?.abort();
   }, [load]);
 
   function resetFilters() {

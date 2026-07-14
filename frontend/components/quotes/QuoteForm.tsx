@@ -34,8 +34,8 @@ function newLineId(): string {
   return `line-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function defaultLine(): LineDraft {
-  return { id: newLineId(), description: "", quantity: "1", unit_price: "0", product_id: null };
+function defaultLine(id: string = newLineId()): LineDraft {
+  return { id, description: "", quantity: "1", unit_price: "0", product_id: null };
 }
 
 export type QuoteFormValues = {
@@ -97,16 +97,24 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
     setCurrencyCode(resolveDefaultInvoiceCurrency(selectedCustomer, orgCurrency));
   }, [selectedCustomer, orgCurrency, currencyManuallySet]);
 
+  // Line ids at first render must be stable across the server and client
+  // render passes (not crypto.randomUUID()) -- they're used as real DOM
+  // id/list attributes below (the product datalist), so two different
+  // random values would be a genuine React hydration mismatch. A plain
+  // index-derived id is fine here since uniqueness only needs to hold
+  // among rows simultaneously in the DOM; newLineId() (random) is still
+  // used for rows added later via addLine(), which only ever runs
+  // client-side in response to a click, after hydration has completed.
   const [lines, setLines] = useState<LineDraft[]>(
     initialQuote
-      ? initialQuote.line_items.map((li) => ({
-          id: newLineId(),
+      ? initialQuote.line_items.map((li, index) => ({
+          id: `initial-line-${index}`,
           description: li.description,
           quantity: li.quantity,
           unit_price: li.unit_price,
           product_id: li.product_id,
         }))
-      : [defaultLine()]
+      : [defaultLine("initial-line-0")]
   );
 
   const issueDate = useMemo(() => initialQuote?.issue_date ?? todayDateString(), [initialQuote]);

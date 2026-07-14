@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BusinessInsightsSection } from "@/components/dashboard/BusinessInsightsSection";
 import { CurrencySelector } from "@/components/dashboard/CurrencySelector";
@@ -74,27 +74,36 @@ export default function DashboardPage() {
     setSelectedCurrency((prev) => prev ?? code);
   }, []);
 
+  // Cancels the in-flight requests if the user navigates away before this
+  // page's two-request load finishes, instead of letting them dangle.
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
       const [dashboardJson, analyticsJson] = await Promise.all([
-        apiFetch<DashboardData>(orgPath("dashboard")),
-        apiFetch<DashboardAnalytics>(orgPath("dashboard/analytics")),
+        apiFetch<DashboardData>(orgPath("dashboard"), { signal: controller.signal }),
+        apiFetch<DashboardAnalytics>(orgPath("dashboard/analytics"), { signal: controller.signal }),
       ]);
       setData(dashboardJson);
       setAnalytics(analyticsJson);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setData(null);
       setAnalytics(null);
       setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
-      setLoading(false);
+      if (abortRef.current === controller) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
+    return () => abortRef.current?.abort();
   }, [load]);
 
   const showEmpty = !loading && !error && data !== null && data.total_invoices === 0;

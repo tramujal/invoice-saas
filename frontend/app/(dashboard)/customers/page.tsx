@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AddCustomerForm } from "@/components/customers/AddCustomerForm";
 import { useToast } from "@/components/ui/toast";
@@ -109,8 +109,17 @@ export default function CustomersPage() {
   const isDefaultState =
     !hasActiveFilters && sortBy === "created_at" && sortDir === "desc";
 
+  // Aborts any still-in-flight previous load() (e.g. a fast-typing
+  // debounced search superseding an earlier request) so a slow stale
+  // response can never overwrite a newer one, and so navigating away
+  // mid-request actually cancels it instead of abandoning it.
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     if (!silent) {
       setLoading(true);
       setError(null);
@@ -119,22 +128,28 @@ export default function CustomersPage() {
       const q = new URLSearchParams({ sort_by: sortBy, sort_dir: sortDir });
       if (debouncedSearch.trim()) q.set("search", debouncedSearch.trim());
       const json = await apiFetch<Customer[]>(
-        `${orgPath("customers")}?${q.toString()}`
+        `${orgPath("customers")}?${q.toString()}`,
+        { signal: controller.signal }
       );
       setItems(json);
       if (!silent) setError(null);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       if (!silent) {
         setItems(null);
         setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
       }
     } finally {
-      if (!silent) setLoading(false);
+      // Only the still-current (non-superseded) call may clear the
+      // loading flag -- otherwise an aborted call's finally could turn
+      // off the spinner for a newer request that's still in flight.
+      if (!silent && abortRef.current === controller) setLoading(false);
     }
   }, [debouncedSearch, sortBy, sortDir]);
 
   useEffect(() => {
     void load();
+    return () => abortRef.current?.abort();
   }, [load]);
 
   function resetFilters() {
@@ -274,10 +289,15 @@ export default function CustomersPage() {
               <tbody className="divide-y divide-slate-100">
                 {items!.map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50/80">
-                    <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
+                    <td
+                      className="max-w-[200px] truncate px-4 py-3 font-medium text-slate-900 sm:px-6"
+                      title={c.name}
+                    >
                       {c.name}
                     </td>
-                    <td className="px-4 py-3 text-slate-700 sm:px-6">{c.email}</td>
+                    <td className="max-w-[220px] truncate px-4 py-3 text-slate-700 sm:px-6" title={c.email}>
+                      {c.email}
+                    </td>
                     <td className="hidden px-4 py-3 text-slate-600 md:table-cell md:px-6">
                       {c.phone || "—"}
                     </td>

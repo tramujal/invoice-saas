@@ -106,7 +106,7 @@ export default function PublicQuotePage() {
               </p>
             ) : null}
 
-            <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+            <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
                 <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
                   <tr>

@@ -195,13 +195,13 @@ export default function TeamPage() {
           </h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
+          <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-500">
                 <th className="px-4 py-3 sm:px-6">{t("common.email")}</th>
                 <th className="px-4 py-3">{t("team.roleLabel")}</th>
-                <th className="px-4 py-3">{t("team.statusLabel")}</th>
-                <th className="px-4 py-3">{t("team.joinedLabel")}</th>
+                <th className="hidden px-4 py-3 sm:table-cell">{t("team.statusLabel")}</th>
+                <th className="hidden px-4 py-3 md:table-cell">{t("team.joinedLabel")}</th>
                 {canManageMembers ? <th className="px-4 py-3 text-right sm:pr-6">{t("team.colActions")}</th> : null}
               </tr>
             </thead>
@@ -224,7 +224,7 @@ export default function TeamPage() {
                   const rowBusy = busyId === member.id;
                   return (
                     <tr key={member.id} className="border-b border-slate-50 last:border-0">
-                      <td className="px-4 py-3 sm:px-6">
+                      <td className="max-w-[180px] truncate px-4 py-3 sm:px-6" title={member.user_email}>
                         <span className="font-medium text-slate-900">{member.user_email}</span>
                         {isSelf ? (
                           <span className="ml-2 text-xs text-slate-400">{t("team.youLabel")}</span>
@@ -237,13 +237,13 @@ export default function TeamPage() {
                           {getMembershipRoleLabel(t, member.role)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{statusLabel(t, member.status)}</td>
-                      <td className="px-4 py-3 text-slate-600">
+                      <td className="hidden px-4 py-3 text-slate-600 sm:table-cell">{statusLabel(t, member.status)}</td>
+                      <td className="hidden px-4 py-3 text-slate-600 md:table-cell">
                         {new Date(member.accepted_at).toLocaleDateString()}
                       </td>
                       {canManageMembers ? (
                         <td className="px-4 py-3 sm:pr-6">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             <select
                               aria-label={t("team.changeRoleLabel", { email: member.user_email })}
                               value={isAssignableRole(member.role) ? member.role : ""}
@@ -300,13 +300,13 @@ export default function TeamPage() {
             </h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-3 sm:px-6">{t("common.email")}</th>
                   <th className="px-4 py-3">{t("team.roleLabel")}</th>
-                  <th className="px-4 py-3">{t("team.invitedByLabel")}</th>
-                  <th className="px-4 py-3">{t("team.expiresLabel")}</th>
+                  <th className="hidden px-4 py-3 sm:table-cell">{t("team.invitedByLabel")}</th>
+                  <th className="hidden px-4 py-3 md:table-cell">{t("team.expiresLabel")}</th>
                   <th className="px-4 py-3 text-right sm:pr-6">{t("team.colActions")}</th>
                 </tr>
               </thead>
@@ -322,7 +322,12 @@ export default function TeamPage() {
                     const rowBusy = busyId === invitation.id;
                     return (
                       <tr key={invitation.id} className="border-b border-slate-50 last:border-0">
-                        <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">{invitation.email}</td>
+                        <td
+                          className="max-w-[180px] truncate px-4 py-3 font-medium text-slate-900 sm:px-6"
+                          title={invitation.email}
+                        >
+                          {invitation.email}
+                        </td>
                         <td className="px-4 py-3">
                           <span
                             className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${MEMBERSHIP_ROLE_BADGE_CLASS[invitation.role]}`}
@@ -330,12 +335,12 @@ export default function TeamPage() {
                             {getMembershipRoleLabel(t, invitation.role)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{invitation.created_by_email ?? "—"}</td>
-                        <td className="px-4 py-3 text-slate-600">
+                        <td className="hidden px-4 py-3 text-slate-600 sm:table-cell">{invitation.created_by_email ?? "—"}</td>
+                        <td className="hidden px-4 py-3 text-slate-600 md:table-cell">
                           {new Date(invitation.expires_at).toLocaleDateString()}
                         </td>
                         <td className="px-4 py-3 sm:pr-6">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => void handleResendInvitation(invitation)}

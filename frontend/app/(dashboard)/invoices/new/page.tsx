@@ -96,9 +96,16 @@ export default function NewInvoicePage() {
     if (currencyManuallySet) return;
     setCurrencyCode(resolveDefaultInvoiceCurrency(selectedCustomer, orgCurrency));
   }, [selectedCustomer, orgCurrency, currencyManuallySet]);
+  // A stable, non-random id here (not newLineId()) -- this line exists at
+  // first render, which happens once on the server and again on the
+  // client during hydration; a random id would differ between the two
+  // passes and mismatch against the real DOM id/list attributes used
+  // below (the product datalist). newLineId() is still used for every
+  // line added later via addLine(), which only ever runs client-side in
+  // response to a click, after hydration has already completed.
   const [lines, setLines] = useState<LineDraft[]>([
     {
-      id: newLineId(),
+      id: "initial-line-0",
       description: "",
       quantity: "1",
       unit_price: "0",

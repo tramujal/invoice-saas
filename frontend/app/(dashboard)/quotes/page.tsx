@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
@@ -100,7 +100,16 @@ function QuotesContent() {
     };
   }
 
+  // Aborts any still-in-flight previous load() (e.g. a fast-typing
+  // debounced search superseding an earlier request) so a slow stale
+  // response can never overwrite a newer one, and so navigating away
+  // mid-request actually cancels it instead of abandoning it.
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
@@ -114,18 +123,25 @@ function QuotesContent() {
       if (status !== "all") q.set("status", status);
       if (activeFilter !== "all") q.set("active", activeFilter === "active" ? "true" : "false");
 
-      const json = await apiFetch<PaginatedQuotes>(`${orgPath("quotes")}?${q.toString()}`);
+      const json = await apiFetch<PaginatedQuotes>(`${orgPath("quotes")}?${q.toString()}`, {
+        signal: controller.signal,
+      });
       setData(json);
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setData(null);
       setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
-      setLoading(false);
+      // Only the still-current (non-superseded) call may clear the
+      // loading flag -- otherwise an aborted call's finally could turn
+      // off the spinner for a newer request that's still in flight.
+      if (abortRef.current === controller) setLoading(false);
     }
   }, [offset, debouncedSearch, status, activeFilter, sortBy, sortDir]);
 
   useEffect(() => {
     void load();
+    return () => abortRef.current?.abort();
   }, [load]);
 
   // A dashboard insight's "View pending/expiring quotes" CTA links here
@@ -541,7 +557,10 @@ function QuotesContent() {
                 data?.items.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50/80">
                     <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">{row.quote_number}</td>
-                    <td className="hidden px-4 py-3 text-slate-600 sm:table-cell sm:px-6">
+                    <td
+                      className="hidden max-w-[180px] truncate px-4 py-3 text-slate-600 sm:table-cell sm:px-6"
+                      title={row.customer_name ?? undefined}
+                    >
                       {row.customer_name ?? <span className="text-slate-400">—</span>}
                     </td>
                     <td className="px-4 py-3 sm:px-6">
