@@ -3,10 +3,16 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AddCustomerForm } from "@/components/customers/AddCustomerForm";
+import { CustomerForm } from "@/components/customers/CustomerForm";
+import {
+  RowActionsMenu,
+  STICKY_ACTIONS_TD_CLASS,
+  STICKY_ACTIONS_TH_CLASS,
+} from "@/components/ui/RowActionsMenu";
 import { useToast } from "@/components/ui/toast";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { ApiError, apiFetchBlob, apiFetch, orgPath } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { Customer } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
@@ -93,6 +99,8 @@ export default function CustomersPage() {
   const [items, setItems] = useState<Customer[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -167,6 +175,28 @@ export default function CustomersPage() {
     }
   }
 
+  async function deleteCustomer(customer: Customer) {
+    if (deletingId) return;
+    if (!window.confirm(t("customers.deleteConfirm", { name: customer.name }))) return;
+    setDeletingId(customer.id);
+    const loadingId = toast.loading(t("customers.toastDeleting"));
+    try {
+      await apiFetch(orgPath(`customers/${customer.id}`), {
+        method: "DELETE",
+        parseJson: false,
+      });
+      toast.dismiss(loadingId);
+      toast.success(t("customers.toastDeleted"));
+      if (editingCustomer?.id === customer.id) setEditingCustomer(null);
+      await load();
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(formatApiError(err, t("customers.toastDeleteError")));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const showEmpty = !loading && items !== null && items.length === 0;
   const showTable = !loading && items !== null && items.length > 0;
 
@@ -211,7 +241,18 @@ export default function CustomersPage() {
         </div>
       </header>
 
-      <AddCustomerForm onCreated={() => load({ silent: true })} />
+      {editingCustomer ? (
+        <CustomerForm
+          customer={editingCustomer}
+          onSaved={async () => {
+            setEditingCustomer(null);
+            await load({ silent: true });
+          }}
+          onCancel={() => setEditingCustomer(null)}
+        />
+      ) : (
+        <CustomerForm onSaved={() => load({ silent: true })} />
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -284,11 +325,14 @@ export default function CustomersPage() {
                   <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
                     {t("customers.taxIdColumn")}
                   </th>
+                  <th className={STICKY_ACTIONS_TH_CLASS}>
+                    <span className="sr-only">{t("customers.colActions")}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {items!.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/80">
+                  <tr key={c.id} className="group hover:bg-slate-50/80">
                     <td
                       className="max-w-[200px] truncate px-4 py-3 font-medium text-slate-900 sm:px-6"
                       title={c.name}
@@ -306,6 +350,20 @@ export default function CustomersPage() {
                     </td>
                     <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
                       {c.tax_id || "—"}
+                    </td>
+                    <td className={STICKY_ACTIONS_TD_CLASS}>
+                      <RowActionsMenu label={t("common.moreActions")}>
+                        <RowActionsMenu.Item onSelect={() => setEditingCustomer(c)}>
+                          {t("common.edit")}
+                        </RowActionsMenu.Item>
+                        <RowActionsMenu.Item
+                          destructive
+                          disabled={deletingId === c.id}
+                          onSelect={() => void deleteCustomer(c)}
+                        >
+                          {t("common.delete")}
+                        </RowActionsMenu.Item>
+                      </RowActionsMenu>
                     </td>
                   </tr>
                 ))}

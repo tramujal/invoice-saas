@@ -5,12 +5,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { PaymentStatusSelect } from "@/components/invoices/PaymentStatusSelect";
-import { SendReminderButton } from "@/components/invoices/SendReminderButton";
+import {
+  RowActionsMenu,
+  STICKY_ACTIONS_TD_CLASS,
+  STICKY_ACTIONS_TH_CLASS,
+} from "@/components/ui/RowActionsMenu";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
 import {
   formatApiError,
+  getApiErrorCode,
   isEmailNotVerifiedError,
   isRateLimitedError,
 } from "@/lib/format-api-error";
@@ -27,8 +32,17 @@ import type {
   InvoiceSummary,
   PaginatedInvoices,
   SendInvoiceEmailResponse,
+  SendInvoiceReminderResponse,
 } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+
+const REMINDER_ERROR_KEYS: Record<string, string> = {
+  reminders_disabled: "invoices.reminderErrorRemindersDisabled",
+  invoice_already_paid: "invoices.reminderErrorAlreadyPaid",
+  invoice_due_date_missing: "invoices.reminderErrorDueDateMissing",
+  customer_email_missing: "invoices.reminderErrorCustomerEmailMissing",
+  reminder_already_sent: "invoices.reminderErrorAlreadySent",
+};
 
 const pageSize = 10;
 
@@ -92,6 +106,7 @@ function InvoicesContent() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [remindingId, setRemindingId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -289,6 +304,33 @@ function InvoicesContent() {
     }
   }
 
+  async function sendReminder(row: InvoiceSummary) {
+    if (remindingId) return;
+    const customer = row.customer_name ?? t("invoiceForm.noCustomerOption");
+    const confirmed = window.confirm(
+      t("invoices.sendReminderConfirmBody", { customer, invoice: row.invoice_number })
+    );
+    if (!confirmed) return;
+
+    setRemindingId(row.id);
+    const loadingId = toast.loading(t("invoices.toastSendingReminder"));
+    try {
+      const result = await apiFetch<SendInvoiceReminderResponse>(
+        orgPath(`invoices/${row.id}/send-reminder`),
+        { method: "POST" }
+      );
+      toast.dismiss(loadingId);
+      toast.success(t("invoices.toastReminderSent", { email: result.sent_to }));
+    } catch (err) {
+      toast.dismiss(loadingId);
+      const code = getApiErrorCode(err);
+      const key = code ? REMINDER_ERROR_KEYS[code] : undefined;
+      toast.error(key ? t(key) : formatApiError(err, t("invoices.toastReminderError")));
+    } finally {
+      setRemindingId(null);
+    }
+  }
+
   const totalPages = data ? Math.max(1, Math.ceil(data.total / pageSize)) : 1;
   const currentPage = Math.floor(offset / pageSize) + 1;
   const showEmpty = !loading && data !== null && data.items.length === 0;
@@ -449,7 +491,7 @@ function InvoicesContent() {
                 <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
                   {t("invoices.colDueDate")}
                 </th>
-                <th className="px-4 py-3 sm:px-6">
+                <th className={STICKY_ACTIONS_TH_CLASS}>
                   <span className="sr-only">{t("invoices.colActions")}</span>
                 </th>
               </tr>
@@ -498,7 +540,7 @@ function InvoicesContent() {
                     effectiveStatus !== "paid" && row.due_date !== null && row.customer_id !== null;
 
                   return (
-                    <tr key={row.id} className="hover:bg-slate-50/80">
+                    <tr key={row.id} className="group hover:bg-slate-50/80">
                       <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">
                         {row.invoice_number}
                       </td>
@@ -535,44 +577,29 @@ function InvoicesContent() {
                       <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
                         {formatDueDateRelative(row.due_date, effectiveStatus, t)}
                       </td>
-                      <td className="px-4 py-3 sm:px-6">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void downloadInvoicePdf(row.id, row.invoice_number)
-                            }
-                            disabled={
-                              downloadingId === row.id || sendingId === row.id
-                            }
-                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      <td className={STICKY_ACTIONS_TD_CLASS}>
+                        <RowActionsMenu label={t("common.moreActions")}>
+                          <RowActionsMenu.Item
+                            onSelect={() => void downloadInvoicePdf(row.id, row.invoice_number)}
+                            disabled={downloadingId === row.id || sendingId === row.id}
                           >
-                            {downloadingId === row.id
-                              ? t("invoices.preparing")
-                              : t("invoices.downloadPdf")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void sendInvoiceEmail(row.id, row.invoice_number)
-                            }
-                            disabled={
-                              sendingId === row.id || downloadingId === row.id
-                            }
-                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            {t("invoices.downloadPdf")}
+                          </RowActionsMenu.Item>
+                          <RowActionsMenu.Item
+                            onSelect={() => void sendInvoiceEmail(row.id, row.invoice_number)}
+                            disabled={sendingId === row.id || downloadingId === row.id}
                           >
-                            {sendingId === row.id
-                              ? t("invoices.sending")
-                              : t("invoices.sendEmail")}
-                          </button>
+                            {t("invoices.sendEmail")}
+                          </RowActionsMenu.Item>
                           {canRemind ? (
-                            <SendReminderButton
-                              invoiceId={row.id}
-                              invoiceNumber={row.invoice_number}
-                              customerName={row.customer_name}
-                            />
+                            <RowActionsMenu.Item
+                              onSelect={() => void sendReminder(row)}
+                              disabled={remindingId === row.id}
+                            >
+                              {t("invoices.sendReminder")}
+                            </RowActionsMenu.Item>
                           ) : null}
-                        </div>
+                        </RowActionsMenu>
                       </td>
                     </tr>
                   );

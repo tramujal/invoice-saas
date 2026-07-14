@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProductForm } from "@/components/products/ProductForm";
+import {
+  RowActionsMenu,
+  STICKY_ACTIONS_TD_CLASS,
+  STICKY_ACTIONS_TH_CLASS,
+} from "@/components/ui/RowActionsMenu";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
@@ -326,7 +331,7 @@ export default function ProductsPage() {
                 <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
                   {t("products.statusLabel")}
                 </th>
-                <th className="px-4 py-3 sm:px-6">
+                <th className={STICKY_ACTIONS_TH_CLASS}>
                   <span className="sr-only">{t("invoices.colActions")}</span>
                 </th>
               </tr>
@@ -361,7 +366,7 @@ export default function ProductsPage() {
                 data?.items.map((product) => {
                   const type = isProductType(product.type) ? product.type : "product";
                   return (
-                    <tr key={product.id} className="hover:bg-slate-50/80">
+                    <tr key={product.id} className="group hover:bg-slate-50/80">
                       <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
                         {product.name}
                         {product.description ? (
@@ -394,35 +399,28 @@ export default function ProductsPage() {
                           {product.active ? t("products.statusActive") : t("products.statusArchived")}
                         </span>
                       </td>
-                      <td className="px-4 py-3 sm:px-6">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setEditingProduct(product)}
-                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
-                          >
+                      <td className={STICKY_ACTIONS_TD_CLASS}>
+                        <RowActionsMenu label={t("common.moreActions")}>
+                          <RowActionsMenu.Item onSelect={() => setEditingProduct(product)}>
                             {t("common.edit")}
-                          </button>
+                          </RowActionsMenu.Item>
                           {product.active ? (
-                            <button
-                              type="button"
-                              onClick={() => void archiveProduct(product)}
+                            <RowActionsMenu.Item
+                              destructive
                               disabled={archivingId === product.id}
-                              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              onSelect={() => void archiveProduct(product)}
                             >
                               {t("products.archiveButton")}
-                            </button>
+                            </RowActionsMenu.Item>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => void restoreProduct(product)}
+                            <RowActionsMenu.Item
                               disabled={archivingId === product.id}
-                              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              onSelect={() => void restoreProduct(product)}
                             >
                               {t("products.restoreButton")}
-                            </button>
+                            </RowActionsMenu.Item>
                           )}
-                        </div>
+                        </RowActionsMenu>
                       </td>
                     </tr>
                   );

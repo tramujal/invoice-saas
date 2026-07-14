@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
@@ -68,20 +68,44 @@ function validate(
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-type AddCustomerFormProps = {
-  onCreated: () => void | Promise<void>;
+type CustomerFormProps = {
+  /** When given, the form edits this customer (PATCH); otherwise it
+   * creates a new one (POST) -- mirrors ProductForm's exact shape. */
+  customer?: Customer | null;
+  onSaved: () => void | Promise<void>;
+  onCancel?: () => void;
 };
 
-export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
+export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps) {
   const toast = useToast();
   const { t } = useTranslation();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [taxId, setTaxId] = useState("");
+  const isEditing = Boolean(customer);
+
+  const [name, setName] = useState(customer?.name ?? "");
+  const [email, setEmail] = useState(customer?.email ?? "");
+  const [phone, setPhone] = useState(customer?.phone ?? "");
+  const [address, setAddress] = useState(customer?.address ?? "");
+  const [taxId, setTaxId] = useState(customer?.tax_id ?? "");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setName(customer?.name ?? "");
+    setEmail(customer?.email ?? "");
+    setPhone(customer?.phone ?? "");
+    setAddress(customer?.address ?? "");
+    setTaxId(customer?.tax_id ?? "");
+    setFieldErrors({});
+  }, [customer]);
+
+  function resetForm() {
+    setName("");
+    setEmail("");
+    setPhone("");
+    setAddress("");
+    setTaxId("");
+    setFieldErrors({});
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -93,33 +117,45 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
     }
     setFieldErrors({});
 
-    const loadingId = toast.loading(t("customers.toastCreating"));
+    const payload = {
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      address: address.trim(),
+      tax_id: taxId.trim(),
+    };
+
+    const loadingId = toast.loading(
+      isEditing ? t("customers.toastSaving") : t("customers.toastCreating")
+    );
     setIsSubmitting(true);
     try {
-      await apiFetch<Customer>(orgPath("customers"), {
-        method: "POST",
-        body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim(),
-          phone: phone.trim(),
-          address: address.trim(),
-          tax_id: taxId.trim(),
-        }),
-      });
-      toast.dismiss(loadingId);
-      toast.success(t("customers.toastCreated"));
-      setName("");
-      setEmail("");
-      setPhone("");
-      setAddress("");
-      setTaxId("");
-      await onCreated();
+      if (isEditing && customer) {
+        await apiFetch<Customer>(orgPath(`customers/${customer.id}`), {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+        toast.dismiss(loadingId);
+        toast.success(t("customers.toastSaved"));
+      } else {
+        await apiFetch<Customer>(orgPath("customers"), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        toast.dismiss(loadingId);
+        toast.success(t("customers.toastCreated"));
+        resetForm();
+      }
+      await onSaved();
     } catch (err) {
       toast.dismiss(loadingId);
       toast.error(
         isEmailNotVerifiedError(err)
           ? t("errors.emailNotVerified")
-          : formatApiError(err, t("customers.toastCreateError"))
+          : formatApiError(
+              err,
+              isEditing ? t("customers.toastSaveError") : t("customers.toastCreateError")
+            )
       );
     } finally {
       setIsSubmitting(false);
@@ -131,15 +167,13 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-        {t("customers.addTitle")}
+        {isEditing ? t("customers.editTitle") : t("customers.addTitle")}
       </h2>
-      <p className="mt-1 text-sm text-slate-500">{t("customers.addSubtitle")}</p>
+      <p className="mt-1 text-sm text-slate-500">
+        {isEditing ? t("customers.editSubtitle") : t("customers.addSubtitle")}
+      </p>
 
-      <form
-        onSubmit={(e) => void handleSubmit(e)}
-        className="mt-5 space-y-4"
-        noValidate
-      >
+      <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 space-y-4" noValidate>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label htmlFor="cust-name" className="text-sm font-medium text-slate-700">
@@ -266,17 +300,10 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
           <button
             type="button"
             disabled={disabled}
-            onClick={() => {
-              setName("");
-              setEmail("");
-              setPhone("");
-              setAddress("");
-              setTaxId("");
-              setFieldErrors({});
-            }}
+            onClick={() => (isEditing ? onCancel?.() : resetForm())}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {t("common.clear")}
+            {isEditing ? t("common.cancel") : t("common.clear")}
           </button>
           <button
             type="submit"
@@ -308,6 +335,8 @@ export function AddCustomerForm({ onCreated }: AddCustomerFormProps) {
                 </svg>
                 {t("common.saving")}
               </>
+            ) : isEditing ? (
+              t("common.saveChanges")
             ) : (
               t("customers.createButton")
             )}

@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  RowActionsMenu,
+  STICKY_ACTIONS_TD_CLASS,
+  STICKY_ACTIONS_TH_CLASS,
+} from "@/components/ui/RowActionsMenu";
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
@@ -298,134 +303,105 @@ function QuotesContent() {
 
   function actionsFor(row: QuoteSummary) {
     const busy = busyId === row.id;
-    const buttons: React.ReactNode[] = [];
-    buttons.push(
-      <button
+    const items: React.ReactNode[] = [];
+    items.push(
+      <RowActionsMenu.Item
         key="pdf"
-        type="button"
-        onClick={() => void downloadQuotePdf(row.id, row.quote_number)}
+        onSelect={() => void downloadQuotePdf(row.id, row.quote_number)}
         disabled={busy}
-        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy ? t("quotes.preparing") : t("quotes.downloadPdf")}
-      </button>
+        {t("quotes.downloadPdf")}
+      </RowActionsMenu.Item>
     );
 
     if (row.effective_status === "draft" || row.effective_status === "sent") {
-      buttons.push(
-        <Link
-          key="edit"
-          href={`/quotes/${row.id}/edit`}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
-        >
+      items.push(
+        <RowActionsMenu.LinkItem key="edit" href={`/quotes/${row.id}/edit`}>
           {t("quotes.edit")}
-        </Link>
+        </RowActionsMenu.LinkItem>
       );
-      buttons.push(
-        <button
+      items.push(
+        <RowActionsMenu.Item
           key="send"
-          type="button"
-          onClick={() => void sendQuoteEmail(row.id, row.quote_number)}
+          onSelect={() => void sendQuoteEmail(row.id, row.quote_number)}
           disabled={busy || row.customer_id === null}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t("quotes.sendEmail")}
-        </button>
+        </RowActionsMenu.Item>
       );
     }
 
     if (row.effective_status === "sent") {
-      buttons.push(
-        <button
+      items.push(
+        <RowActionsMenu.Item
           key="accept"
-          type="button"
-          onClick={() => void markQuote(row.id, "mark-accepted")}
+          onSelect={() => void markQuote(row.id, "mark-accepted")}
           disabled={busy}
-          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t("quotes.markAccepted")}
-        </button>
+        </RowActionsMenu.Item>
       );
-      buttons.push(
-        <button
+      items.push(
+        <RowActionsMenu.Item
           key="reject"
-          type="button"
-          onClick={() => void markQuote(row.id, "mark-rejected")}
+          onSelect={() => void markQuote(row.id, "mark-rejected")}
           disabled={busy}
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-900 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t("quotes.markRejected")}
-        </button>
+        </RowActionsMenu.Item>
       );
     }
 
     if (row.status === "accepted") {
-      buttons.push(
-        <button
-          key="convert"
-          type="button"
-          onClick={() => void convertQuote(row.id)}
-          disabled={busy}
-          className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+      items.push(
+        <RowActionsMenu.Item key="convert" onSelect={() => void convertQuote(row.id)} disabled={busy}>
           {t("quotes.convert")}
-        </button>
+        </RowActionsMenu.Item>
       );
     }
 
-    buttons.push(
-      <button
-        key="duplicate"
-        type="button"
-        onClick={() => void duplicateQuote(row.id)}
-        disabled={busy}
-        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-      >
+    items.push(
+      <RowActionsMenu.Item key="duplicate" onSelect={() => void duplicateQuote(row.id)} disabled={busy}>
         {t("quotes.duplicate")}
-      </button>
+      </RowActionsMenu.Item>
     );
 
     if (row.active) {
-      buttons.push(
-        <button
+      items.push(
+        <RowActionsMenu.Item
           key="archive"
-          type="button"
-          onClick={() => void archiveOrRestore(row.id, true)}
+          onSelect={() => void archiveOrRestore(row.id, true)}
           disabled={busy}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t("quotes.archive")}
-        </button>
+        </RowActionsMenu.Item>
       );
     } else {
-      buttons.push(
-        <button
+      items.push(
+        <RowActionsMenu.Item
           key="restore"
-          type="button"
-          onClick={() => void archiveOrRestore(row.id, false)}
+          onSelect={() => void archiveOrRestore(row.id, false)}
           disabled={busy}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t("quotes.restore")}
-        </button>
+        </RowActionsMenu.Item>
       );
     }
 
     if (row.status === "draft") {
-      buttons.push(
-        <button
+      items.push(
+        <RowActionsMenu.Item
           key="delete"
-          type="button"
-          onClick={() => void deleteDraft(row.id)}
+          destructive
+          onSelect={() => void deleteDraft(row.id)}
           disabled={busy}
-          className="rounded-lg border border-transparent px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t("quotes.delete")}
-        </button>
+        </RowActionsMenu.Item>
       );
     }
 
-    return buttons;
+    return items;
   }
 
   return (
@@ -522,7 +498,7 @@ function QuotesContent() {
                 <th className="px-4 py-3 sm:px-6">{t("quotes.colTotal")}</th>
                 <th className="hidden px-4 py-3 lg:table-cell lg:px-6">{t("quotes.colExpiry")}</th>
                 <th className="hidden px-4 py-3 lg:table-cell lg:px-6">{t("quotes.colCreated")}</th>
-                <th className="px-4 py-3 sm:px-6">
+                <th className={STICKY_ACTIONS_TH_CLASS}>
                   <span className="sr-only">{t("quotes.colActions")}</span>
                 </th>
               </tr>
@@ -555,7 +531,7 @@ function QuotesContent() {
                 </tr>
               ) : (
                 data?.items.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50/80">
+                  <tr key={row.id} className="group hover:bg-slate-50/80">
                     <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">{row.quote_number}</td>
                     <td
                       className="hidden max-w-[180px] truncate px-4 py-3 text-slate-600 sm:table-cell sm:px-6"
@@ -575,8 +551,8 @@ function QuotesContent() {
                     <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
                       {new Date(row.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-4 py-3 sm:px-6">
-                      <div className="flex flex-wrap gap-2">{actionsFor(row)}</div>
+                    <td className={STICKY_ACTIONS_TD_CLASS}>
+                      <RowActionsMenu label={t("common.moreActions")}>{actionsFor(row)}</RowActionsMenu>
                     </td>
                   </tr>
                 ))

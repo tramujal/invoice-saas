@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { InviteMemberForm } from "@/components/team/InviteMemberForm";
+import {
+  RowActionsMenu,
+  STICKY_ACTIONS_TD_CLASS,
+  STICKY_ACTIONS_TH_CLASS,
+} from "@/components/ui/RowActionsMenu";
 import { useToast } from "@/components/ui/toast";
 import { getUserEmail } from "@/lib/auth-storage";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
@@ -202,7 +207,11 @@ export default function TeamPage() {
                 <th className="px-4 py-3">{t("team.roleLabel")}</th>
                 <th className="hidden px-4 py-3 sm:table-cell">{t("team.statusLabel")}</th>
                 <th className="hidden px-4 py-3 md:table-cell">{t("team.joinedLabel")}</th>
-                {canManageMembers ? <th className="px-4 py-3 text-right sm:pr-6">{t("team.colActions")}</th> : null}
+                {canManageMembers ? (
+                  <th className={STICKY_ACTIONS_TH_CLASS}>
+                    <span className="sr-only">{t("team.colActions")}</span>
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -223,7 +232,7 @@ export default function TeamPage() {
                   const isSelf = member.user_email === userEmail;
                   const rowBusy = busyId === member.id;
                   return (
-                    <tr key={member.id} className="border-b border-slate-50 last:border-0">
+                    <tr key={member.id} className="group border-b border-slate-50 last:border-0 hover:bg-slate-50/80">
                       <td className="max-w-[180px] truncate px-4 py-3 sm:px-6" title={member.user_email}>
                         <span className="font-medium text-slate-900">{member.user_email}</span>
                         {isSelf ? (
@@ -242,10 +251,13 @@ export default function TeamPage() {
                         {new Date(member.accepted_at).toLocaleDateString()}
                       </td>
                       {canManageMembers ? (
-                        <td className="px-4 py-3 sm:pr-6">
-                          <div className="flex flex-wrap items-center justify-end gap-2">
+                        <td className={STICKY_ACTIONS_TD_CLASS}>
+                          <div className="flex items-center justify-end gap-2">
+                            <label htmlFor={`role-select-${member.id}`} className="sr-only">
+                              {t("team.changeRoleLabel", { email: member.user_email })}
+                            </label>
                             <select
-                              aria-label={t("team.changeRoleLabel", { email: member.user_email })}
+                              id={`role-select-${member.id}`}
                               value={isAssignableRole(member.role) ? member.role : ""}
                               onChange={(e) => void handleRoleChange(member, e.target.value as InvitationRole)}
                               disabled={rowBusy}
@@ -262,24 +274,23 @@ export default function TeamPage() {
                                 </option>
                               ))}
                             </select>
-                            {canGrantOwnership && !hasPermission(member, "organization.manage") ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleGrantOwnership(member)}
+                            <RowActionsMenu label={t("common.moreActions")}>
+                              {canGrantOwnership && !hasPermission(member, "organization.manage") ? (
+                                <RowActionsMenu.Item
+                                  onSelect={() => void handleGrantOwnership(member)}
+                                  disabled={rowBusy}
+                                >
+                                  {t("team.grantOwnershipButton")}
+                                </RowActionsMenu.Item>
+                              ) : null}
+                              <RowActionsMenu.Item
+                                destructive
+                                onSelect={() => void handleRemove(member)}
                                 disabled={rowBusy}
-                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {t("team.grantOwnershipButton")}
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => void handleRemove(member)}
-                              disabled={rowBusy}
-                              className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {t("team.removeButton")}
-                            </button>
+                                {t("team.removeButton")}
+                              </RowActionsMenu.Item>
+                            </RowActionsMenu>
                           </div>
                         </td>
                       ) : null}
@@ -307,7 +318,9 @@ export default function TeamPage() {
                   <th className="px-4 py-3">{t("team.roleLabel")}</th>
                   <th className="hidden px-4 py-3 sm:table-cell">{t("team.invitedByLabel")}</th>
                   <th className="hidden px-4 py-3 md:table-cell">{t("team.expiresLabel")}</th>
-                  <th className="px-4 py-3 text-right sm:pr-6">{t("team.colActions")}</th>
+                  <th className={STICKY_ACTIONS_TH_CLASS}>
+                    <span className="sr-only">{t("team.colActions")}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -321,7 +334,10 @@ export default function TeamPage() {
                   invitations.map((invitation) => {
                     const rowBusy = busyId === invitation.id;
                     return (
-                      <tr key={invitation.id} className="border-b border-slate-50 last:border-0">
+                      <tr
+                        key={invitation.id}
+                        className="group border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
+                      >
                         <td
                           className="max-w-[180px] truncate px-4 py-3 font-medium text-slate-900 sm:px-6"
                           title={invitation.email}
@@ -339,25 +355,22 @@ export default function TeamPage() {
                         <td className="hidden px-4 py-3 text-slate-600 md:table-cell">
                           {new Date(invitation.expires_at).toLocaleDateString()}
                         </td>
-                        <td className="px-4 py-3 sm:pr-6">
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void handleResendInvitation(invitation)}
+                        <td className={STICKY_ACTIONS_TD_CLASS}>
+                          <RowActionsMenu label={t("common.moreActions")}>
+                            <RowActionsMenu.Item
+                              onSelect={() => void handleResendInvitation(invitation)}
                               disabled={rowBusy}
-                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               {t("team.resendButton")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleCancelInvitation(invitation)}
+                            </RowActionsMenu.Item>
+                            <RowActionsMenu.Item
+                              destructive
+                              onSelect={() => void handleCancelInvitation(invitation)}
                               disabled={rowBusy}
-                              className="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               {t("team.cancelButton")}
-                            </button>
-                          </div>
+                            </RowActionsMenu.Item>
+                          </RowActionsMenu>
                         </td>
                       </tr>
                     );
