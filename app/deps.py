@@ -5,7 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.membership_role import MembershipRole
+from app.membership_status import MembershipStatus
 from app.models import OrganizationMember, User
+from app.permissions import Permission, check_permission
 from app.security import decode_access_token
 
 security = HTTPBearer(auto_error=False)
@@ -66,6 +69,45 @@ def require_org_member(user: User, organization_id: str, db: Session) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not a member of this organization",
         )
+
+
+def require_permission(
+    user: User, organization_id: str, permission: Permission, db: Session
+) -> OrganizationMember:
+    """Supersedes a bare require_org_member call wherever a specific
+    capability (not just membership) is needed. Internally re-does
+    require_org_member's exact membership query, additionally filtered to
+    status == active -- so this never weakens today's check, it
+    strengthens it (a soft-removed member, which couldn't exist before
+    this feature, now correctly fails here too). Returns the caller's own
+    membership row so call sites that also need the role (e.g. the team
+    management endpoints) get it for free, with no second query.
+
+    Two things this single check can't express -- granting/revoking the
+    "owner" role, and the "at least one other active owner must remain"
+    invariant -- are data-dependent and live in app.services.team instead.
+    """
+    membership = db.scalar(
+        select(OrganizationMember).where(
+            OrganizationMember.user_id == user.id,
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.status == MembershipStatus.active.value,
+        )
+    )
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not a member of this organization",
+        )
+    if not check_permission(MembershipRole(membership.role), permission):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "permission_denied",
+                "message": f"This action requires the '{permission.value}' permission.",
+            },
+        )
+    return membership
 
 
 EMAIL_NOT_VERIFIED_MESSAGE = (

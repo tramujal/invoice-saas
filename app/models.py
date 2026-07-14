@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -20,6 +20,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
+from app.membership_role import MembershipRole
+from app.membership_status import MembershipStatus
 from app.payment_status import PaymentStatus
 from app.product_type import ProductType
 from app.quote_status import QuoteStatus
@@ -128,7 +130,7 @@ class User(Base):
     )
 
     memberships: Mapped[list["OrganizationMember"]] = relationship(
-        back_populates="user"
+        back_populates="user", foreign_keys="OrganizationMember.user_id"
     )
 
     @property
@@ -171,6 +173,22 @@ class EmailVerificationToken(Base):
 
 
 class OrganizationMember(Base):
+    """A user's real, established relationship to an organization --
+    always represents someone who has actually joined (created the org at
+    registration, or accepted an OrganizationInvitation), never a pending
+    invite. This is deliberate: require_org_member's existence-check
+    query, and every other membership-based authorization check in this
+    app, must never be satisfiable by a not-yet-accepted invitation. See
+    OrganizationInvitation for the entire pre-membership lifecycle, kept
+    in its own table for exactly this reason.
+
+    role is a single, ordinary field -- multiple members may simultaneously
+    hold role="owner" (see app.permissions for the full role -> capability
+    matrix). The only hard invariant, enforced in app.services.team, is
+    "at least one active owner, always"; granting/revoking ownership is
+    just a role change with extra guards, not a special data state.
+    """
+
     __tablename__ = "organization_members"
     __table_args__ = (UniqueConstraint("user_id", "organization_id"),)
 
@@ -183,9 +201,147 @@ class OrganizationMember(Base):
     organization_id: Mapped[str] = mapped_column(
         CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
+    role: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=MembershipRole.member.value,
+        server_default=MembershipRole.member.value,
+    )
+    # Soft-removal only -- see MembershipStatus.removed's docstring. Never
+    # deleted, since Invoice/Quote.created_by_user_id and invited_by/
+    # role_changed_by/removed_by on other rows may still reference this
+    # membership's history.
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=MembershipStatus.active.value,
+        server_default=MembershipStatus.active.value,
+    )
+    # Audit-only FKs -- never used for authorization, only for "who did
+    # this" display. ON DELETE SET NULL so a deleted user can never cascade
+    # into losing another member's history.
+    invited_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # NOT NULL -- every membership row, by construction, represents an
+    # already-joined relationship (see the class docstring). For the
+    # org-creating owner this equals created_at; for an invitee it's when
+    # they accepted.
+    #
+    # accepted_at/created_at/updated_at all set a client-side `default=`
+    # (not just `server_default=`) because, unlike every other table here
+    # (created fresh via Base.metadata.create_all(), which faithfully
+    # emits server_default into the real CREATE TABLE DDL), these three
+    # columns were added to an existing table via a raw ALTER TABLE ADD
+    # COLUMN in app.schema_migrations, which historically didn't attach a
+    # DB-level DEFAULT -- so relying on server_default alone silently left
+    # every membership row created since then with a NULL timestamp.
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+    # Covers "who changed role" AND "who granted/revoked ownership" --
+    # ownership is just a role change, so one field serves both audit asks.
+    role_changed_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    removed_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
-    user: Mapped["User"] = relationship(back_populates="memberships")
+    user: Mapped["User"] = relationship(
+        back_populates="memberships", foreign_keys=[user_id]
+    )
     organization: Mapped["Organization"] = relationship(back_populates="members")
+    inviter: Mapped["User | None"] = relationship(foreign_keys=[invited_by])
+
+    @property
+    def user_email(self) -> str:
+        return self.user.email
+
+    @property
+    def invited_by_email(self) -> str | None:
+        # User has no display-name field anywhere in this app -- email is
+        # already the sole user-facing identifier (see login/register),
+        # so it's reused here rather than inventing a name field.
+        return self.inviter.email if self.inviter is not None else None
+
+    @property
+    def permissions(self) -> list[str]:
+        """The full permission set app.permissions.ROLE_PERMISSIONS grants
+        this membership's current role. Exposed so API consumers (frontend
+        UI gating, future integrations) key off actual capabilities rather
+        than the role name itself -- role -> permission is defined in
+        exactly one place (app.permissions), never re-derived here."""
+        from app.permissions import ROLE_PERMISSIONS
+
+        return sorted(p.value for p in ROLE_PERMISSIONS[MembershipRole(self.role)])
+
+
+class OrganizationInvitation(Base):
+    """The entire pre-membership lifecycle of an invite -- deliberately
+    kept out of OrganizationMember (see that class's docstring for why: an
+    invitation targets an email that may not have a User row yet, and
+    OrganizationMember.user_id is NOT NULL). Never soft-deleted: cancelling
+    an invitation removes the row outright (there is no history worth
+    keeping for something that was never accepted), and accepting it sets
+    accepted_at once, permanently, which is this table's entire single-use
+    guarantee -- see app.services.team.get_invitation_by_token.
+
+    role is intentionally the narrower InvitationRole (never "owner") --
+    ownership can only ever be granted through the dedicated
+    grant-ownership action once someone is already a real member.
+    """
+
+    __tablename__ = "organization_invitations"
+    __table_args__ = (Index("ix_org_invitations_org_email", "organization_id", "email"),)
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Unique, SHA-256 via app.tokens.hash_token -- mirrors
+    # PasswordResetToken.token_hash exactly. "Resend" rotates this column
+    # in place (new token, new expiry) rather than inserting a new row, so
+    # at most one valid token per pending invitation ever exists.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+    inviter: Mapped["User | None"] = relationship()
+
+    @property
+    def created_by_email(self) -> str | None:
+        return self.inviter.email if self.inviter is not None else None
 
 
 class Customer(Base):

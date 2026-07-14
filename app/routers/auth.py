@@ -17,6 +17,7 @@ from app.email_verification import (
     hash_verification_token,
 )
 from app.localization import DEFAULT_LANGUAGE
+from app.membership_role import MembershipRole
 from app.models import (
     EmailVerificationToken,
     Organization,
@@ -127,7 +128,15 @@ def register(
     db.add(organization)
     db.flush()
 
-    db.add(OrganizationMember(user_id=user.id, organization_id=organization.id))
+    # The org-creating user must always become its owner -- the "at least
+    # one owner" invariant (app.services.team) has to hold from the very
+    # first membership row, not just after someone later grants ownership.
+    # OrganizationMember.role otherwise defaults to "member".
+    db.add(
+        OrganizationMember(
+            user_id=user.id, organization_id=organization.id, role=MembershipRole.owner.value
+        )
+    )
     db.commit()
     db.refresh(user)
 

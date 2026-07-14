@@ -38,6 +38,8 @@ function ctaLabel(t: TranslateFn, cta: InsightCta): string {
       return t("dashboard.insights.cta.viewPendingQuotes");
     case "view_expiring_quotes":
       return t("dashboard.insights.cta.viewExpiringQuotes");
+    case "view_team":
+      return t("dashboard.insights.cta.viewTeam");
     case "ask_assistant":
       return t("dashboard.insights.cta.askAssistant");
     default:

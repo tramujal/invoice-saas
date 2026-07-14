@@ -11,6 +11,7 @@ import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBrea
 import { PaymentStatusChart } from "@/components/dashboard/PaymentStatusChart";
 import { QuotePipelineCard } from "@/components/dashboard/QuotePipelineCard";
 import { RevenueTrendCard } from "@/components/dashboard/RevenueTrendCard";
+import { TeamWidget } from "@/components/dashboard/TeamWidget";
 import { RevenueTrendLineChart } from "@/components/dashboard/RevenueTrendLineChart";
 import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
 import { TopProductsChart } from "@/components/dashboard/TopProductsChart";
@@ -192,6 +193,11 @@ export default function DashboardPage() {
         currency={effectiveCurrency}
         loading={loading}
       />
+
+      {/* Same reasoning as QuotePipelineCard above -- team composition is
+          independent of invoicing activity, so it renders unconditionally
+          rather than being suppressed by the invoice-only empty state. */}
+      <TeamWidget team={analytics?.team ?? null} loading={loading} />
 
       {showEmpty ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_org_member, require_permission, require_verified_email
 from app.models import Organization, User
+from app.permissions import Permission
 from app.reminder_settings import format_day_list
 from app.schemas import OrganizationProfileResponse, OrganizationUpdateRequest
 
@@ -36,6 +37,10 @@ def get_organization(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Organization:
+    # Deliberately left on require_org_member, not migrated to
+    # require_permission -- there is no requested "organization.read"
+    # permission, and the org profile is low-sensitivity info every
+    # member already implicitly needs (name, currency, localization, etc).
     require_org_member(current_user, organization_id, db)
     return _organization_or_404(db, organization_id)
 
@@ -47,7 +52,7 @@ def update_organization(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Organization:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.settings_manage, db)
     require_verified_email(current_user)
     organization = _organization_or_404(db, organization_id)
     # mode="json" ensures enum fields (language/currency_code/tax_label) are

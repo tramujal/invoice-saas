@@ -32,6 +32,8 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_quotes_table(engine)
     _add_quote_line_items_table(engine)
     _add_quote_reminders_table(engine)
+    _add_organization_member_role_fields(engine)
+    _add_organization_invitations_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -609,6 +611,88 @@ def _add_quote_reminders_table(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_quote_reminders_org_status "
                 "ON quote_reminders (organization_id, status)"
+            )
+        )
+
+
+def _add_organization_member_role_fields(engine: Engine) -> None:
+    """Adds role/status/invited_by/invited_at/accepted_at/role_changed_by/
+    removed_by/created_at/updated_at to organization_members.
+
+    role's backfill is unambiguous: today, app.routers.auth.register() is
+    the ONLY code path that ever creates an organization_members row (no
+    invite path has existed until this feature), so every existing
+    organization has exactly one member -- who is, by construction,
+    unambiguously its owner. Every pre-existing row is therefore backfilled
+    to role='owner', status='active', with accepted_at/created_at/
+    updated_at all backfilled to CURRENT_TIMESTAMP (there is no earlier,
+    real timestamp to recover, since this table had none before now).
+    """
+    inspector = inspect(engine)
+    if "organization_members" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("organization_members")}
+    new_columns = {
+        "role": "VARCHAR(16) NOT NULL DEFAULT 'member'",
+        "status": "VARCHAR(16) NOT NULL DEFAULT 'active'",
+        "invited_by": "CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL",
+        "invited_at": "TIMESTAMP NULL",
+        "accepted_at": "TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP",
+        "role_changed_by": "CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL",
+        "removed_by": "CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL",
+        "created_at": "TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    missing = {name: ddl for name, ddl in new_columns.items() if name not in columns}
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for name, ddl in missing.items():
+            conn.execute(text(f"ALTER TABLE organization_members ADD COLUMN {name} {ddl}"))
+        if "role" in missing:
+            conn.execute(text("UPDATE organization_members SET role = 'owner'"))
+        if "accepted_at" in missing:
+            conn.execute(
+                text("UPDATE organization_members SET accepted_at = CURRENT_TIMESTAMP")
+            )
+        if "created_at" in missing:
+            conn.execute(
+                text("UPDATE organization_members SET created_at = CURRENT_TIMESTAMP")
+            )
+        if "updated_at" in missing:
+            conn.execute(
+                text("UPDATE organization_members SET updated_at = CURRENT_TIMESTAMP")
+            )
+
+
+def _add_organization_invitations_table(engine: Engine) -> None:
+    """Creates organization_invitations if it's missing -- same idempotent
+    safety net as _add_quotes_table/_add_invoice_reminders_table
+    (Base.metadata.create_all() already creates this table on a fresh
+    database since OrganizationInvitation is a declared model)."""
+    inspector = inspect(engine)
+    if "organization_invitations" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS organization_invitations ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "email VARCHAR(255) NOT NULL, "
+                "role VARCHAR(16) NOT NULL, "
+                "token_hash VARCHAR(64) NOT NULL UNIQUE, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "accepted_at TIMESTAMP NULL, "
+                "created_by CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_org_invitations_org_email "
+                "ON organization_invitations (organization_id, email)"
             )
         )
 

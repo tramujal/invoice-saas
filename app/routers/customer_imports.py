@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_permission, require_verified_email
 from app.imports.base import build_confirm, build_preview
 from app.imports.column_mapping import ImportMappingError
 from app.imports.customers import (
@@ -29,6 +29,7 @@ from app.imports.parsers import ImportFileError, parse_upload
 from app.imports.templates import build_csv_template, build_xlsx_template
 from app.imports.types import REASON_FILE_TOO_LARGE, REASON_UNSUPPORTED_FILE_TYPE
 from app.models import Organization, User
+from app.permissions import Permission
 from app.rate_limit import (
     IMPORT_CONFIRM_RULES,
     IMPORT_PREVIEW_RULES,
@@ -99,7 +100,7 @@ def preview_customer_import(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ImportPreviewResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
 
     enforce_rate_limit(
@@ -194,7 +195,7 @@ def confirm_customer_import(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ImportConfirmResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
 
     enforce_rate_limit(
@@ -275,7 +276,7 @@ def download_customer_import_template_csv(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
     organization = _organization_or_404(db, organization_id)
 
@@ -294,7 +295,7 @@ def download_customer_import_template_xlsx(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
     organization = _organization_or_404(db, organization_id)
 

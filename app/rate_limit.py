@@ -290,3 +290,16 @@ PUBLIC_QUOTE_VIEW_RULES = (
     RateLimitRule(limit=200, window_seconds=3600),
 )
 PUBLIC_QUOTE_ACTION_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
+INVITATION_CREATE_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
+# Anonymous accept-invitation endpoints. View is read-only and IP-keyed
+# only, mirroring PUBLIC_QUOTE_VIEW_RULES exactly. Accept is authenticated
+# (unlike the quote public flow), so it additionally gets a user-keyed
+# bucket in the router -- INVITATION_PUBLIC_ACCEPT_RULES itself is applied
+# to both the ip_identity and user_identity checks.
+INVITATION_PUBLIC_VIEW_RULES = (
+    RateLimitRule(limit=30, window_seconds=60),
+    RateLimitRule(limit=200, window_seconds=3600),
+)
+INVITATION_PUBLIC_ACCEPT_RULES = (RateLimitRule(limit=10, window_seconds=3600),)

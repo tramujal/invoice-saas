@@ -6,9 +6,10 @@ from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_permission, require_verified_email
 from app.invoice_numbering import format_invoice_number
 from app.models import Customer, Quote, User
+from app.permissions import Permission
 from app.quote_numbering import format_quote_number, parse_quote_number
 from app.quote_pdf import render_quote_pdf
 from app.quote_status import QuoteStatus
@@ -118,7 +119,7 @@ def list_organization_quotes(
     sort_by: QuoteSortField = Query(default=QuoteSortField.created_at),
     sort_dir: SortDirection = Query(default=SortDirection.desc),
 ) -> PaginatedQuotesResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_read, db)
 
     base_query = _build_quote_query(
         organization_id, search, status_filter, active, created_after
@@ -155,7 +156,7 @@ def get_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_read, db)
     return _quote_in_org(db, organization_id, quote_id)
 
 
@@ -166,7 +167,7 @@ def download_quote_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_read, db)
     quote = _quote_in_org(db, organization_id, quote_id)
     pdf_bytes = render_quote_pdf(quote)
     filename = f"{format_quote_number(quote.quote_number)}.pdf"
@@ -184,7 +185,7 @@ def create_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_create, db)
     require_verified_email(current_user)
 
     customer: Customer | None = None
@@ -235,7 +236,7 @@ def update_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
 
@@ -294,7 +295,7 @@ def archive_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     return archive_quote_record(db, quote)
@@ -307,7 +308,7 @@ def restore_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     return restore_quote_record(db, quote)
@@ -320,7 +321,7 @@ def delete_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
@@ -343,7 +344,7 @@ def duplicate_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     return duplicate_quote_record(db, organization_id, current_user, quote)
@@ -359,7 +360,7 @@ def mark_quote_accepted(
     """Manual acceptance action -- for a customer who confirmed by phone
     or email rather than through the public accept link. Only legal from
     effective_status == sent (see app.services.quotes._require_sent)."""
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
@@ -381,7 +382,7 @@ def mark_quote_rejected(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Quote:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
@@ -403,7 +404,7 @@ def convert_quote(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ConvertQuoteToInvoiceResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_convert, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
@@ -453,7 +454,7 @@ def send_quote_email(
         ]
     )
 
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.quote_send, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
 

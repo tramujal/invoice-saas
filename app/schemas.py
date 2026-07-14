@@ -19,6 +19,7 @@ from app.insights.limits import (
     INSIGHTS_MAX_TITLE_LENGTH,
 )
 from app.invoice_numbering import format_invoice_number
+from app.membership_role import InvitationRole, MembershipRole
 from app.payment_status import PaymentStatus
 from app.product_type import ProductType
 from app.quote_numbering import format_quote_number
@@ -333,6 +334,122 @@ class OrganizationUpdateRequest(BaseModel):
         if value is None:
             return value
         return _check_reminder_day_list(value)
+
+
+# --- Team / roles / invitations ---------------------------------------------
+
+
+class MembershipStatusEnum(str, Enum):
+    active = "active"
+    removed = "removed"
+
+
+class MembershipRoleUpdateRequest(BaseModel):
+    """Ordinary admin/member/viewer transitions -- deliberately typed to
+    InvitationRole (never MembershipRole), so this endpoint can never grant
+    "owner" at all, by construction. Demoting an existing owner IS allowed
+    through this same request (new_role is still admin/member/viewer);
+    granting owner is only ever possible via the dedicated
+    grant-ownership action below."""
+
+    role: InvitationRole
+
+
+class GrantOwnershipRequest(BaseModel):
+    """Confirmation is required in the body itself, not just implied by
+    hitting the endpoint -- granting ownership is the single most
+    consequential action in this feature, so it gets its own explicit,
+    unmistakable opt-in."""
+
+    confirm: bool = Field(
+        description="Must be true. A lightweight, explicit anti-accidental-submission guard."
+    )
+
+
+class InvitationCreateRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    role: InvitationRole
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class MemberResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    user_id: str
+    user_email: str
+    role: MembershipRole
+    status: MembershipStatusEnum
+    invited_by_email: str | None
+    invited_at: datetime | None
+    accepted_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    # Derived from role via app.permissions.ROLE_PERMISSIONS (see
+    # OrganizationMember.permissions) -- the frontend gates UI on these
+    # values, never on the role name itself, so a future custom role needs
+    # no frontend changes to participate correctly.
+    permissions: list[str]
+
+
+class PaginatedMembersResponse(BaseModel):
+    total: int
+    items: list[MemberResponse]
+
+
+class InvitationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    email: str
+    role: InvitationRole
+    expires_at: datetime
+    accepted_at: datetime | None
+    created_by_email: str | None
+    created_at: datetime
+
+
+class PaginatedInvitationsResponse(BaseModel):
+    total: int
+    items: list[InvitationResponse]
+
+
+class PublicInvitationResponse(BaseModel):
+    """What the anonymous accept-invitation page renders -- deliberately
+    narrower than InvitationResponse: no ids, no organization_id, nothing
+    beyond what a visitor needs to decide whether to accept. Mirrors
+    PublicQuoteResponse's exact "narrow, public-safe subset" rationale."""
+
+    organization_name: str
+    inviter_email: str | None
+    role: InvitationRole
+    expires_at: datetime
+    already_accepted: bool
+    expired: bool
+
+
+class PublicInvitationAcceptResponse(BaseModel):
+    organization_id: str
+    organization_name: str
+    role: InvitationRole
+
+
+class TeamRoleCount(BaseModel):
+    role: MembershipRole
+    count: int
+
+
+class TeamSummaryResponse(BaseModel):
+    total_members: int
+    by_role: list[TeamRoleCount]
+    owner_count: int
+    pending_invitations: int
 
 
 class InvoiceLineItemCreate(BaseModel):
@@ -826,6 +943,7 @@ class DashboardAnalyticsResponse(BaseModel):
     top_products_and_services: list[TopProductRevenue]
     quote_pipeline: QuotePipelineSummary
     quote_monthly_conversions: list[QuoteMonthlyConversionPoint]
+    team: TeamSummaryResponse
 
 
 class InsightMetricResponse(BaseModel):
@@ -850,6 +968,7 @@ class InsightCtaResponse(BaseModel):
         "view_products",
         "view_pending_quotes",
         "view_expiring_quotes",
+        "view_team",
     ]
     # Only set for type == "ask_assistant" -- a deterministic, already-
     # localized prefill question, never AI-generated.

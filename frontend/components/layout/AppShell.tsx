@@ -10,13 +10,15 @@ import {
   clearAuthSession,
   EMAIL_VERIFIED_STORAGE_KEY,
   getEmailVerified,
+  getOrganizationId,
   getOrganizationName,
   isAuthenticated,
   setEmailVerified as cacheEmailVerified,
+  updateActiveOrganization,
 } from "@/lib/auth-storage";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { MeResponse, MessageResponse } from "@/lib/types";
+import type { MeResponse, MessageResponse, OrganizationSummary } from "@/lib/types";
 
 const links = [
   { href: "/dashboard", labelKey: "nav.dashboard" },
@@ -43,6 +45,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   // says otherwise, so the banner never flashes on a verified account.
   const [emailVerified, setEmailVerifiedState] = useState(true);
   const [isResending, setIsResending] = useState(false);
+  // The full membership list -- needed to render a switcher at all (a
+  // single-org user just sees their org name, same as before this
+  // feature). Populated from the same /auth/me call the email-verified
+  // check already makes, rather than a second request.
+  const [organizations, setOrganizations] = useState<OrganizationSummary[] | null>(null);
+  const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -56,6 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setEmailVerifiedState(me.user.email_verified);
         cacheEmailVerified(me.user.email_verified);
+        setOrganizations(me.organizations);
       })
       .catch((err) => {
         if (!cancelled && err instanceof ApiError && err.status === 401) {
@@ -94,6 +103,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.replace("/login");
   }
 
+  function switchOrganization(organizationId: string) {
+    if (isSwitchingOrg || organizationId === getOrganizationId()) return;
+    const target = organizations?.find((o) => o.id === organizationId);
+    if (!target) return;
+    setIsSwitchingOrg(true);
+    updateActiveOrganization({
+      organizationId: target.id,
+      organizationName: target.name,
+      organizationCurrency: target.currency_code,
+      organizationLanguage: target.language,
+    });
+    // A full reload, not a client-side navigation -- every already-loaded
+    // page's React state (invoice lists, dashboard totals, etc.) was
+    // fetched for the *previous* organization and has no reason to
+    // reactively refetch just because localStorage changed underneath it.
+    window.location.assign("/dashboard");
+  }
+
   async function resendVerification() {
     if (isResending) return;
     setIsResending(true);
@@ -121,7 +148,26 @@ export function AppShell({ children }: { children: ReactNode }) {
             Invoicing
           </Link>
         </div>
-        {organizationName ? (
+        {organizations && organizations.length > 1 ? (
+          <div className="hidden border-b border-slate-100 px-6 py-3 md:block">
+            <label htmlFor="org-switcher" className="sr-only">
+              {t("nav.switchOrganization")}
+            </label>
+            <select
+              id="org-switcher"
+              value={getOrganizationId() ?? ""}
+              onChange={(e) => switchOrganization(e.target.value)}
+              disabled={isSwitchingOrg}
+              className="w-full truncate rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-800 outline-none ring-slate-400 focus:ring-2 disabled:opacity-60"
+            >
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : organizationName ? (
           <Link
             href="/settings"
             className="hidden truncate border-b border-slate-100 px-6 py-3 text-sm font-semibold text-slate-800 hover:bg-surface-muted md:block"

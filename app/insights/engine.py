@@ -86,6 +86,7 @@ from app.routers.dashboard import (
     get_dashboard_summary,
     get_pending_total_by_currency,
 )
+from app.team_analytics import get_pending_invitations, get_recent_accepted_members, get_team_summary
 
 # Pending balance flagged only once it exceeds this share of that
 # currency's total revenue -- chosen to be meaningful enough to flag
@@ -156,10 +157,13 @@ def build_insights(
         # invoice in the funnel -- a brand-new business quoting its first
         # prospective customer must still see quote-pipeline insights
         # here, not just "no invoices yet" with everything else
-        # suppressed until its first sale closes.
+        # suppressed until its first sale closes. Team composition is
+        # independent of sales activity entirely, so it's included here
+        # too -- an org with zero invoices can still have teammates.
         return _diversity_order(
             [_new_business_no_invoices(language)]
             + _quote_pipeline_insights(db, organization_id, language)
+            + _team_insights(db, organization_id, language)
         )
 
     analytics = get_dashboard_analytics_data(db, organization_id)
@@ -179,6 +183,7 @@ def build_insights(
     candidates.extend(_concentration_insights(summary, analytics, language))
     candidates.extend(_product_revenue_insights(db, organization_id, analytics, now, language))
     candidates.extend(_quote_pipeline_insights(db, organization_id, language))
+    candidates.extend(_team_insights(db, organization_id, language))
 
     inactivity = _inactivity_insight(last_invoice_at, customers, now, language)
     if inactivity is not None:
@@ -832,6 +837,105 @@ def _quote_pipeline_insights(db: Session, organization_id: str, language: str) -
                 ),
                 cta=None,
                 priority_score=_severity_priority(InsightSeverity.warning, 0.3),
+            )
+        )
+
+    return insights
+
+
+# Team insights scope is deliberately narrow -- per the approved addendum,
+# ONLY these four: total members + members by role (combined into one
+# summary insight), pending invitations, organizations with only one
+# owner, and recent accepted invitations. "Inactive members," "large
+# teams," and "permission distribution" are explicitly NOT implemented:
+# this app has no last_active_at or equivalent activity signal, and
+# inferring inactivity from created_at or login absence would be
+# unreliable, exactly the trap the addendum calls out.
+TEAM_RECENT_JOINS_WINDOW_DAYS = 30
+
+
+def _team_insights(db: Session, organization_id: str, language: str) -> list[Insight]:
+    insights: list[Insight] = []
+
+    summary = get_team_summary(db, organization_id)
+
+    if summary.total_members > 0:
+        breakdown = ", ".join(
+            f"{row.count} {row.role.value}" for row in summary.by_role if row.count > 0
+        )
+        insights.append(
+            Insight(
+                id="team_summary",
+                category=InsightCategory.team,
+                severity=InsightSeverity.info,
+                title=t(language, "insight_team_summary_title").format(count=summary.total_members),
+                message=t(language, "insight_team_summary_message").format(
+                    count=summary.total_members, breakdown=breakdown
+                ),
+                suggestion=None,
+                metric=None,
+                related_entity=None,
+                cta=InsightCta(type="view_team"),
+                priority_score=_severity_priority(InsightSeverity.info, 0.1),
+            )
+        )
+
+    if summary.pending_invitations > 0:
+        insights.append(
+            Insight(
+                id="team_pending_invitations",
+                category=InsightCategory.team,
+                severity=InsightSeverity.info,
+                title=t(language, "insight_team_pending_invitations_title").format(
+                    count=summary.pending_invitations
+                ),
+                message=t(language, "insight_team_pending_invitations_message").format(
+                    count=summary.pending_invitations
+                ),
+                suggestion=t(language, "insight_team_pending_invitations_suggestion"),
+                metric=None,
+                related_entity=None,
+                cta=InsightCta(type="view_team"),
+                priority_score=_severity_priority(InsightSeverity.info, 0.2),
+            )
+        )
+
+    # Only fires when there's genuinely exactly one owner -- meaningful
+    # now that multiple simultaneous owners are supported (see
+    # app.permissions / app.services.team), unlike a single-owner-only
+    # model where this would always be trivially true.
+    if summary.owner_count == 1:
+        insights.append(
+            Insight(
+                id="team_only_one_owner",
+                category=InsightCategory.team,
+                severity=InsightSeverity.warning,
+                title=t(language, "insight_team_only_one_owner_title"),
+                message=t(language, "insight_team_only_one_owner_message"),
+                suggestion=None,
+                metric=None,
+                related_entity=None,
+                cta=InsightCta(type="view_team"),
+                priority_score=_severity_priority(InsightSeverity.warning, 0.2),
+            )
+        )
+
+    recent_members = get_recent_accepted_members(
+        db, organization_id, days=TEAM_RECENT_JOINS_WINDOW_DAYS
+    )
+    if recent_members:
+        insights.append(
+            Insight(
+                id="team_recent_joins",
+                category=InsightCategory.team,
+                severity=InsightSeverity.positive,
+                title=t(language, "insight_team_recent_joins_title").format(count=len(recent_members)),
+                message=t(language, "insight_team_recent_joins_message").format(count=len(recent_members)),
+                suggestion=None,
+                metric=None,
+                related_entity=None,
+                cta=None,
+                priority_score=_severity_priority(InsightSeverity.positive, 0.2),
             )
         )
 

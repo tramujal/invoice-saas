@@ -140,3 +140,14 @@ class QuoteCustomerEmailMissingError(ActionToolError):
     condition is identical."""
 
     code = "customer_email_missing"
+
+
+class PermissionDeniedError(ActionToolError):
+    """The caller's role doesn't grant the permission this tool requires
+    -- see app.ai.tools.registry.TOOL_PERMISSIONS and app.permissions.
+    Raised centrally by the two router call sites (propose and confirm),
+    never by an individual tool -- the AI Agent never bypasses
+    authorization because this is the exact same check_permission/
+    ROLE_PERMISSIONS the HTTP routers use, not a separate implementation."""
+
+    code = "permission_denied"

@@ -6,9 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member
+from app.deps import get_current_user, require_permission
 from app.effective_status import get_effective_payment_status
 from app.models import Customer, Invoice, Organization, User
+from app.permissions import Permission
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.product_analytics import get_revenue_by_product
@@ -24,10 +25,13 @@ from app.schemas import (
     QuoteMonthlyConversionPoint,
     QuotePipelineSummary,
     QuoteStatusCountPoint,
+    TeamRoleCount,
+    TeamSummaryResponse,
     TopCustomerRevenue,
     TopProductRevenue,
 )
 from app.quote_status import QuoteStatus
+from app.team_analytics import get_team_summary
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/dashboard", tags=["dashboard"]
@@ -229,7 +233,7 @@ def get_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.dashboard_view, db)
     return get_dashboard_summary(db, organization_id)
 
 
@@ -389,6 +393,16 @@ def get_dashboard_analytics_data(db: Session, organization_id: str) -> Dashboard
         for point in get_quote_monthly_conversions(db, organization_id, month_starts)
     ]
 
+    team_summary_data = get_team_summary(db, organization_id)
+    team_summary = TeamSummaryResponse(
+        total_members=team_summary_data.total_members,
+        by_role=[
+            TeamRoleCount(role=row.role, count=row.count) for row in team_summary_data.by_role
+        ],
+        owner_count=team_summary_data.owner_count,
+        pending_invitations=team_summary_data.pending_invitations,
+    )
+
     return DashboardAnalyticsResponse(
         monthly_summary=monthly_summary,
         monthly_revenue_by_currency=monthly_revenue_by_currency,
@@ -397,6 +411,7 @@ def get_dashboard_analytics_data(db: Session, organization_id: str) -> Dashboard
         top_products_and_services=top_products_and_services,
         quote_pipeline=quote_pipeline,
         quote_monthly_conversions=quote_monthly_conversions,
+        team=team_summary,
     )
 
 
@@ -406,5 +421,5 @@ def get_dashboard_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DashboardAnalyticsResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.dashboard_view, db)
     return get_dashboard_analytics_data(db, organization_id)

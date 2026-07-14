@@ -344,6 +344,41 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_quote_conversion_rate_label": (
             "Quote conversion rate: {percentage}% of decided quotes (accepted vs. rejected) have been accepted"
         ),
+
+        "membership_role_owner": "Owner",
+        "membership_role_admin": "Admin",
+        "membership_role_member": "Member",
+        "membership_role_viewer": "Viewer",
+
+        "invitation_subject": "You've been invited to join {organization}",
+        "invitation_greeting": "Hello,",
+        "invitation_intro": "{inviter} has invited you to join {organization} as a {role}.",
+        "invitation_accept_label": "Accept Invitation:",
+        "invitation_expiry": "This invitation expires in 7 days.",
+        "invitation_ignore": "If you weren't expecting this invitation, you can safely ignore this email.",
+        "invitation_accepted_subject": "{organization}: your invitation was accepted",
+        "invitation_accepted_greeting": "Hello,",
+        "invitation_accepted_body": "{email} has accepted your invitation to join {organization} as a {role}.",
+
+        "insight_team_summary_title": "{count} team members",
+        "insight_team_summary_message": "Your team has {count} members: {breakdown}.",
+        "insight_team_pending_invitations_title": "{count} invitations awaiting response",
+        "insight_team_pending_invitations_message": "{count} invitations have been sent and are still awaiting a response.",
+        "insight_team_pending_invitations_suggestion": "Consider resending or following up on invitations that have been pending a while.",
+        "insight_team_only_one_owner_title": "You're the only owner",
+        "insight_team_only_one_owner_message": "This organization currently has only one owner. Consider granting a trusted teammate admin access for redundancy.",
+        "insight_team_recent_joins_title": "{count} new team members recently",
+        "insight_team_recent_joins_message": "{count} new team members joined in the last 30 days.",
+
+        "assistant_team_heading": "Team",
+        "assistant_team_size_label": "Team size",
+        "assistant_team_owners_label": "Owners",
+        "assistant_team_admins_label": "Admins",
+        "assistant_team_pending_invitations_heading": "Pending Invitations",
+        "assistant_no_pending_invitations": "No pending invitations.",
+        "assistant_team_recent_members_heading": "Recent Team Members",
+        "assistant_no_recent_members": "No members have joined recently.",
+        "assistant_invited_by_label": "invited by",
     },
     "es": {
         "invoice_title": "Factura",
@@ -678,6 +713,41 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "Tasa de conversión de presupuestos: {percentage}% de los presupuestos decididos "
             "(aceptados vs. rechazados) fueron aceptados"
         ),
+
+        "membership_role_owner": "Propietario",
+        "membership_role_admin": "Administrador",
+        "membership_role_member": "Miembro",
+        "membership_role_viewer": "Espectador",
+
+        "invitation_subject": "Te han invitado a unirte a {organization}",
+        "invitation_greeting": "Hola,",
+        "invitation_intro": "{inviter} te ha invitado a unirte a {organization} como {role}.",
+        "invitation_accept_label": "Aceptar invitación:",
+        "invitation_expiry": "Esta invitación vence en 7 días.",
+        "invitation_ignore": "Si no esperabas esta invitación, puedes ignorar este correo de forma segura.",
+        "invitation_accepted_subject": "{organization}: tu invitación fue aceptada",
+        "invitation_accepted_greeting": "Hola,",
+        "invitation_accepted_body": "{email} aceptó tu invitación para unirse a {organization} como {role}.",
+
+        "insight_team_summary_title": "{count} miembros del equipo",
+        "insight_team_summary_message": "Tu equipo tiene {count} miembros: {breakdown}.",
+        "insight_team_pending_invitations_title": "{count} invitaciones esperando respuesta",
+        "insight_team_pending_invitations_message": "{count} invitaciones fueron enviadas y siguen esperando una respuesta.",
+        "insight_team_pending_invitations_suggestion": "Considera reenviar o dar seguimiento a las invitaciones que llevan tiempo pendientes.",
+        "insight_team_only_one_owner_title": "Eres el único propietario",
+        "insight_team_only_one_owner_message": "Esta organización actualmente tiene un solo propietario. Considera otorgar acceso de administrador a un colaborador de confianza como respaldo.",
+        "insight_team_recent_joins_title": "{count} nuevos miembros del equipo recientemente",
+        "insight_team_recent_joins_message": "{count} nuevos miembros del equipo se unieron en los últimos 30 días.",
+
+        "assistant_team_heading": "Equipo",
+        "assistant_team_size_label": "Tamaño del equipo",
+        "assistant_team_owners_label": "Propietarios",
+        "assistant_team_admins_label": "Administradores",
+        "assistant_team_pending_invitations_heading": "Invitaciones Pendientes",
+        "assistant_no_pending_invitations": "No hay invitaciones pendientes.",
+        "assistant_team_recent_members_heading": "Miembros Recientes del Equipo",
+        "assistant_no_recent_members": "Ningún miembro se ha unido recientemente.",
+        "assistant_invited_by_label": "invitado por",
     },
 }
 

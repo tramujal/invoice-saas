@@ -14,13 +14,15 @@ from app.ai.base import AIProviderError, AIProviderTimeoutError, ChatMessage, Te
 from app.ai.factory import get_ai_provider
 from app.ai.limits import ASSISTANT_ACTION_TTL_SECONDS
 from app.ai.prompts import ASSISTANT_SYSTEM_PROMPT
-from app.ai.tools.registry import TOOL_REGISTRY, tool_definitions
+from app.ai.tools.registry import TOOL_PERMISSIONS, TOOL_REGISTRY, tool_definitions
 from app.ai.tools.types import ActionToolError, AmbiguousCustomerError, AmbiguousProductError
 from app.assistant_action_status import AssistantActionStatus
 from app.assistant_context import build_business_context, format_business_context_as_text
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_permission, require_verified_email
+from app.membership_role import MembershipRole
 from app.models import AssistantAction, User
+from app.permissions import ROLE_PERMISSIONS, Permission, check_permission
 from app.rate_limit import (
     RATE_LIMIT_CODE,
     RateLimitCheck,
@@ -79,12 +81,14 @@ def assistant_chat(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    # Cheapest / most fundamental checks first, in order: membership, email
-    # verification (this calls a paid external API — see the adjustment
-    # that added this requirement), then rate limiting, then configuration,
-    # then the actual (comparatively expensive) DB work of building context.
-    require_org_member(current_user, organization_id, db)
+    # Cheapest / most fundamental checks first, in order: membership+
+    # permission, email verification (this calls a paid external API — see
+    # the adjustment that added this requirement), then rate limiting, then
+    # configuration, then the actual (comparatively expensive) DB work of
+    # building context.
+    membership = require_permission(current_user, organization_id, Permission.assistant_chat, db)
     require_verified_email(current_user)
+    caller_role = MembershipRole(membership.role)
 
     enforce_rate_limit(
         [
@@ -135,7 +139,7 @@ def assistant_chat(
     start = time.monotonic()
     try:
         stream_iterator = ai_provider.stream_complete(
-            system_prompt, messages, tools=tool_definitions()
+            system_prompt, messages, tools=tool_definitions(allowed=ROLE_PERMISSIONS[caller_role])
         )
     except AIProviderTimeoutError:
         logger.warning(
@@ -177,6 +181,23 @@ def assistant_chat(
                 user_hash,
             )
             yield _ndjson({"type": "error", "code": "assistant_action_invalid"})
+            return
+
+        # Re-checked here even though tool_definitions() already filtered
+        # by role above -- that filtering is only UX (don't offer actions
+        # the model can't use), never the actual security boundary. A
+        # malformed or replayed client request could still name a tool
+        # that was never offered, so this is the real enforcement point.
+        required_permission = TOOL_PERMISSIONS.get(tool.name)
+        if required_permission is not None and not check_permission(caller_role, required_permission):
+            logger.warning(
+                "assistant_chat: permission denied tool=%s role=%s org_hash=%s user_hash=%s",
+                event.name,
+                caller_role.value,
+                org_hash,
+                user_hash,
+            )
+            yield _ndjson({"type": "error", "code": "permission_denied"})
             return
 
         # Only ever consumed on this branch (an actual tool call), never

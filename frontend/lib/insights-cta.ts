@@ -22,6 +22,8 @@ export function insightCtaHref(cta: InsightCta): string {
       return "/quotes?status=sent";
     case "view_expiring_quotes":
       return "/quotes?status=sent";
+    case "view_team":
+      return "/settings/team";
     case "ask_assistant":
       return `/assistant?q=${encodeURIComponent(cta.question ?? "")}`;
     default:

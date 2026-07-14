@@ -98,6 +98,30 @@ export function updateOrganizationLanguage(language: string): void {
   window.localStorage.setItem(ORG_LANGUAGE_KEY, language);
 }
 
+/** Switches the active organization in place (same token, same user) --
+ * used by the accept-invitation flow (a newly-accepted org must become
+ * reachable immediately) and the organization switcher. Unlike
+ * setAuthSession, this never touches the token/apiBaseUrl/userEmail keys,
+ * since those don't change when switching organizations. */
+export function updateActiveOrganization(params: {
+  organizationId: string;
+  organizationName?: string;
+  organizationCurrency?: string;
+  organizationLanguage?: string;
+}): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ORG_ID_KEY, params.organizationId.trim());
+  if (params.organizationName) {
+    window.localStorage.setItem(ORG_NAME_KEY, params.organizationName);
+  }
+  if (params.organizationCurrency) {
+    window.localStorage.setItem(ORG_CURRENCY_KEY, params.organizationCurrency);
+  }
+  if (params.organizationLanguage) {
+    window.localStorage.setItem(ORG_LANGUAGE_KEY, params.organizationLanguage);
+  }
+}
+
 export function getUserEmail(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(USER_EMAIL_KEY);

@@ -28,7 +28,9 @@ from app.customer_activity import get_last_invoice_at_by_customer
 from app.insights.queries import get_due_soon_invoice_details, get_overdue_invoice_details
 from app.invoice_numbering import format_invoice_number
 from app.localization import get_language, t
-from app.models import Customer, InvoiceReminder, Organization
+from app.membership_status import MembershipStatus
+from app.models import Customer, InvoiceReminder, Organization, OrganizationMember
+from app.permissions import Permission, roles_with_permission
 from app.product_analytics import get_dormant_products
 from app.quote_numbering import format_quote_number
 from app.quote_analytics import (
@@ -39,6 +41,11 @@ from app.quote_analytics import (
 from app.reminder_status import ReminderStatus
 from app.routers.dashboard import get_dashboard_analytics_data, get_dashboard_summary
 from app.schemas import DashboardAnalyticsResponse, DashboardResponse
+from app.team_analytics import (
+    get_pending_invitations,
+    get_recent_accepted_members,
+    get_team_summary,
+)
 
 OVERDUE_INVOICES_LIMIT = 10
 DUE_SOON_INVOICES_LIMIT = 10
@@ -49,6 +56,8 @@ DORMANT_PRODUCTS_LIMIT = 10
 DORMANT_PRODUCTS_DAYS = 90
 QUOTES_PENDING_LIMIT = 10
 QUOTES_EXPIRED_LIMIT = 10
+TEAM_PENDING_INVITATIONS_LIMIT = 10
+TEAM_RECENT_MEMBERS_LIMIT = 10
 
 
 @dataclass
@@ -91,6 +100,19 @@ class QuoteInfo:
 
 
 @dataclass
+class TeamPendingInvitationInfo:
+    email: str
+    role: str
+
+
+@dataclass
+class TeamRecentMemberInfo:
+    user_email: str
+    role: str
+    invited_by_email: str | None
+
+
+@dataclass
 class BusinessContext:
     organization_name: str
     language: str
@@ -104,6 +126,11 @@ class BusinessContext:
     quotes_pending: list[QuoteInfo]
     quotes_expired: list[QuoteInfo]
     quote_acceptance_rate_percent: float | None
+    team_size: int
+    team_owners: list[str]
+    team_admins: list[str]
+    team_pending_invitations: list[TeamPendingInvitationInfo]
+    team_recent_members: list[TeamRecentMemberInfo]
 
 
 def _overdue_invoice_list(db: Session, organization_id: str) -> list[OverdueInvoiceInfo]:
@@ -219,6 +246,59 @@ def _quotes_expired(db: Session, organization_id: str) -> list[QuoteInfo]:
     ]
 
 
+def _team_context(
+    db: Session, organization_id: str
+) -> tuple[int, list[str], list[str], list[TeamPendingInvitationInfo], list[TeamRecentMemberInfo]]:
+    """Returns (team_size, owner_emails, admin_emails, pending_invitations,
+    recent_members) -- reuses app.team_analytics's shared queries, the
+    same ones app.routers.dashboard and app.insights.engine's team
+    insights use, so the assistant's answer to "how many members do we
+    have" can never drift from what the dashboard shows. Bounded the same
+    way every other list in this module is (max 10)."""
+    summary = get_team_summary(db, organization_id)
+
+    # "Owners" and "admins" here mean *capability*, not a specific role
+    # name: owner-equivalent = holds organization.manage (the same
+    # permission app.services.team's ownership invariants key off);
+    # admin-equivalent = holds members.manage but not organization.manage,
+    # so nobody is double-counted. A future custom role granted either
+    # permission is correctly included with no change here.
+    owner_roles = [r.value for r in roles_with_permission(Permission.organization_manage)]
+    admin_roles = [
+        r.value
+        for r in roles_with_permission(Permission.members_manage)
+        if r not in roles_with_permission(Permission.organization_manage)
+    ]
+    owner_and_admin_rows = db.scalars(
+        select(OrganizationMember)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.status == MembershipStatus.active.value,
+            OrganizationMember.role.in_(owner_roles + admin_roles),
+        )
+        .limit(2 * TEAM_RECENT_MEMBERS_LIMIT)
+    ).all()
+    owner_emails = [m.user_email for m in owner_and_admin_rows if m.role in owner_roles][
+        :TEAM_RECENT_MEMBERS_LIMIT
+    ]
+    admin_emails = [m.user_email for m in owner_and_admin_rows if m.role in admin_roles][
+        :TEAM_RECENT_MEMBERS_LIMIT
+    ]
+
+    pending = [
+        TeamPendingInvitationInfo(email=inv.email, role=inv.role)
+        for inv in get_pending_invitations(db, organization_id, TEAM_PENDING_INVITATIONS_LIMIT)
+    ]
+    recent = [
+        TeamRecentMemberInfo(
+            user_email=m.user_email, role=m.role, invited_by_email=m.invited_by_email
+        )
+        for m in get_recent_accepted_members(db, organization_id, limit=TEAM_RECENT_MEMBERS_LIMIT)
+    ]
+
+    return summary.total_members, owner_emails, admin_emails, pending, recent
+
+
 def build_business_context(db: Session, organization_id: str) -> BusinessContext:
     """Assumes the caller has already authorized the request (require_org_member
     + require_verified_email) — this function does not re-check
@@ -226,6 +306,9 @@ def build_business_context(db: Session, organization_id: str) -> BusinessContext
     get_dashboard_analytics_data's own contract."""
     organization = db.get(Organization, organization_id)
     now = datetime.now(timezone.utc)
+    team_size, owner_emails, admin_emails, pending_invitations, recent_members = _team_context(
+        db, organization_id
+    )
 
     return BusinessContext(
         organization_name=organization.name if organization else "",
@@ -242,7 +325,45 @@ def build_business_context(db: Session, organization_id: str) -> BusinessContext
         quote_acceptance_rate_percent=get_quote_pipeline_summary(
             db, organization_id
         ).acceptance_rate_percent,
+        team_size=team_size,
+        team_owners=owner_emails,
+        team_admins=admin_emails,
+        team_pending_invitations=pending_invitations,
+        team_recent_members=recent_members,
     )
+
+
+def _append_team_section(lines: list[str], context: BusinessContext, language: str) -> None:
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_team_heading')}:")
+    lines.append(f"- {t(language, 'assistant_team_size_label')}: {context.team_size}")
+    lines.append(
+        f"- {t(language, 'assistant_team_owners_label')}: "
+        + (", ".join(context.team_owners) if context.team_owners else "—")
+    )
+    lines.append(
+        f"- {t(language, 'assistant_team_admins_label')}: "
+        + (", ".join(context.team_admins) if context.team_admins else "—")
+    )
+
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_team_pending_invitations_heading')} (max {TEAM_PENDING_INVITATIONS_LIMIT}):")
+    if not context.team_pending_invitations:
+        lines.append(f"- {t(language, 'assistant_no_pending_invitations')}")
+    for invitation in context.team_pending_invitations:
+        lines.append(f"- {invitation.email} ({invitation.role})")
+
+    lines.append("")
+    lines.append(f"{t(language, 'assistant_team_recent_members_heading')} (max {TEAM_RECENT_MEMBERS_LIMIT}):")
+    if not context.team_recent_members:
+        lines.append(f"- {t(language, 'assistant_no_recent_members')}")
+    for member in context.team_recent_members:
+        invited_by = (
+            f" ({t(language, 'assistant_invited_by_label')} {member.invited_by_email})"
+            if member.invited_by_email
+            else ""
+        )
+        lines.append(f"- {member.user_email} ({member.role}){invited_by}")
 
 
 def format_business_context_as_text(context: BusinessContext) -> str:
@@ -258,6 +379,11 @@ def format_business_context_as_text(context: BusinessContext) -> str:
 
     if context.dashboard.total_invoices == 0 and context.dashboard.total_customers == 0:
         lines.append(t(language, "assistant_no_data_note"))
+        # Team composition is independent of invoicing/customer activity --
+        # a brand-new org with zero invoices can still answer "how many
+        # members do we have?" -- so it renders even on this early return,
+        # unlike the rest of the (invoice/customer-dependent) sections below.
+        _append_team_section(lines, context, language)
         text = "\n".join(lines)
         return text[:AI_MAX_CONTEXT_CHARS]
 
@@ -428,6 +554,8 @@ def format_business_context_as_text(context: BusinessContext) -> str:
                 percentage=f"{context.quote_acceptance_rate_percent:.0f}"
             )
         )
+
+    _append_team_section(lines, context, language)
 
     lines.append("")
     lines.append(f"{t(language, 'assistant_monthly_revenue_heading')}:")

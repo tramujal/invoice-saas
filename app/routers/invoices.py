@@ -6,13 +6,14 @@ from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_permission, require_verified_email
 from app.insights.queries import DUE_SOON_WINDOW_DAYS
 from app.invoice_numbering import format_invoice_number, parse_invoice_number
 from app.invoice_pdf import render_invoice_pdf
 from app.models import Customer, Invoice, Organization, User
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
+from app.permissions import Permission
 from app.rate_limit import (
     SEND_INVOICE_EMAIL_RULES,
     RateLimitCheck,
@@ -158,7 +159,7 @@ def list_organization_invoices(
     sort_by: InvoiceSortField = Query(default=InvoiceSortField.created_at),
     sort_dir: SortDirection = Query(default=SortDirection.desc),
 ) -> PaginatedInvoicesResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.invoice_read, db)
 
     today_local = None
     if due_filter is not None:
@@ -209,7 +210,7 @@ def download_invoice_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.invoice_read, db)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
     pdf_bytes = render_invoice_pdf(invoice)
     filename = f"{format_invoice_number(invoice.invoice_number)}.pdf"
@@ -251,7 +252,7 @@ def send_invoice_email(
     # whether the email provider is configured, so a bad request (wrong org,
     # missing invoice, no customer email) always reports its real 403/404/422
     # rather than being masked by a 503 from get_email_sender().
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.invoice_send, db)
     require_verified_email(current_user)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
 
@@ -283,7 +284,7 @@ def update_invoice_payment_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Invoice:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.invoice_edit, db)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
     return update_invoice_payment_status_record(db, invoice, body.payment_status)
 
@@ -295,7 +296,7 @@ def create_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Invoice:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.invoice_create, db)
     require_verified_email(current_user)
 
     customer: Customer | None = None
@@ -365,7 +366,7 @@ def send_invoice_reminder(
         ]
     )
 
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.invoice_send, db)
     require_verified_email(current_user)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
 

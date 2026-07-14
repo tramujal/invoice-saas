@@ -35,6 +35,15 @@ function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
   return true;
 }
 
+/** Only ever a same-origin relative path -- never trust the raw query
+ * value as a redirect target (a "//evil.com" or absolute-URL value would
+ * otherwise be a classic open-redirect). Used to send the visitor back to
+ * where they came from (e.g. /accept-invitation?token=...) after signing
+ * in, instead of always landing on /dashboard. */
+function safeNextPath(raw: string | null): string {
+  return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/dashboard";
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -48,10 +57,11 @@ function LoginForm() {
   const [organizationName, setOrganizationName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const nextPath = safeNextPath(searchParams.get("next"));
 
   useEffect(() => {
-    if (isAuthenticated()) router.replace("/dashboard");
-  }, [router]);
+    if (isAuthenticated()) router.replace(nextPath);
+  }, [router, nextPath]);
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -94,7 +104,7 @@ function LoginForm() {
         setError(t("auth.errorNoOrganization"));
         return;
       }
-      router.replace("/dashboard");
+      router.replace(nextPath);
     } catch (err) {
       if (isRateLimitedError(err)) {
         setError(

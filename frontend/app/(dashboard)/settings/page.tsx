@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
+import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import {
@@ -263,6 +264,8 @@ export default function SettingsPage() {
         </h1>
         <p className="mt-1 text-sm text-slate-500">{t("settings.subtitle")}</p>
       </header>
+
+      <SettingsSubNav />
 
       {error ? (
         <div

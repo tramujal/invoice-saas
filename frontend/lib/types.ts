@@ -1,3 +1,4 @@
+import type { InvitationRole, MembershipRole, MembershipStatus } from "@/lib/membership-role";
 import type { PaymentStatus } from "@/lib/payment-status";
 import type { ProductType } from "@/lib/product-type";
 import type { QuoteStatus } from "@/lib/quote-status";
@@ -284,6 +285,7 @@ export type DashboardAnalytics = {
   top_products_and_services: TopProductRevenue[];
   quote_pipeline: QuotePipelineSummary;
   quote_monthly_conversions: QuoteMonthlyConversionPoint[];
+  team: TeamSummary;
 };
 
 /** Response from GET/POST/PATCH .../products, .../products/{id}/archive,
@@ -442,7 +444,8 @@ export type InsightCtaType =
   | "ask_assistant"
   | "view_products"
   | "view_pending_quotes"
-  | "view_expiring_quotes";
+  | "view_expiring_quotes"
+  | "view_team";
 
 export type InsightMetric = {
   currency_code: string | null;
@@ -545,3 +548,83 @@ export type AssistantChatMessage =
       resultSummary?: Record<string, unknown>;
     }
   | { kind: "clarification"; code: string; candidates: string[] };
+
+// --- Team & Invitations --------------------------------------------------
+
+/** Response row from GET/PATCH/POST .../members -- see
+ * app.schemas.MemberResponse. email is the sole user-facing identifier
+ * (the app has no display-name field anywhere). */
+export type Member = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  user_email: string;
+  role: MembershipRole;
+  status: MembershipStatus;
+  invited_by_email: string | null;
+  invited_at: string | null;
+  accepted_at: string;
+  created_at: string;
+  updated_at: string;
+  /** Derived server-side from role via app.permissions.ROLE_PERMISSIONS --
+   * gate UI on this, never on `role` directly (see lib/permissions.ts). */
+  permissions: string[];
+};
+
+export type PaginatedMembers = {
+  total: number;
+  items: Member[];
+};
+
+/** Response row from GET/POST/POST-resend .../invitations -- see
+ * app.schemas.InvitationResponse. Always role !== "owner" -- ownership can
+ * only be granted through the dedicated grant-ownership action. */
+export type Invitation = {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: InvitationRole;
+  expires_at: string;
+  accepted_at: string | null;
+  created_by_email: string | null;
+  created_at: string;
+};
+
+export type PaginatedInvitations = {
+  total: number;
+  items: Invitation[];
+};
+
+/** Response from GET /invitations/public/{token} -- deliberately narrower
+ * than Invitation: no ids, nothing beyond what an anonymous visitor needs
+ * to decide whether to accept. */
+export type PublicInvitation = {
+  organization_name: string;
+  inviter_email: string | null;
+  role: InvitationRole;
+  expires_at: string;
+  already_accepted: boolean;
+  expired: boolean;
+};
+
+/** Response from POST /invitations/public/{token}/accept */
+export type PublicInvitationAcceptResponse = {
+  organization_id: string;
+  organization_name: string;
+  role: InvitationRole;
+};
+
+export type TeamRoleCount = {
+  role: MembershipRole;
+  count: number;
+};
+
+/** Also embedded as DashboardAnalytics.team -- one shared shape, computed
+ * by app.team_analytics, reused by both the dashboard and this feature's
+ * own team page. */
+export type TeamSummary = {
+  total_members: number;
+  by_role: TeamRoleCount[];
+  owner_count: number;
+  pending_invitations: number;
+};

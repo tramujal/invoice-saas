@@ -5,8 +5,9 @@ from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_permission, require_verified_email
 from app.models import Product, User
+from app.permissions import Permission
 from app.product_type import ProductType
 from app.schemas import (
     PaginatedProductsResponse,
@@ -53,7 +54,7 @@ def create_product(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Product:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
     return create_product_record(
         db,
@@ -83,7 +84,7 @@ def list_products(
     sort_by: ProductSortField = Query(default=ProductSortField.created_at),
     sort_dir: SortDirection = Query(default=SortDirection.desc),
 ) -> PaginatedProductsResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.product_read, db)
 
     query = select(Product).where(Product.organization_id == organization_id)
 
@@ -118,7 +119,7 @@ def update_product(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Product:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
     product = _product_or_404(db, organization_id, product_id)
     # Deliberately NOT mode="json": that would stringify the Decimal
@@ -141,7 +142,7 @@ def archive_product(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Product:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
     product = _product_or_404(db, organization_id, product_id)
     return archive_product_record(db, product)
@@ -154,7 +155,7 @@ def restore_product(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Product:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
     product = _product_or_404(db, organization_id, product_id)
     return restore_product_record(db, product)

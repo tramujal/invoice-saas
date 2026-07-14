@@ -20,12 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.tools.invoices import SendInvoiceEmailTool
-from app.ai.tools.registry import TOOL_REGISTRY
+from app.ai.tools.registry import TOOL_PERMISSIONS, TOOL_REGISTRY
 from app.ai.tools.types import ActionToolError
 from app.assistant_action_status import AssistantActionStatus
 from app.database import get_db
-from app.deps import get_current_user, require_org_member, require_verified_email
+from app.deps import get_current_user, require_org_member, require_permission, require_verified_email
+from app.membership_role import MembershipRole
 from app.models import AssistantAction, User
+from app.permissions import Permission, check_permission
 from app.rate_limit import (
     SEND_INVOICE_EMAIL_RULES,
     RateLimitCheck,
@@ -120,7 +122,7 @@ def confirm_assistant_action(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AssistantActionConfirmResponse:
-    require_org_member(current_user, organization_id, db)
+    membership = require_permission(current_user, organization_id, Permission.assistant_execute, db)
     # Every AI-driven write requires verified email, uniformly -- even for
     # update_invoice_status, which the direct PATCH endpoint doesn't gate.
     # Deliberately stricter for this AI-driven surface: an LLM can be
@@ -158,6 +160,24 @@ def confirm_assistant_action(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=_detail("assistant_action_invalid", INVALID_MESSAGE),
+        )
+
+    # Re-checked here, not just trusted from propose time -- the caller's
+    # role could have changed between propose and confirm (e.g. a
+    # demotion mid-session). This uses the exact same check_permission/
+    # TOOL_PERMISSIONS the propose endpoint (app/routers/assistant.py)
+    # does -- there is no separate AI-specific authorization
+    # implementation anywhere, so the AI Agent can never bypass it.
+    required_permission = TOOL_PERMISSIONS.get(tool.name)
+    if required_permission is not None and not check_permission(
+        MembershipRole(membership.role), required_permission
+    ):
+        action.status = AssistantActionStatus.failed.value
+        action.failure_code = "permission_denied"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_detail("permission_denied", "You no longer have permission to perform this action."),
         )
 
     try:

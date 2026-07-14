@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.factory import is_ai_configured
 from app.database import get_db
-from app.deps import get_current_user, require_org_member
+from app.deps import get_current_user, require_permission
 from app.insights.cache import CacheEntry, fingerprint, get_cached, set_cached
 from app.insights.engine import build_insights, cap_insights
 from app.insights.limits import (
@@ -36,6 +36,7 @@ from app.insights.models import Insight
 from app.insights.narration import narrate_insights
 from app.localization import get_language
 from app.models import Organization, User
+from app.permissions import Permission
 from app.rate_limit import (
     RateLimitCheck,
     RateLimitRule,
@@ -107,7 +108,7 @@ def get_dashboard_insights(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DashboardInsightsResponse:
-    require_org_member(current_user, organization_id, db)
+    require_permission(current_user, organization_id, Permission.insights_view, db)
 
     organization = db.get(Organization, organization_id)
     language = get_language(organization)
