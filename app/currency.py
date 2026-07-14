@@ -8,31 +8,78 @@ sites don't change.
 """
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, Sequence
 
 if TYPE_CHECKING:
-    from app.models import Customer, Invoice, Organization
+    from app.models import Invoice, Organization, Product
 
 DEFAULT_CURRENCY_CODE = "USD"
 SUPPORTED_CURRENCIES = ("USD", "UYU", "EUR")
 
 
-def resolve_default_currency_code(
-    customer: "Customer | None", organization: "Organization"
-) -> str:
-    """Single source of truth for what currency a *new* invoice should
-    default to before any explicit override on the create request.
+class CurrencyRequiredError(Exception):
+    """Raised when a document's currency can't be inferred: no explicit
+    currency_code was given, and no line item is linked to a product (i.e.
+    every line is a manual line, which carries no currency of its own)."""
 
-    Currently this is always the organization's default, regardless of
-    customer. It takes `customer` as a parameter (rather than just
-    `organization`) so that a future customer-level preferred currency only
-    requires changing the body of this function — e.g. preferring
-    `customer.preferred_currency_code` when set — with no changes needed at
-    its call site in invoice creation, and no change to the invoice
-    creation payload/API shape (an explicit `currency_code` on the request
-    still wins over whatever this returns).
+
+class ProductCurrencyMismatchError(Exception):
+    """Raised when a line item's product currency doesn't match the
+    document's currency (explicit or already inferred from an earlier
+    line)."""
+
+    def __init__(self, product_name: str, product_currency: str, document_currency: str):
+        self.product_name = product_name
+        self.product_currency = product_currency
+        self.document_currency = document_currency
+        super().__init__(
+            f"Product '{product_name}' is priced in {product_currency}, "
+            f"but this document is in {document_currency}."
+        )
+
+
+class _HasProductId(Protocol):
+    product_id: str | None
+
+
+def resolve_document_currency_code(
+    requested_currency_code: str | None,
+    line_items: Sequence[_HasProductId],
+    resolved_products_by_id: "dict[str, Product]",
+) -> str:
+    """Single source of truth for resolving a document's (invoice or
+    quote's) currency from an optional explicit override plus its line
+    items' products.
+
+    - If `requested_currency_code` is given, every product-linked line must
+      match it (raises ProductCurrencyMismatchError on the first mismatch).
+    - If not given, the first product-linked line's product currency
+      becomes the baseline, and every other product-linked line must match
+      it.
+    - Manual lines (product_id is None) carry no currency of their own in
+      the schema — they're validated only insofar as the single top-level
+      currency_code they implicitly belong to must match every product-
+      linked line's currency too.
+    - If no baseline can be established at all (no requested currency, no
+      product-linked line), raises CurrencyRequiredError.
+
+    `resolved_products_by_id` must already contain every product referenced
+    by `line_items` — callers fetch these anyway to validate product
+    existence, so this function takes no db/organization_id and issues no
+    queries of its own.
     """
-    return get_currency_code(organization)
+    baseline = requested_currency_code
+    for line in line_items:
+        if line.product_id is None:
+            continue
+        product = resolved_products_by_id[line.product_id]
+        if baseline is None:
+            baseline = product.currency_code
+        elif product.currency_code != baseline:
+            raise ProductCurrencyMismatchError(product.name, product.currency_code, baseline)
+    if baseline is None:
+        raise CurrencyRequiredError()
+    return baseline
 
 
 def get_currency_code(organization: "Organization | Invoice | None" = None) -> str:

@@ -118,6 +118,31 @@ class LineItemIncompleteError(ActionToolError):
     code = "line_item_incomplete"
 
 
+class CurrencyRequiredError(ActionToolError):
+    """Mirrors app.currency.CurrencyRequiredError -- no currency_code was
+    given and every line item is a manual line (no product_name), so
+    there's nothing to infer the document's currency from."""
+
+    code = "currency_required"
+
+
+class ProductCurrencyMismatchError(ActionToolError):
+    """Mirrors app.currency.ProductCurrencyMismatchError -- a resolved
+    product's currency doesn't match the document's currency (explicit or
+    inferred from an earlier line)."""
+
+    code = "product_currency_mismatch"
+
+    def __init__(self, product_name: str, product_currency: str, document_currency: str):
+        super().__init__(
+            f"'{product_name}' is priced in {product_currency}, "
+            f"but this document is in {document_currency}."
+        )
+        self.product_name = product_name
+        self.product_currency = product_currency
+        self.document_currency = document_currency
+
+
 class QuoteNotFoundError(ActionToolError):
     code = "quote_not_found"
 

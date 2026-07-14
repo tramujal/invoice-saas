@@ -15,6 +15,7 @@ def test_create_invoice_via_api(client, db_session):
             ],
             "customer_id": customer.id,
             "due_date": str(date.today() + timedelta(days=14)),
+            "currency_code": "USD",
         },
         headers=owner.auth_headers,
     )

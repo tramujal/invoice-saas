@@ -23,6 +23,7 @@ from app.ai.tools.products import resolve_product_by_name
 from app.ai.tools.types import (
     ActionToolError,
     AmbiguousCustomerError,
+    CurrencyRequiredError,
     CustomerEmailMissingError,
     CustomerNotFoundError,
     ExecutionResult,
@@ -30,13 +31,17 @@ from app.ai.tools.types import (
     InvoiceDueDateMissingError,
     InvoiceNotFoundError,
     LineItemIncompleteError,
+    ProductCurrencyMismatchError,
     ProposalResult,
     ReminderAlreadySentError,
     RemindersDisabledError,
 )
-from app.currency import format_amount, get_currency_code, resolve_default_currency_code
+from app.currency import format_amount, get_currency_code
+from app.currency import CurrencyRequiredError as ServiceCurrencyRequiredError
+from app.currency import ProductCurrencyMismatchError as ServiceProductCurrencyMismatchError
+from app.currency import resolve_document_currency_code
 from app.invoice_numbering import format_invoice_number
-from app.models import Customer, Organization, User
+from app.models import Customer, Organization, Product, User
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.schemas import CurrencyCode, InvoiceLineItemCreate
@@ -157,15 +162,19 @@ class AiInvoiceLineItemInput(BaseModel):
 
 def _resolve_line_items(
     db: Session, organization_id: str, lines: list[AiInvoiceLineItemInput]
-) -> list[InvoiceLineItemCreate]:
+) -> tuple[list[InvoiceLineItemCreate], dict[str, Product]]:
     """Resolves each model-supplied line into an ordinary
     InvoiceLineItemCreate (now carrying product_id) -- the exact same
     shape the direct HTTP create-invoice endpoint uses, so execute() and
-    create_invoice_record need no special-casing for the AI path."""
+    create_invoice_record need no special-casing for the AI path. Also
+    returns every resolved Product keyed by id, so callers can feed
+    resolve_document_currency_code with no extra queries."""
     resolved: list[InvoiceLineItemCreate] = []
+    resolved_products_by_id: dict[str, Product] = {}
     for line in lines:
         if line.product_name:
             product = resolve_product_by_name(db, organization_id, line.product_name)
+            resolved_products_by_id[product.id] = product
             description = line.description or product.name
             unit_price = (
                 line.unit_price if line.unit_price is not None else product.default_unit_price
@@ -191,7 +200,7 @@ def _resolve_line_items(
                     product_id=None,
                 )
             )
-    return resolved
+    return resolved, resolved_products_by_id
 
 
 class CreateInvoiceDraftInput(BaseModel):
@@ -214,7 +223,12 @@ class CreateInvoiceDraftInput(BaseModel):
     )
     currency_code: CurrencyCode | None = Field(
         default=None,
-        description="ISO currency code. Omit to use the organization's default currency.",
+        description=(
+            "ISO currency code. Omit when every line item resolves to a catalog "
+            "product -- currency is inferred automatically from the first product's "
+            "own currency. Required when any line item is a manual (non-catalog) line, "
+            "since a manual line has no currency of its own to infer from."
+        ),
     )
 
 
@@ -244,7 +258,9 @@ class CreateInvoiceDraftTool(ActionTool):
     ) -> ProposalResult:
         data = CreateInvoiceDraftInput.model_validate(raw_input)
         customer = _resolve_customer_by_name(db, organization_id, data.customer_name)
-        resolved_line_items = _resolve_line_items(db, organization_id, data.line_items)
+        resolved_line_items, resolved_products_by_id = _resolve_line_items(
+            db, organization_id, data.line_items
+        )
 
         # Preview totals only -- never a DB write, never consumes the
         # invoice-number sequence. execute() recomputes these again from
@@ -252,12 +268,18 @@ class CreateInvoiceDraftTool(ActionTool):
         # authoritative.
         totals = compute_invoice_totals(resolved_line_items, data.tax_rate)
 
-        organization = db.get(Organization, organization_id)
-        currency_code = (
-            data.currency_code.value
-            if data.currency_code
-            else resolve_default_currency_code(customer, organization)
-        )
+        try:
+            currency_code = resolve_document_currency_code(
+                data.currency_code.value if data.currency_code else None,
+                resolved_line_items,
+                resolved_products_by_id,
+            )
+        except ServiceCurrencyRequiredError:
+            raise CurrencyRequiredError()
+        except ServiceProductCurrencyMismatchError as exc:
+            raise ProductCurrencyMismatchError(
+                exc.product_name, exc.product_currency, exc.document_currency
+            )
 
         resolved = CreateInvoiceDraftResolved(
             customer_id=customer.id,
@@ -296,15 +318,22 @@ class CreateInvoiceDraftTool(ActionTool):
         except ServiceCustomerNotFoundInOrgError:
             raise CustomerNotFoundError(resolved.customer_id)
 
-        invoice = create_invoice_record(
-            db,
-            organization_id,
-            current_user,
-            customer,
-            resolved.currency_code,
-            resolved.line_items,
-            resolved.tax_rate,
-        )
+        try:
+            invoice = create_invoice_record(
+                db,
+                organization_id,
+                current_user,
+                customer,
+                resolved.currency_code,
+                resolved.line_items,
+                resolved.tax_rate,
+            )
+        except ServiceCurrencyRequiredError:
+            raise CurrencyRequiredError()
+        except ServiceProductCurrencyMismatchError as exc:
+            raise ProductCurrencyMismatchError(
+                exc.product_name, exc.product_currency, exc.document_currency
+            )
         return ExecutionResult(
             summary={
                 "invoice_number": format_invoice_number(invoice.invoice_number),

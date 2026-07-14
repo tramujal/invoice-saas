@@ -22,6 +22,8 @@ const KNOWN_CODES = new Set([
   "invoice_not_found",
   "customer_email_missing",
   "rate_limit_exceeded",
+  "currency_required",
+  "product_currency_mismatch",
 ]);
 
 export function assistantErrorMessageForCode(t: TranslateFn, code: string): string {

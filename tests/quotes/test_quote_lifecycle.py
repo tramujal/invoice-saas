@@ -22,6 +22,7 @@ def test_create_quote_via_api(client, db_session):
                 {"description": "Consulting", "quantity": "2", "unit_price": "50.00"}
             ],
             "customer_id": customer.id,
+            "currency_code": "USD",
         },
         headers=owner.auth_headers,
     )

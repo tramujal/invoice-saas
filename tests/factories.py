@@ -22,7 +22,7 @@ from app.models import (
     Product,
     User,
 )
-from app.schemas import InvoiceLineItemCreate, QuoteLineItemCreate
+from app.schemas import CurrencyCode, InvoiceLineItemCreate, QuoteLineItemCreate
 from app.security import create_access_token, hash_password
 from app.services.invoices import create_invoice_record
 from app.services.quotes import create_quote_record
@@ -122,9 +122,13 @@ def make_product(
     *,
     name: str = "Consulting",
     unit_price: Decimal = Decimal("100.00"),
+    currency_code: str = "USD",
 ) -> Product:
     product = Product(
-        organization_id=organization.id, name=name, default_unit_price=unit_price
+        organization_id=organization.id,
+        name=name,
+        default_unit_price=unit_price,
+        currency_code=currency_code,
     )
     db.add(product)
     db.commit()
@@ -141,6 +145,7 @@ def make_invoice(
     line_items: list[InvoiceLineItemCreate] | None = None,
     tax_rate: Decimal = Decimal("0"),
     due_date=None,
+    currency_code: CurrencyCode | None = CurrencyCode.USD,
 ):
     line_items = line_items or [
         InvoiceLineItemCreate(description="Line 1", quantity=Decimal("1"), unit_price=Decimal("100.00"))
@@ -150,7 +155,7 @@ def make_invoice(
         organization.id,
         actor,
         customer,
-        None,
+        currency_code,
         line_items,
         tax_rate,
         due_date=due_date,
@@ -167,6 +172,7 @@ def make_quote(
     tax_rate: Decimal = Decimal("0"),
     expiry_date=None,
     notes: str = "",
+    currency_code: CurrencyCode | None = CurrencyCode.USD,
 ):
     line_items = line_items or [
         QuoteLineItemCreate(description="Line 1", quantity=Decimal("1"), unit_price=Decimal("100.00"))
@@ -176,7 +182,7 @@ def make_quote(
         organization.id,
         actor,
         customer,
-        None,
+        currency_code,
         line_items,
         tax_rate,
         expiry_date=expiry_date,

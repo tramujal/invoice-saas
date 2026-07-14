@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.currency import resolve_default_currency_code
+from app.currency import resolve_document_currency_code
 from app.email.base import EmailAttachment, EmailMessage, EmailSendError
 from app.email.factory import get_email_sender
 from app.email.reminder_templates import (
@@ -36,7 +36,15 @@ from app.email.reminder_templates import (
 from app.email.templates import build_invoice_email
 from app.invoice_numbering import format_invoice_number, parse_invoice_number
 from app.invoice_pdf import render_invoice_pdf
-from app.models import Customer, Invoice, InvoiceLineItem, InvoiceReminder, Organization, User
+from app.models import (
+    Customer,
+    Invoice,
+    InvoiceLineItem,
+    InvoiceReminder,
+    Organization,
+    Product,
+    User,
+)
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.reminder_status import ReminderStatus
@@ -182,11 +190,16 @@ def create_invoice_record(
     # InvoiceLineItem.product_id's docstring) -- validated to resolve
     # within this organization here, but description/quantity/unit_price
     # below always come from `line_items` as given, never re-derived from
-    # the live product row.
+    # the live product row. The resolved Product rows are kept (rather than
+    # discarded) so their currency_code can feed resolve_document_currency_code
+    # below with no extra queries.
+    resolved_products_by_id: dict[str, Product] = {}
     for line in line_items:
         if line.product_id is not None:
             try:
-                get_product_in_org(db, organization_id, line.product_id)
+                resolved_products_by_id[line.product_id] = get_product_in_org(
+                    db, organization_id, line.product_id
+                )
             except ProductNotFoundError:
                 raise ProductNotFoundInOrgError(line.product_id)
 
@@ -217,10 +230,10 @@ def create_invoice_record(
 
     # Permanently pinned at creation time -- see Invoice.currency_code's
     # docstring in app/models.py. Neither is ever re-derived later.
-    resolved_currency_code = (
-        currency_code.value
-        if currency_code
-        else resolve_default_currency_code(customer, organization)
+    resolved_currency_code = resolve_document_currency_code(
+        currency_code.value if currency_code else None,
+        line_items,
+        resolved_products_by_id,
     )
     language = organization.language
 

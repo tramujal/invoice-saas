@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.currency import CurrencyRequiredError, ProductCurrencyMismatchError
 from app.database import get_db
 from app.deps import get_current_user, require_permission, require_verified_email
 from app.invoice_numbering import format_invoice_number
@@ -226,6 +227,25 @@ def create_quote(
                 "message": "One of the selected products was not found in this organization.",
             },
         )
+    except CurrencyRequiredError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "currency_required",
+                "message": "A currency is required when every line item is a manual line.",
+            },
+        )
+    except ProductCurrencyMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "product_currency_mismatch",
+                "message": (
+                    f"'{exc.product_name}' is priced in {exc.product_currency}, "
+                    f"but this document is in {exc.document_currency}."
+                ),
+            },
+        )
 
 
 @router.patch("/{quote_id}", response_model=QuoteResponse)
@@ -264,7 +284,11 @@ def update_quote(
             db,
             organization_id,
             quote,
-            line_items=changes.get("line_items"),
+            # Pulled from the still-typed `body` (not `changes`, which is a
+            # plain dict from model_dump()) -- update_quote_record and the
+            # totals/currency helpers it calls need real QuoteLineItemCreate
+            # objects with attribute access, not nested dicts.
+            line_items=body.line_items if "line_items" in changes else None,
             tax_rate=changes.get("tax_rate"),
             notes=changes.get("notes"),
             **customer_kwarg,
@@ -284,6 +308,25 @@ def update_quote(
             detail={
                 "code": "product_not_found",
                 "message": "One of the selected products was not found in this organization.",
+            },
+        )
+    except CurrencyRequiredError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "currency_required",
+                "message": "A currency is required when every line item is a manual line.",
+            },
+        )
+    except ProductCurrencyMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "product_currency_mismatch",
+                "message": (
+                    f"'{exc.product_name}' is priced in {exc.product_currency}, "
+                    f"but this document is in {exc.document_currency}."
+                ),
             },
         )
 

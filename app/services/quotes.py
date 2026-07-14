@@ -30,11 +30,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.currency import resolve_default_currency_code
+from app.currency import resolve_document_currency_code
 from app.email.base import EmailAttachment, EmailMessage, EmailSendError
 from app.email.factory import get_email_sender
 from app.email.quote_templates import build_quote_email, build_quote_reminder_email
-from app.models import Customer, Invoice, Organization, Quote, QuoteLineItem, QuoteReminder, User
+from app.models import (
+    Customer,
+    Invoice,
+    Organization,
+    Product,
+    Quote,
+    QuoteLineItem,
+    QuoteReminder,
+    User,
+)
 from app.org_time import get_organization_today
 from app.quote_effective_status import get_effective_quote_status
 from app.quote_numbering import format_quote_number, parse_quote_number
@@ -135,18 +144,24 @@ def get_customer_in_org(db: Session, organization_id: str, customer_id: str) -> 
 
 def _validate_line_item_products(
     db: Session, organization_id: str, line_items: list[QuoteLineItemCreate]
-) -> None:
+) -> dict[str, Product]:
     """A line's product_id is purely an analytics tag (see
     QuoteLineItem.product_id's docstring) -- validated to resolve within
     this organization here, but description/quantity/unit_price always
     come from `line_items` as given, never re-derived from the live
-    product row."""
+    product row. Returns the resolved Product rows keyed by id so callers
+    can feed them into resolve_document_currency_code with no extra
+    queries."""
+    resolved_products_by_id: dict[str, Product] = {}
     for line in line_items:
         if line.product_id is not None:
             try:
-                get_product_in_org(db, organization_id, line.product_id)
+                resolved_products_by_id[line.product_id] = get_product_in_org(
+                    db, organization_id, line.product_id
+                )
             except ProductNotFoundError:
                 raise ProductNotFoundInOrgError(line.product_id)
+    return resolved_products_by_id
 
 
 def create_quote_record(
@@ -164,7 +179,7 @@ def create_quote_record(
     creation time, exactly mirroring create_invoice_record. Totals are
     always recomputed here from `line_items` -- never accepted as a
     parameter."""
-    _validate_line_item_products(db, organization_id, line_items)
+    resolved_products_by_id = _validate_line_item_products(db, organization_id, line_items)
 
     # compute_invoice_totals is a pure function of any object exposing
     # .quantity/.unit_price -- QuoteLineItemCreate has the identical shape
@@ -192,10 +207,10 @@ def create_quote_record(
     quote_number = organization.next_quote_number
     organization.next_quote_number = quote_number + 1
 
-    resolved_currency_code = (
-        currency_code.value
-        if currency_code
-        else resolve_default_currency_code(customer, organization)
+    resolved_currency_code = resolve_document_currency_code(
+        currency_code.value if currency_code else None,
+        line_items,
+        resolved_products_by_id,
     )
     language = organization.language
 
@@ -291,7 +306,11 @@ def update_quote_record(
     effective_tax_rate = tax_rate if tax_rate is not None else quote.tax_rate
 
     if line_items is not None:
-        _validate_line_item_products(db, organization_id, line_items)
+        resolved_products_by_id = _validate_line_item_products(db, organization_id, line_items)
+        # The quote's currency is already pinned and immutable post-creation
+        # (see QuoteUpdateRequest -- it has no currency_code field), so this
+        # reduces to "every replacement product-linked line must match it."
+        resolve_document_currency_code(quote.currency_code, line_items, resolved_products_by_id)
         totals = compute_invoice_totals(line_items, effective_tax_rate)  # type: ignore[arg-type]
         quote.line_items = [
             QuoteLineItem(

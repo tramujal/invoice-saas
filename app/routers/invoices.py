@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.currency import CurrencyRequiredError, ProductCurrencyMismatchError
 from app.database import get_db
 from app.deps import get_current_user, require_permission, require_verified_email
 from app.insights.queries import DUE_SOON_WINDOW_DAYS
@@ -334,6 +335,25 @@ def create_invoice(
             detail={
                 "code": "product_not_found",
                 "message": "One of the selected products was not found in this organization.",
+            },
+        )
+    except CurrencyRequiredError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "currency_required",
+                "message": "A currency is required when every line item is a manual line.",
+            },
+        )
+    except ProductCurrencyMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "product_currency_mismatch",
+                "message": (
+                    f"'{exc.product_name}' is priced in {exc.product_currency}, "
+                    f"but this document is in {exc.document_currency}."
+                ),
             },
         )
 

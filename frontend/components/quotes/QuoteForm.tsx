@@ -3,39 +3,17 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
 import { apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import { formatCurrency, formatMoney, parseQuantity, parseUnitPrice, roundMoney } from "@/lib/money";
-import {
-  CURRENCY_CODES,
-  getCurrencyLabel,
-  resolveDefaultInvoiceCurrency,
-  type CurrencyCode,
-} from "@/lib/organization-settings";
-import type { Customer, PaginatedProducts, Product, Quote } from "@/lib/types";
+import { formatCurrency, formatMoney, parseQuantity, parseUnitPrice } from "@/lib/money";
+import { resolveDefaultInvoiceCurrency, type CurrencyCode } from "@/lib/organization-settings";
+import type { Customer, Quote } from "@/lib/types";
+import { useDocumentLines, type LineDraft } from "@/lib/use-document-lines";
 
 function todayDateString(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-type LineDraft = {
-  id: string;
-  description: string;
-  quantity: string;
-  unit_price: string;
-  product_id: string | null;
-};
-
-function newLineId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `line-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function defaultLine(id: string = newLineId()): LineDraft {
-  return { id, description: "", quantity: "1", unit_price: "0", product_id: null };
 }
 
 export type QuoteFormValues = {
@@ -55,23 +33,31 @@ type QuoteFormProps = {
   isSubmitting: boolean;
 };
 
+/** Seeds each of an existing quote's line items with its own client-only
+ * currency_code, set directly from the quote's pinned currency rather than
+ * looked up from a products cache -- this form no longer eagerly preloads
+ * the product catalog, so a lookup-based fallback would silently fail to
+ * resolve currency for essentially every pre-existing product-linked line
+ * on initial edit-mode load, not just archived/deleted ones. */
+function seedLinesFromQuote(quote: Quote): LineDraft[] {
+  const currency = (quote.currency_code as CurrencyCode) ?? "USD";
+  return quote.line_items.map((li, index) => ({
+    id: `initial-line-${index}`,
+    description: li.description,
+    quantity: li.quantity,
+    unit_price: li.unit_price,
+    product_id: li.product_id,
+    currency_code: currency,
+    default_tax_rate: null,
+  }));
+}
+
 export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting }: QuoteFormProps) {
   const { t } = useTranslation();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customerId, setCustomerId] = useState<string>(initialQuote?.customer_id ?? "");
-  const [taxPercent, setTaxPercent] = useState<string>(
-    initialQuote ? String(Number(initialQuote.tax_rate) * 100) : "0"
-  );
-  const [taxManuallySet, setTaxManuallySet] = useState(mode === "edit");
-
-  const [products, setProducts] = useState<Product[]>([]);
-  useEffect(() => {
-    apiFetch<PaginatedProducts>(`${orgPath("products")}?active=true&limit=100`)
-      .then((res) => setProducts(res.items))
-      .catch(() => setProducts([]));
-  }, []);
 
   const [orgCurrency, setOrgCurrency] = useState<string | null>(null);
   useEffect(() => {
@@ -87,35 +73,27 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
   }, []);
 
   const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
+  const defaultCurrency = resolveDefaultInvoiceCurrency(selectedCustomer, orgCurrency);
 
-  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(
-    (initialQuote?.currency_code as CurrencyCode) ?? "USD"
-  );
-  const [currencyManuallySet, setCurrencyManuallySet] = useState(mode === "edit");
-  useEffect(() => {
-    if (currencyManuallySet) return;
-    setCurrencyCode(resolveDefaultInvoiceCurrency(selectedCustomer, orgCurrency));
-  }, [selectedCustomer, orgCurrency, currencyManuallySet]);
-
-  // Line ids at first render must be stable across the server and client
-  // render passes (not crypto.randomUUID()) -- they're used as real DOM
-  // id/list attributes below (the product datalist), so two different
-  // random values would be a genuine React hydration mismatch. A plain
-  // index-derived id is fine here since uniqueness only needs to hold
-  // among rows simultaneously in the DOM; newLineId() (random) is still
-  // used for rows added later via addLine(), which only ever runs
-  // client-side in response to a click, after hydration has completed.
-  const [lines, setLines] = useState<LineDraft[]>(
-    initialQuote
-      ? initialQuote.line_items.map((li, index) => ({
-          id: `initial-line-${index}`,
-          description: li.description,
-          quantity: li.quantity,
-          unit_price: li.unit_price,
-          product_id: li.product_id,
-        }))
-      : [defaultLine("initial-line-0")]
-  );
+  const {
+    lines,
+    documentCurrency,
+    addProductLine,
+    addManualLine,
+    updateLine,
+    removeLine,
+    taxPercent,
+    onTaxPercentChange,
+    taxRateFraction,
+    lineAmounts,
+    subtotal,
+    taxAmount,
+    total,
+  } = useDocumentLines({
+    initialLines: initialQuote ? seedLinesFromQuote(initialQuote) : undefined,
+    initialTaxPercent: initialQuote ? String(Number(initialQuote.tax_rate) * 100) : undefined,
+    taxManuallySetInitially: mode === "edit",
+  });
 
   const issueDate = useMemo(() => initialQuote?.issue_date ?? todayDateString(), [initialQuote]);
   const [expiryDate, setExpiryDate] = useState<string>(initialQuote?.expiry_date ?? "");
@@ -123,84 +101,14 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const taxRateFraction = useMemo(() => {
-    const p = Number(taxPercent);
-    if (!Number.isFinite(p) || p < 0) return 0;
-    return Math.min(p, 100) / 100;
-  }, [taxPercent]);
-
-  const { lineAmounts, subtotal, taxAmount, total } = useMemo(() => {
-    const lineAmounts = lines.map((line) => {
-      const qty = parseQuantity(line.quantity);
-      const price = parseUnitPrice(line.unit_price);
-      if (qty === null || price === null) return null;
-      return roundMoney(qty * price);
-    });
-
-    const sub = lineAmounts.every((v) => v !== null)
-      ? roundMoney((lineAmounts as number[]).reduce((acc, v) => roundMoney(acc + v), 0))
-      : null;
-
-    const tax = sub !== null ? roundMoney(sub * taxRateFraction) : null;
-    const tot = sub !== null && tax !== null ? roundMoney(sub + tax) : null;
-
-    return { lineAmounts, subtotal: sub, taxAmount: tax, total: tot };
-  }, [lines, taxRateFraction]);
-
-  function updateLine(id: string, patch: Partial<Omit<LineDraft, "id">>) {
-    setLines((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
-  }
-
-  const productsForCurrency = useMemo(
-    () => products.filter((p) => p.currency_code === currencyCode),
-    [products, currencyCode]
-  );
-
-  function maybePrefillTaxFromLines(candidateLines: LineDraft[]) {
-    if (taxManuallySet) return;
-    const rates = new Set(
-      candidateLines
-        .map((l) => products.find((p) => p.id === l.product_id)?.default_tax_rate)
-        .filter((r): r is string => r !== undefined)
-    );
-    if (rates.size === 1) {
-      const rate = Number(Array.from(rates)[0]);
-      if (Number.isFinite(rate)) setTaxPercent(String(rate * 100));
-    }
-  }
-
-  function selectProduct(lineId: string, product: Product) {
-    setLines((prev) => {
-      const next = prev.map((row) =>
-        row.id === lineId
-          ? { ...row, description: product.name, unit_price: product.default_unit_price, product_id: product.id }
-          : row
-      );
-      maybePrefillTaxFromLines(next);
-      return next;
-    });
-  }
-
-  function handleDescriptionChange(lineId: string, value: string) {
-    const matched = productsForCurrency.find((p) => p.name === value);
-    if (matched) {
-      selectProduct(lineId, matched);
-    } else {
-      updateLine(lineId, { description: value, product_id: null });
-    }
-  }
-
-  function addLine() {
-    setLines((prev) => [...prev, defaultLine()]);
-  }
-
-  function removeLine(id: string) {
-    setLines((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.id !== id)));
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitError(null);
+
+    if (lines.length === 0) {
+      setSubmitError(t("lineItemPicker.errorAtLeastOneLine"));
+      return;
+    }
 
     const parsedLines = lines.map((line) => {
       const description = line.description.trim();
@@ -211,15 +119,15 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
 
     for (const row of parsedLines) {
       if (!row.description) {
-        setSubmitError(t("quoteForm.errorDescriptionRequired"));
+        setSubmitError(t("lineItemPicker.errorDescriptionRequired"));
         return;
       }
       if (row.quantity === null) {
-        setSubmitError(t("quoteForm.errorQuantityInvalid"));
+        setSubmitError(t("lineItemPicker.errorQuantityInvalid"));
         return;
       }
       if (row.unit_price === null) {
-        setSubmitError(t("quoteForm.errorUnitPriceInvalid"));
+        setSubmitError(t("lineItemPicker.errorUnitPriceInvalid"));
         return;
       }
     }
@@ -229,9 +137,12 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
       return;
     }
 
+    // documentCurrency is guaranteed non-null here: submit is blocked above
+    // whenever lines is empty, and a non-empty lines array always has a
+    // first line with its own currency_code (see useDocumentLines).
     await onSubmit({
       customer_id: customerId || null,
-      currency_code: currencyCode,
+      currency_code: documentCurrency as CurrencyCode,
       line_items: parsedLines as {
         description: string;
         quantity: number;
@@ -293,28 +204,6 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
               </p>
             ) : null}
           </div>
-
-          <div className="mt-4 max-w-xs">
-            <label htmlFor="currency" className="text-sm font-medium text-slate-700">
-              {t("common.currencyLabel")}
-            </label>
-            <select
-              id="currency"
-              value={currencyCode}
-              onChange={(e) => {
-                setCurrencyCode(e.target.value as CurrencyCode);
-                setCurrencyManuallySet(true);
-              }}
-              disabled={isSubmitting}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
-            >
-              {CURRENCY_CODES.map((code) => (
-                <option key={code} value={code}>
-                  {getCurrencyLabel(t, code)}
-                </option>
-              ))}
-            </select>
-          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
@@ -359,98 +248,17 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-              {t("quoteForm.lineItemsSectionTitle")}
-            </h2>
-            <button
-              type="button"
-              onClick={addLine}
-              disabled={isSubmitting}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed"
-            >
-              {t("quoteForm.addLine")}
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-4">
-            {lines.map((line, index) => (
-              <div key={line.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 sm:p-4">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {t("quoteForm.lineLabel", { number: index + 1 })}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeLine(line.id)}
-                    disabled={isSubmitting || lines.length <= 1}
-                    className="text-xs font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {t("common.remove")}
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:gap-4">
-                  <div className="sm:col-span-5">
-                    <label className="text-xs font-medium text-slate-600">{t("quoteForm.descriptionLabel")}</label>
-                    <input
-                      type="text"
-                      list={`quote-product-options-${line.id}`}
-                      value={line.description}
-                      onChange={(e) => handleDescriptionChange(line.id, e.target.value)}
-                      disabled={isSubmitting}
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
-                      placeholder={t("quoteForm.descriptionPlaceholder")}
-                      autoComplete="off"
-                    />
-                    <datalist id={`quote-product-options-${line.id}`}>
-                      {productsForCurrency.map((p) => (
-                        <option key={p.id} value={p.name} />
-                      ))}
-                    </datalist>
-                    {line.product_id ? (
-                      <p className="mt-1 text-xs text-slate-500">{t("quoteForm.productLinkedNote")}</p>
-                    ) : null}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 sm:col-span-4 sm:grid-cols-2">
-                    <div>
-                      <label className="text-xs font-medium text-slate-600">{t("quoteForm.qtyLabel")}</label>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.0001"
-                        value={line.quantity}
-                        onChange={(e) => updateLine(line.id, { quantity: e.target.value })}
-                        disabled={isSubmitting}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-slate-600">{t("quoteForm.unitPriceLabel")}</label>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        value={line.unit_price}
-                        onChange={(e) => updateLine(line.id, { unit_price: e.target.value })}
-                        disabled={isSubmitting}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
-                      />
-                    </div>
-                  </div>
-                  <div className="sm:col-span-3">
-                    <label className="text-xs font-medium text-slate-600">{t("quoteForm.lineTotalLabel")}</label>
-                    <div className="mt-1 flex h-[42px] items-center rounded-lg border border-dashed border-slate-200 bg-white px-3 text-sm font-medium text-slate-900">
-                      {lineAmounts[index] === null ? "—" : formatMoney(lineAmounts[index] as number)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        <LineItemsEditor
+          lines={lines}
+          documentCurrency={documentCurrency}
+          defaultCurrency={defaultCurrency}
+          lineAmounts={lineAmounts}
+          onAddProductLine={addProductLine}
+          onAddManualLine={addManualLine}
+          onUpdateLine={updateLine}
+          onRemoveLine={removeLine}
+          disabled={isSubmitting}
+        />
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -466,10 +274,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
                 max="100"
                 step="0.01"
                 value={taxPercent}
-                onChange={(e) => {
-                  setTaxPercent(e.target.value);
-                  setTaxManuallySet(true);
-                }}
+                onChange={(e) => onTaxPercentChange(e.target.value)}
                 disabled={isSubmitting}
                 className="mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 sm:max-w-none"
               />
@@ -482,19 +287,31 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-600">{t("invoices.colSubtotal")}</dt>
                 <dd className="font-medium text-slate-900">
-                  {subtotal === null ? "—" : formatCurrency(subtotal, currencyCode)}
+                  {subtotal === null
+                    ? "—"
+                    : documentCurrency
+                      ? formatCurrency(subtotal, documentCurrency)
+                      : formatMoney(subtotal)}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-600">{t("invoices.colTax")}</dt>
                 <dd className="font-medium text-slate-900">
-                  {taxAmount === null ? "—" : formatCurrency(taxAmount, currencyCode)}
+                  {taxAmount === null
+                    ? "—"
+                    : documentCurrency
+                      ? formatCurrency(taxAmount, documentCurrency)
+                      : formatMoney(taxAmount)}
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base">
                 <dt className="font-semibold text-slate-800">{t("invoices.colTotal")}</dt>
                 <dd className="font-semibold text-slate-900">
-                  {total === null ? "—" : formatCurrency(total, currencyCode)}
+                  {total === null
+                    ? "—"
+                    : documentCurrency
+                      ? formatCurrency(total, documentCurrency)
+                      : formatMoney(total)}
                 </dd>
               </div>
             </dl>

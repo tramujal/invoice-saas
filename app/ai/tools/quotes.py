@@ -21,17 +21,21 @@ from app.ai.tools.invoices import AiInvoiceLineItemInput, _resolve_customer_by_n
 from app.ai.tools.products import resolve_product_by_name
 from app.ai.tools.types import (
     ActionToolError,
+    CurrencyRequiredError,
     CustomerNotFoundError,
     ExecutionResult,
     LineItemIncompleteError,
+    ProductCurrencyMismatchError,
     ProposalResult,
     QuoteAlreadyConvertedError,
     QuoteCustomerEmailMissingError,
     QuoteNotAcceptedError,
     QuoteNotFoundError,
 )
-from app.currency import resolve_default_currency_code
-from app.models import Customer, Organization, User
+from app.currency import CurrencyRequiredError as ServiceCurrencyRequiredError
+from app.currency import ProductCurrencyMismatchError as ServiceProductCurrencyMismatchError
+from app.currency import resolve_document_currency_code
+from app.models import Customer, Product, User
 from app.quote_numbering import format_quote_number
 from app.schemas import CurrencyCode, QuoteLineItemCreate
 from app.services.invoices import compute_invoice_totals
@@ -71,16 +75,19 @@ def _resolve_quote(db: Session, organization_id: str, quote_reference: str):
 
 def _resolve_quote_line_items(
     db: Session, organization_id: str, lines: list[AiInvoiceLineItemInput]
-) -> list[QuoteLineItemCreate]:
+) -> tuple[list[QuoteLineItemCreate], dict[str, Product]]:
     """Same resolution logic as app.ai.tools.invoices._resolve_line_items,
     just producing QuoteLineItemCreate objects instead of
     InvoiceLineItemCreate -- reuses AiInvoiceLineItemInput (the model's
     input shape) and resolve_product_by_name (product resolution)
-    unchanged, since neither is invoice-specific."""
+    unchanged, since neither is invoice-specific. Also returns every
+    resolved Product keyed by id, for resolve_document_currency_code."""
     resolved: list[QuoteLineItemCreate] = []
+    resolved_products_by_id: dict[str, Product] = {}
     for line in lines:
         if line.product_name:
             product = resolve_product_by_name(db, organization_id, line.product_name)
+            resolved_products_by_id[product.id] = product
             description = line.description or product.name
             unit_price = (
                 line.unit_price if line.unit_price is not None else product.default_unit_price
@@ -106,7 +113,7 @@ def _resolve_quote_line_items(
                     product_id=None,
                 )
             )
-    return resolved
+    return resolved, resolved_products_by_id
 
 
 # --- create_quote_draft ------------------------------------------------------
@@ -127,7 +134,12 @@ class CreateQuoteDraftInput(BaseModel):
     )
     currency_code: CurrencyCode | None = Field(
         default=None,
-        description="ISO currency code. Omit to use the organization's default currency.",
+        description=(
+            "ISO currency code. Omit when every line item resolves to a catalog "
+            "product -- currency is inferred automatically from the first product's "
+            "own currency. Required when any line item is a manual (non-catalog) line, "
+            "since a manual line has no currency of its own to infer from."
+        ),
     )
 
 
@@ -153,16 +165,24 @@ class CreateQuoteDraftTool(ActionTool):
     ) -> ProposalResult:
         data = CreateQuoteDraftInput.model_validate(raw_input)
         customer = _resolve_customer_by_name(db, organization_id, data.customer_name)
-        resolved_line_items = _resolve_quote_line_items(db, organization_id, data.line_items)
+        resolved_line_items, resolved_products_by_id = _resolve_quote_line_items(
+            db, organization_id, data.line_items
+        )
 
         totals = compute_invoice_totals(resolved_line_items, data.tax_rate)  # type: ignore[arg-type]
 
-        organization = db.get(Organization, organization_id)
-        currency_code = (
-            data.currency_code.value
-            if data.currency_code
-            else resolve_default_currency_code(customer, organization)
-        )
+        try:
+            currency_code = resolve_document_currency_code(
+                data.currency_code.value if data.currency_code else None,
+                resolved_line_items,
+                resolved_products_by_id,
+            )
+        except ServiceCurrencyRequiredError:
+            raise CurrencyRequiredError()
+        except ServiceProductCurrencyMismatchError as exc:
+            raise ProductCurrencyMismatchError(
+                exc.product_name, exc.product_currency, exc.document_currency
+            )
 
         resolved = CreateQuoteDraftResolved(
             customer_id=customer.id,
@@ -199,15 +219,22 @@ class CreateQuoteDraftTool(ActionTool):
         except ServiceCustomerNotFoundInOrgError:
             raise CustomerNotFoundError(resolved.customer_id)
 
-        quote = create_quote_record(
-            db,
-            organization_id,
-            current_user,
-            customer,
-            resolved.currency_code,
-            resolved.line_items,
-            resolved.tax_rate,
-        )
+        try:
+            quote = create_quote_record(
+                db,
+                organization_id,
+                current_user,
+                customer,
+                resolved.currency_code,
+                resolved.line_items,
+                resolved.tax_rate,
+            )
+        except ServiceCurrencyRequiredError:
+            raise CurrencyRequiredError()
+        except ServiceProductCurrencyMismatchError as exc:
+            raise ProductCurrencyMismatchError(
+                exc.product_name, exc.product_currency, exc.document_currency
+            )
         return ExecutionResult(
             summary={
                 "quote_number": format_quote_number(quote.quote_number),
