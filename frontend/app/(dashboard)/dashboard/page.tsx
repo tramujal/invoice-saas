@@ -17,6 +17,9 @@ import { TopCustomersChart } from "@/components/dashboard/TopCustomersChart";
 import { TopProductsChart } from "@/components/dashboard/TopProductsChart";
 import { TopServicesChart } from "@/components/dashboard/TopServicesChart";
 import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
+import { ButtonLink } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -135,20 +138,37 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            {t("dashboard.title")}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">{t("dashboard.subtitle")}</p>
-        </div>
-        <CurrencySelector
-          currencies={availableCurrencies}
-          selected={effectiveCurrency}
-          onSelect={setSelectedCurrency}
-          t={t}
-        />
-      </header>
+      <PageHeader
+        title={t("dashboard.title")}
+        subtitle={t("dashboard.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <rect x="3" y="3" width="7" height="9" rx="1" />
+            <rect x="14" y="3" width="7" height="5" rx="1" />
+            <rect x="14" y="12" width="7" height="9" rx="1" />
+            <rect x="3" y="16" width="7" height="5" rx="1" />
+          </svg>
+        }
+        actions={
+          <CurrencySelector
+            currencies={availableCurrencies}
+            selected={effectiveCurrency}
+            onSelect={setSelectedCurrency}
+            t={t}
+          />
+        }
+      />
 
       <BusinessInsightsSection />
 
@@ -177,18 +197,76 @@ export default function DashboardPage() {
           }
           description={t("dashboard.totalRevenueDescription")}
           loading={loading}
+          tone="success"
+          icon={
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M12 2v20" />
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+          }
         />
         <DashboardCard
           title={t("dashboard.totalInvoicesTitle")}
           value={data ? String(data.total_invoices) : "—"}
           description={t("dashboard.totalInvoicesDescription")}
           loading={loading}
+          tone="info"
+          icon={
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+              <path d="M14 2v6h6" />
+              <path d="M9 13h6" />
+              <path d="M9 17h6" />
+            </svg>
+          }
         />
         <DashboardCard
           title={t("dashboard.totalCustomersTitle")}
           value={data ? String(data.total_customers) : "—"}
           description={t("dashboard.totalCustomersDescription")}
           loading={loading}
+          tone="info"
+          icon={
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          }
         />
       </section>
 
@@ -209,20 +287,15 @@ export default function DashboardPage() {
       <TeamWidget team={analytics?.team ?? null} loading={loading} />
 
       {showEmpty ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center">
-          <h3 className="text-base font-semibold text-slate-900">
-            {t("dashboard.emptyTitle")}
-          </h3>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-slate-600">
-            {t("dashboard.emptyDescription")}
-          </p>
-          <Link
-            href="/invoices/new"
-            className="mt-5 inline-flex rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            {t("dashboard.createInvoiceCta")}
-          </Link>
-        </div>
+        <EmptyState
+          title={t("dashboard.emptyTitle")}
+          description={t("dashboard.emptyDescription")}
+          action={
+            <ButtonLink href="/invoices/new" size="sm">
+              {t("dashboard.createInvoiceCta")}
+            </ButtonLink>
+          }
+        />
       ) : (
         <>
           <section

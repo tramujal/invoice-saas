@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Textarea } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
@@ -178,14 +180,14 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
             <label htmlFor="prod-name" className="text-sm font-medium text-slate-700">
               {t("common.name")} <span className="text-red-600">*</span>
             </label>
-            <input
+            <Input
               id="prod-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={disabled}
               maxLength={LIMITS.name}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
               aria-invalid={Boolean(fieldErrors.name)}
               aria-describedby={fieldErrors.name ? "prod-name-err" : undefined}
             />
@@ -200,14 +202,14 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
             <label htmlFor="prod-description" className="text-sm font-medium text-slate-700">
               {t("products.descriptionLabel")}
             </label>
-            <textarea
+            <Textarea
               id="prod-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               disabled={disabled}
               maxLength={LIMITS.description}
               rows={2}
-              className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1 resize-y"
               aria-invalid={Boolean(fieldErrors.description)}
               aria-describedby={fieldErrors.description ? "prod-description-err" : undefined}
             />
@@ -222,33 +224,33 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
             <label htmlFor="prod-type" className="text-sm font-medium text-slate-700">
               {t("products.typeLabel")}
             </label>
-            <select
+            <Select
               id="prod-type"
               value={type}
               onChange={(e) => setType(e.target.value as ProductType)}
               disabled={disabled}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
             >
               {PRODUCT_TYPES.map((option) => (
                 <option key={option} value={option}>
                   {getProductTypeLabel(t, option)}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>
             <label htmlFor="prod-sku" className="text-sm font-medium text-slate-700">
               {t("products.skuLabel")}
             </label>
-            <input
+            <Input
               id="prod-sku"
               type="text"
               value={sku}
               onChange={(e) => setSku(e.target.value)}
               disabled={disabled}
               maxLength={LIMITS.sku}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
               aria-invalid={Boolean(fieldErrors.sku)}
               aria-describedby={fieldErrors.sku ? "prod-sku-err" : undefined}
             />
@@ -263,7 +265,7 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
             <label htmlFor="prod-price" className="text-sm font-medium text-slate-700">
               {t("products.defaultPriceLabel")}
             </label>
-            <input
+            <Input
               id="prod-price"
               type="number"
               inputMode="decimal"
@@ -272,7 +274,7 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
               value={unitPrice}
               onChange={(e) => setUnitPrice(e.target.value)}
               disabled={disabled}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
             />
           </div>
 
@@ -280,26 +282,26 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
             <label htmlFor="prod-currency" className="text-sm font-medium text-slate-700">
               {t("common.currencyLabel")}
             </label>
-            <select
+            <Select
               id="prod-currency"
               value={currencyCode}
               onChange={(e) => setCurrencyCode(e.target.value as CurrencyCode)}
               disabled={disabled}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
             >
               {CURRENCY_CODES.map((code) => (
                 <option key={code} value={code}>
                   {getCurrencyLabel(t, code)}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>
             <label htmlFor="prod-tax-rate" className="text-sm font-medium text-slate-700">
               {t("products.defaultTaxRateLabel")}
             </label>
-            <input
+            <Input
               id="prod-tax-rate"
               type="number"
               inputMode="decimal"
@@ -309,31 +311,27 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
               value={taxPercent}
               onChange={(e) => setTaxPercent(e.target.value)}
               disabled={disabled}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
             />
           </div>
         </div>
 
         <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={disabled}
             onClick={() => (isEditing ? onCancel?.() : resetForm())}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isEditing ? t("common.cancel") : t("common.clear")}
-          </button>
-          <button
-            type="submit"
-            disabled={disabled}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          </Button>
+          <Button type="submit" disabled={disabled}>
             {isSubmitting
               ? t("common.saving")
               : isEditing
                 ? t("common.saveChanges")
                 : t("products.createButton")}
-          </button>
+          </Button>
         </div>
       </form>
     </section>

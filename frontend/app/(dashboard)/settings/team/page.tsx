@@ -4,11 +4,22 @@ import { useCallback, useEffect, useState } from "react";
 
 import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { InviteMemberForm } from "@/components/team/InviteMemberForm";
+import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
   STICKY_ACTIONS_TD_CLASS,
   STICKY_ACTIONS_TH_CLASS,
 } from "@/components/ui/RowActionsMenu";
+import {
+  TABLE_BODY_CLASS,
+  TABLE_CELL_CLASS,
+  TABLE_CLASS,
+  TABLE_HEAD_CELL_CLASS,
+  TABLE_HEAD_CLASS,
+  TABLE_ROW_CLASS,
+} from "@/components/ui/TableShell";
 import { useToast } from "@/components/ui/toast";
 import { getUserEmail } from "@/lib/auth-storage";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
@@ -178,10 +189,29 @@ export default function TeamPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{t("team.title")}</h1>
-        <p className="mt-1 text-sm text-slate-500">{t("team.subtitle")}</p>
-      </header>
+      <PageHeader
+        title={t("team.title")}
+        subtitle={t("team.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+        }
+      />
 
       <SettingsSubNav />
 
@@ -200,13 +230,13 @@ export default function TeamPage() {
           </h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-3 sm:px-6">{t("common.email")}</th>
-                <th className="px-4 py-3">{t("team.roleLabel")}</th>
-                <th className="hidden px-4 py-3 sm:table-cell">{t("team.statusLabel")}</th>
-                <th className="hidden px-4 py-3 md:table-cell">{t("team.joinedLabel")}</th>
+          <table className={TABLE_CLASS}>
+            <thead className={TABLE_HEAD_CLASS}>
+              <tr>
+                <th className={TABLE_HEAD_CELL_CLASS}>{t("common.email")}</th>
+                <th className={TABLE_HEAD_CELL_CLASS}>{t("team.roleLabel")}</th>
+                <th className={`hidden ${TABLE_HEAD_CELL_CLASS} sm:table-cell`}>{t("team.statusLabel")}</th>
+                <th className={`hidden ${TABLE_HEAD_CELL_CLASS} md:table-cell`}>{t("team.joinedLabel")}</th>
                 {canManageMembers ? (
                   <th className={STICKY_ACTIONS_TH_CLASS}>
                     <span className="sr-only">{t("team.colActions")}</span>
@@ -214,16 +244,16 @@ export default function TeamPage() {
                 ) : null}
               </tr>
             </thead>
-            <tbody>
+            <tbody className={TABLE_BODY_CLASS}>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400 sm:px-6">
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500 sm:px-6">
                     {t("team.loading")}
                   </td>
                 </tr>
               ) : !members || members.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400 sm:px-6">
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500 sm:px-6">
                     {t("team.noMembers")}
                   </td>
                 </tr>
@@ -232,22 +262,20 @@ export default function TeamPage() {
                   const isSelf = member.user_email === userEmail;
                   const rowBusy = busyId === member.id;
                   return (
-                    <tr key={member.id} className="group border-b border-slate-50 last:border-0 hover:bg-slate-50/80">
-                      <td className="max-w-[180px] truncate px-4 py-3 sm:px-6" title={member.user_email}>
+                    <tr key={member.id} className={TABLE_ROW_CLASS}>
+                      <td className={`max-w-[180px] truncate ${TABLE_CELL_CLASS}`} title={member.user_email}>
                         <span className="font-medium text-slate-900">{member.user_email}</span>
                         {isSelf ? (
                           <span className="ml-2 text-xs text-slate-400">{t("team.youLabel")}</span>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${MEMBERSHIP_ROLE_BADGE_CLASS[member.role]}`}
-                        >
+                      <td className={TABLE_CELL_CLASS}>
+                        <Badge className={MEMBERSHIP_ROLE_BADGE_CLASS[member.role]}>
                           {getMembershipRoleLabel(t, member.role)}
-                        </span>
+                        </Badge>
                       </td>
-                      <td className="hidden px-4 py-3 text-slate-600 sm:table-cell">{statusLabel(t, member.status)}</td>
-                      <td className="hidden px-4 py-3 text-slate-600 md:table-cell">
+                      <td className={`hidden ${TABLE_CELL_CLASS} text-slate-600 sm:table-cell`}>{statusLabel(t, member.status)}</td>
+                      <td className={`hidden ${TABLE_CELL_CLASS} text-slate-600 md:table-cell`}>
                         {new Date(member.accepted_at).toLocaleDateString()}
                       </td>
                       {canManageMembers ? (
@@ -311,48 +339,46 @@ export default function TeamPage() {
             </h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-500">
-                  <th className="px-4 py-3 sm:px-6">{t("common.email")}</th>
-                  <th className="px-4 py-3">{t("team.roleLabel")}</th>
-                  <th className="hidden px-4 py-3 sm:table-cell">{t("team.invitedByLabel")}</th>
-                  <th className="hidden px-4 py-3 md:table-cell">{t("team.expiresLabel")}</th>
+            <table className={TABLE_CLASS}>
+              <thead className={TABLE_HEAD_CLASS}>
+                <tr>
+                  <th className={TABLE_HEAD_CELL_CLASS}>{t("common.email")}</th>
+                  <th className={TABLE_HEAD_CELL_CLASS}>{t("team.roleLabel")}</th>
+                  <th className={`hidden ${TABLE_HEAD_CELL_CLASS} sm:table-cell`}>{t("team.invitedByLabel")}</th>
+                  <th className={`hidden ${TABLE_HEAD_CELL_CLASS} md:table-cell`}>{t("team.expiresLabel")}</th>
                   <th className={STICKY_ACTIONS_TH_CLASS}>
                     <span className="sr-only">{t("team.colActions")}</span>
                   </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className={TABLE_BODY_CLASS}>
                 {!invitations || invitations.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400 sm:px-6">
-                      {t("team.noPendingInvitations")}
+                    <td colSpan={5} className="px-4 py-6 sm:px-6">
+                      <EmptyState
+                        title={t("team.emptyInvitationsTitle")}
+                        description={t("team.emptyInvitationsDescription")}
+                      />
                     </td>
                   </tr>
                 ) : (
                   invitations.map((invitation) => {
                     const rowBusy = busyId === invitation.id;
                     return (
-                      <tr
-                        key={invitation.id}
-                        className="group border-b border-slate-50 last:border-0 hover:bg-slate-50/80"
-                      >
+                      <tr key={invitation.id} className={TABLE_ROW_CLASS}>
                         <td
-                          className="max-w-[180px] truncate px-4 py-3 font-medium text-slate-900 sm:px-6"
+                          className={`max-w-[180px] truncate font-medium text-slate-900 ${TABLE_CELL_CLASS}`}
                           title={invitation.email}
                         >
                           {invitation.email}
                         </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${MEMBERSHIP_ROLE_BADGE_CLASS[invitation.role]}`}
-                          >
+                        <td className={TABLE_CELL_CLASS}>
+                          <Badge className={MEMBERSHIP_ROLE_BADGE_CLASS[invitation.role]}>
                             {getMembershipRoleLabel(t, invitation.role)}
-                          </span>
+                          </Badge>
                         </td>
-                        <td className="hidden px-4 py-3 text-slate-600 sm:table-cell">{invitation.created_by_email ?? "—"}</td>
-                        <td className="hidden px-4 py-3 text-slate-600 md:table-cell">
+                        <td className={`hidden ${TABLE_CELL_CLASS} text-slate-600 sm:table-cell`}>{invitation.created_by_email ?? "—"}</td>
+                        <td className={`hidden ${TABLE_CELL_CLASS} text-slate-600 md:table-cell`}>
                           {new Date(invitation.expires_at).toLocaleDateString()}
                         </td>
                         <td className={STICKY_ACTIONS_TD_CLASS}>

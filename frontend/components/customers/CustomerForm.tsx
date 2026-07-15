@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Input, Textarea } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
@@ -179,7 +181,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
             <label htmlFor="cust-name" className="text-sm font-medium text-slate-700">
               {t("common.name")} <span className="text-red-600">*</span>
             </label>
-            <input
+            <Input
               id="cust-name"
               type="text"
               name="name"
@@ -188,7 +190,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
               disabled={disabled}
               maxLength={LIMITS.name}
               autoComplete="name"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
               aria-invalid={Boolean(fieldErrors.name)}
               aria-describedby={fieldErrors.name ? "cust-name-err" : undefined}
             />
@@ -203,7 +205,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
             <label htmlFor="cust-email" className="text-sm font-medium text-slate-700">
               {t("common.email")} <span className="text-red-600">*</span>
             </label>
-            <input
+            <Input
               id="cust-email"
               type="email"
               name="email"
@@ -212,7 +214,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
               disabled={disabled}
               maxLength={LIMITS.email}
               autoComplete="email"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
               aria-invalid={Boolean(fieldErrors.email)}
               aria-describedby={fieldErrors.email ? "cust-email-err" : undefined}
             />
@@ -228,7 +230,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
               <label htmlFor="cust-phone" className="text-sm font-medium text-slate-700">
                 {t("common.phone")}
               </label>
-              <input
+              <Input
                 id="cust-phone"
                 type="tel"
                 name="phone"
@@ -237,7 +239,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
                 disabled={disabled}
                 maxLength={LIMITS.phone}
                 autoComplete="tel"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
                 aria-invalid={Boolean(fieldErrors.phone)}
                 aria-describedby={fieldErrors.phone ? "cust-phone-err" : undefined}
               />
@@ -252,7 +254,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
               <label htmlFor="cust-address" className="text-sm font-medium text-slate-700">
                 {t("common.address")}
               </label>
-              <textarea
+              <Textarea
                 id="cust-address"
                 name="address"
                 value={address}
@@ -260,7 +262,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
                 disabled={disabled}
                 maxLength={LIMITS.address}
                 rows={3}
-                className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1 resize-y"
                 aria-invalid={Boolean(fieldErrors.address)}
                 aria-describedby={fieldErrors.address ? "cust-address-err" : undefined}
               />
@@ -275,7 +277,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
               <label htmlFor="cust-tax-id" className="text-sm font-medium text-slate-700">
                 {t("customers.taxIdLabel")}
               </label>
-              <input
+              <Input
                 id="cust-tax-id"
                 type="text"
                 name="tax_id"
@@ -283,7 +285,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
                 onChange={(e) => setTaxId(e.target.value)}
                 disabled={disabled}
                 maxLength={LIMITS.tax_id}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
                 aria-invalid={Boolean(fieldErrors.tax_id)}
                 aria-describedby={fieldErrors.tax_id ? "cust-tax-id-err" : undefined}
               />
@@ -297,19 +299,15 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
         </div>
 
         <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={disabled}
             onClick={() => (isEditing ? onCancel?.() : resetForm())}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isEditing ? t("common.cancel") : t("common.clear")}
-          </button>
-          <button
-            type="submit"
-            disabled={disabled}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          </Button>
+          <Button type="submit" disabled={disabled}>
             {isSubmitting ? (
               <>
                 <svg
@@ -340,7 +338,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
             ) : (
               t("customers.createButton")
             )}
-          </button>
+          </Button>
         </div>
       </form>
     </section>

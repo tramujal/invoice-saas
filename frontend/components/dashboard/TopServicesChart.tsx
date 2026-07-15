@@ -72,7 +72,7 @@ export function TopServicesChart({ data, loading = false }: TopServicesChartProp
               <Bar
                 dataKey="revenue"
                 name={t("dashboard.revenueLabel")}
-                fill="#7c3aed"
+                fill="#475569"
                 radius={[0, 4, 4, 0]}
                 maxBarSize={24}
               />

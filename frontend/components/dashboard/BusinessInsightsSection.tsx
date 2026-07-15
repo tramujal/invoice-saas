@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { InsightCard } from "@/components/dashboard/InsightCard";
+import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { isRateLimitedError } from "@/lib/format-api-error";
@@ -80,14 +81,16 @@ export function BusinessInsightsSection() {
           ) : null}
         </div>
         {data?.ai_available ? (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void load({ refresh: true })}
             disabled={refreshing || loading}
-            className="self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
+            className="self-start sm:self-auto"
           >
             {refreshing ? t("dashboard.insights.refreshing") : t("dashboard.insights.refresh")}
-          </button>
+          </Button>
         ) : null}
       </div>
 

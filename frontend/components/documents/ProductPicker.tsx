@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { Input } from "@/components/ui/Input";
 import { apiFetch, orgPath } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatCurrency } from "@/lib/money";
@@ -205,7 +206,7 @@ export function ProductPicker({
       className="z-50 max-h-96 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg ring-1 ring-black/5"
     >
       <div className="border-b border-slate-100 p-2">
-        <input
+        <Input
           ref={inputRef}
           type="text"
           role="combobox"
@@ -217,7 +218,6 @@ export function ProductPicker({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleInputKeyDown}
           placeholder={t("lineItemPicker.searchPlaceholder")}
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
         />
       </div>
       <div

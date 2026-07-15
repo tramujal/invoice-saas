@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequirementsChecklist";
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { ApiError, authRequest } from "@/lib/api";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { isAuthenticated, setAuthSession } from "@/lib/auth-storage";
@@ -174,11 +176,11 @@ function LoginForm() {
             >
               {t("common.email")}
             </label>
-            <input
+            <Input
               id="email"
               type="email"
               autoComplete="email"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+              className="mt-1"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t("auth.emailPlaceholder")}
@@ -192,11 +194,11 @@ function LoginForm() {
             >
               {t("auth.passwordLabel")}
             </label>
-            <input
+            <Input
               id="password"
               type="password"
               autoComplete={mode === "login" ? "current-password" : "new-password"}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+              className="mt-1"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={mode === "register" ? t("auth.passwordPlaceholderRegister") : "••••••••"}
@@ -222,11 +224,11 @@ function LoginForm() {
               >
                 {t("auth.organizationNameLabel")}
               </label>
-              <input
+              <Input
                 id="organizationName"
                 type="text"
                 autoComplete="organization"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                className="mt-1"
                 value={organizationName}
                 onChange={(e) => setOrganizationName(e.target.value)}
                 placeholder={t("auth.organizationNamePlaceholder")}
@@ -239,10 +241,10 @@ function LoginForm() {
             <summary className="cursor-pointer select-none font-medium text-slate-600 hover:text-slate-800">
               {t("auth.advancedSummary")}
             </summary>
-            <input
+            <Input
               type="url"
               autoComplete="off"
-              className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+              className="mt-2"
               value={apiBaseUrl}
               onChange={(e) => setApiBaseUrl(e.target.value)}
               placeholder="http://127.0.0.1:8000"
@@ -256,11 +258,7 @@ function LoginForm() {
             </p>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          <Button type="submit" disabled={isSubmitting} className="w-full">
             {isSubmitting
               ? mode === "login"
                 ? t("auth.signingIn")
@@ -268,7 +266,7 @@ function LoginForm() {
               : mode === "login"
                 ? t("auth.signIn")
                 : t("auth.createAccount")}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

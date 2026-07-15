@@ -1,10 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { PaymentStatusSelect } from "@/components/invoices/PaymentStatusSelect";
+import { ButtonLink } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
+import { Input, Select } from "@/components/ui/Input";
+import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
   STICKY_ACTIONS_TD_CLASS,
@@ -55,12 +59,6 @@ type PaymentStatusFilter = PaymentStatus | "all";
 type DateRangePreset = "all" | "today" | "week" | "month" | "year";
 type DueFilter = "all" | "overdue" | "due_soon" | "no_due_date";
 type InvoiceSortBy = "invoice_number" | "created_at" | "total" | "customer_name";
-
-const selectClass =
-  "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-400 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-50";
-
-const numberInputClass =
-  "w-28 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-50";
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -134,6 +132,67 @@ function InvoicesContent() {
     maxTotal.trim() !== "";
   const isDefaultState =
     !hasActiveFilters && sortBy === "created_at" && sortDir === "desc";
+
+  const dateRangeLabels: Record<DateRangePreset, string> = {
+    all: t("invoices.dateAll"),
+    today: t("invoices.dateToday"),
+    week: t("invoices.dateWeek"),
+    month: t("invoices.dateMonth"),
+    year: t("invoices.dateYear"),
+  };
+  const dueFilterLabels: Record<DueFilter, string> = {
+    all: t("invoices.dueFilterAll"),
+    overdue: t("invoices.dueFilterOverdue"),
+    due_soon: t("invoices.dueFilterDueSoon"),
+    no_due_date: t("invoices.dueFilterNoDueDate"),
+  };
+
+  const filterChips: ActiveFilterChip[] = [];
+  if (paymentStatus !== "all") {
+    const label = `${t("invoices.filterChipStatus")}: ${getPaymentStatusLabel(t, paymentStatus)}`;
+    filterChips.push({
+      key: "status",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setPaymentStatus)("all"),
+    });
+  }
+  if (dateRange !== "all") {
+    const label = `${t("invoices.filterChipDate")}: ${dateRangeLabels[dateRange]}`;
+    filterChips.push({
+      key: "date",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setDateRange)("all"),
+    });
+  }
+  if (dueFilter !== "all") {
+    const label = `${t("invoices.filterChipDue")}: ${dueFilterLabels[dueFilter]}`;
+    filterChips.push({
+      key: "due",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setDueFilter)("all"),
+    });
+  }
+  if (minTotal.trim() !== "") {
+    const label = `${t("invoices.filterChipMin")}: ${minTotal.trim()}`;
+    filterChips.push({
+      key: "min",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setMinTotal)(""),
+    });
+  }
+  if (maxTotal.trim() !== "") {
+    const label = `${t("invoices.filterChipMax")}: ${maxTotal.trim()}`;
+    filterChips.push({
+      key: "max",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setMaxTotal)(""),
+    });
+  }
 
   function resetToFirstPage<T>(setter: (v: T) => void) {
     return (value: T) => {
@@ -337,129 +396,118 @@ function InvoicesContent() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            {t("invoices.title")}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">{t("invoices.subtitle")}</p>
-        </div>
-        <Link
-          href="/invoices/new"
-          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 sm:mt-0"
+      <PageHeader
+        title={t("invoices.title")}
+        subtitle={t("invoices.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            <path d="M14 2v6h6" />
+            <path d="M9 13h6" />
+            <path d="M9 17h6" />
+          </svg>
+        }
+        actions={
+          <ButtonLink href="/invoices/new" className="shrink-0">
+            {t("invoices.newInvoice")}
+          </ButtonLink>
+        }
+      />
+
+      <FilterToolbar
+        searchValue={search}
+        onSearchChange={resetToFirstPage(setSearch)}
+        searchPlaceholder={t("invoices.searchPlaceholder")}
+        searchAriaLabel={t("invoices.searchAriaLabel")}
+        onReset={resetFilters}
+        resetLabel={t("invoices.resetFilters")}
+        isDefaultState={isDefaultState}
+        filtersLabel={t("common.filters")}
+        chips={filterChips}
+      >
+        <Select
+          value={paymentStatus}
+          onChange={(e) =>
+            resetToFirstPage(setPaymentStatus)(e.target.value as PaymentStatusFilter)
+          }
+          fullWidth={false}
+          aria-label={t("invoices.filterStatusAriaLabel")}
         >
-          {t("invoices.newInvoice")}
-        </Link>
-      </header>
+          <option value="all">{t("invoices.allStatuses")}</option>
+          {PAYMENT_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {getPaymentStatusLabel(t, status)}
+            </option>
+          ))}
+        </Select>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="invoice-search" className="sr-only">
-              {t("invoices.searchAriaLabel")}
-            </label>
-            <input
-              id="invoice-search"
-              type="search"
-              value={search}
-              onChange={(e) => resetToFirstPage(setSearch)(e.target.value)}
-              placeholder={t("invoices.searchPlaceholder")}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2"
-            />
-          </div>
+        <Select
+          value={dateRange}
+          onChange={(e) => resetToFirstPage(setDateRange)(e.target.value as DateRangePreset)}
+          fullWidth={false}
+          aria-label={t("invoices.filterDateAriaLabel")}
+        >
+          <option value="all">{t("invoices.dateAll")}</option>
+          <option value="today">{t("invoices.dateToday")}</option>
+          <option value="week">{t("invoices.dateWeek")}</option>
+          <option value="month">{t("invoices.dateMonth")}</option>
+          <option value="year">{t("invoices.dateYear")}</option>
+        </Select>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={paymentStatus}
-              onChange={(e) =>
-                resetToFirstPage(setPaymentStatus)(
-                  e.target.value as PaymentStatusFilter
-                )
-              }
-              className={selectClass}
-              aria-label={t("invoices.filterStatusAriaLabel")}
-            >
-              <option value="all">{t("invoices.allStatuses")}</option>
-              {PAYMENT_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {getPaymentStatusLabel(t, status)}
-                </option>
-              ))}
-            </select>
+        <Select
+          value={dueFilter}
+          onChange={(e) => resetToFirstPage(setDueFilter)(e.target.value as DueFilter)}
+          fullWidth={false}
+          aria-label={t("invoices.dueFilterAriaLabel")}
+        >
+          <option value="all">{t("invoices.dueFilterAll")}</option>
+          <option value="overdue">{t("invoices.dueFilterOverdue")}</option>
+          <option value="due_soon">{t("invoices.dueFilterDueSoon")}</option>
+          <option value="no_due_date">{t("invoices.dueFilterNoDueDate")}</option>
+        </Select>
 
-            <select
-              value={dateRange}
-              onChange={(e) =>
-                resetToFirstPage(setDateRange)(e.target.value as DateRangePreset)
-              }
-              className={selectClass}
-              aria-label={t("invoices.filterDateAriaLabel")}
-            >
-              <option value="all">{t("invoices.dateAll")}</option>
-              <option value="today">{t("invoices.dateToday")}</option>
-              <option value="week">{t("invoices.dateWeek")}</option>
-              <option value="month">{t("invoices.dateMonth")}</option>
-              <option value="year">{t("invoices.dateYear")}</option>
-            </select>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={minTotal}
+          onChange={(e) => resetToFirstPage(setMinTotal)(e.target.value)}
+          placeholder={t("invoices.minTotalPlaceholder")}
+          aria-label={t("invoices.minTotalAriaLabel")}
+          fullWidth={false} className="w-28"
+        />
+        <Input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={maxTotal}
+          onChange={(e) => resetToFirstPage(setMaxTotal)(e.target.value)}
+          placeholder={t("invoices.maxTotalPlaceholder")}
+          aria-label={t("invoices.maxTotalAriaLabel")}
+          fullWidth={false} className="w-28"
+        />
 
-            <select
-              value={dueFilter}
-              onChange={(e) =>
-                resetToFirstPage(setDueFilter)(e.target.value as DueFilter)
-              }
-              className={selectClass}
-              aria-label={t("invoices.dueFilterAriaLabel")}
-            >
-              <option value="all">{t("invoices.dueFilterAll")}</option>
-              <option value="overdue">{t("invoices.dueFilterOverdue")}</option>
-              <option value="due_soon">{t("invoices.dueFilterDueSoon")}</option>
-              <option value="no_due_date">{t("invoices.dueFilterNoDueDate")}</option>
-            </select>
-
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={minTotal}
-              onChange={(e) => resetToFirstPage(setMinTotal)(e.target.value)}
-              placeholder={t("invoices.minTotalPlaceholder")}
-              aria-label={t("invoices.minTotalAriaLabel")}
-              className={numberInputClass}
-            />
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={maxTotal}
-              onChange={(e) => resetToFirstPage(setMaxTotal)(e.target.value)}
-              placeholder={t("invoices.maxTotalPlaceholder")}
-              aria-label={t("invoices.maxTotalAriaLabel")}
-              className={numberInputClass}
-            />
-
-            <SortControl
-              fields={sortFields}
-              sortBy={sortBy}
-              sortDir={sortDir}
-              onSortByChange={resetToFirstPage((v: string) =>
-                setSortBy(v as InvoiceSortBy)
-              )}
-              onSortDirChange={resetToFirstPage(setSortDir)}
-            />
-
-            <button
-              type="button"
-              onClick={resetFilters}
-              disabled={isDefaultState}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t("invoices.resetFilters")}
-            </button>
-          </div>
-        </div>
-      </section>
+        <SortControl
+          fields={sortFields}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSortByChange={resetToFirstPage((v: string) => setSortBy(v as InvoiceSortBy))}
+          onSortDirChange={resetToFirstPage(setSortDir)}
+        />
+      </FilterToolbar>
 
       {error ? (
         <div
@@ -473,22 +521,22 @@ function InvoicesContent() {
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-700">
               <tr>
-                <th className="px-4 py-3 sm:px-6">{t("invoices.colInvoice")}</th>
-                <th className="hidden px-4 py-3 sm:table-cell sm:px-6">
+                <th className="px-4 py-2.5 sm:px-6">{t("invoices.colInvoice")}</th>
+                <th className="hidden px-4 py-2.5 sm:table-cell sm:px-6">
                   {t("invoices.colCustomer")}
                 </th>
-                <th className="px-4 py-3 sm:px-6">{t("invoices.colStatus")}</th>
-                <th className="px-4 py-3 sm:px-6">{t("invoices.colSubtotal")}</th>
-                <th className="hidden px-4 py-3 md:table-cell md:px-6">
+                <th className="px-4 py-2.5 sm:px-6">{t("invoices.colStatus")}</th>
+                <th className="px-4 py-2.5 sm:px-6">{t("invoices.colSubtotal")}</th>
+                <th className="hidden px-4 py-2.5 md:table-cell md:px-6">
                   {t("invoices.colTax")}
                 </th>
-                <th className="px-4 py-3 sm:px-6">{t("invoices.colTotal")}</th>
-                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                <th className="px-4 py-2.5 sm:px-6">{t("invoices.colTotal")}</th>
+                <th className="hidden px-4 py-2.5 lg:table-cell lg:px-6">
                   {t("invoices.colCreated")}
                 </th>
-                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                <th className="hidden px-4 py-2.5 lg:table-cell lg:px-6">
                   {t("invoices.colDueDate")}
                 </th>
                 <th className={STICKY_ACTIONS_TH_CLASS}>
@@ -508,23 +556,50 @@ function InvoicesContent() {
                 </tr>
               ) : showEmpty ? (
                 <tr>
-                  <td
-                    colSpan={9}
-                    className="px-4 py-8 text-center text-slate-500 sm:px-6"
-                  >
+                  <td colSpan={9} className="px-4 py-6 sm:px-6">
                     {hasActiveFilters ? (
-                      <div className="space-y-2">
-                        <p>{t("invoices.noMatch")}</p>
-                        <button
-                          type="button"
-                          onClick={resetFilters}
-                          className="font-medium text-slate-700 underline hover:text-slate-900"
-                        >
-                          {t("invoices.resetFilters")}
-                        </button>
-                      </div>
+                      <EmptyState
+                        title={t("invoices.emptyFilteredTitle")}
+                        description={t("invoices.emptyFilteredDescription")}
+                        action={
+                          <button
+                            type="button"
+                            onClick={resetFilters}
+                            className="font-medium text-slate-700 underline hover:text-slate-900"
+                          >
+                            {t("invoices.resetFilters")}
+                          </button>
+                        }
+                      />
                     ) : (
-                      t("invoices.noneYet")
+                      <EmptyState
+                        icon={
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="22"
+                            height="22"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                            <path d="M14 2v6h6" />
+                            <path d="M9 13h6" />
+                            <path d="M9 17h6" />
+                          </svg>
+                        }
+                        title={t("invoices.emptyTitle")}
+                        description={t("invoices.emptyDescription")}
+                        action={
+                          <ButtonLink href="/invoices/new" size="sm">
+                            {t("invoices.newInvoice")}
+                          </ButtonLink>
+                        }
+                      />
                     )}
                   </td>
                 </tr>
@@ -540,19 +615,19 @@ function InvoicesContent() {
                     effectiveStatus !== "paid" && row.due_date !== null && row.customer_id !== null;
 
                   return (
-                    <tr key={row.id} className="group hover:bg-slate-50/80">
-                      <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">
+                    <tr key={row.id} className="group transition-colors hover:bg-slate-50/80">
+                      <td className="px-4 py-2.5 font-mono text-xs text-slate-900 sm:px-6">
                         {row.invoice_number}
                       </td>
                       <td
-                        className="hidden max-w-[180px] truncate px-4 py-3 text-slate-600 sm:table-cell sm:px-6"
+                        className="hidden max-w-[180px] truncate px-4 py-2.5 text-slate-600 sm:table-cell sm:px-6"
                         title={row.customer_name ?? undefined}
                       >
                         {row.customer_name ?? (
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 sm:px-6">
+                      <td className="px-4 py-2.5 sm:px-6">
                         <PaymentStatusSelect
                           invoiceId={row.id}
                           value={status}
@@ -562,19 +637,19 @@ function InvoicesContent() {
                           }
                         />
                       </td>
-                      <td className="px-4 py-3 text-slate-800 sm:px-6">
+                      <td className="px-4 py-2.5 text-slate-800 sm:px-6">
                         {formatCurrency(row.subtotal, row.currency_code)}
                       </td>
-                      <td className="hidden px-4 py-3 text-slate-800 md:table-cell md:px-6">
+                      <td className="hidden px-4 py-2.5 text-slate-800 md:table-cell md:px-6">
                         {formatCurrency(row.tax_amount, row.currency_code)}
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
+                      <td className="px-4 py-2.5 font-medium text-slate-900 sm:px-6">
                         {formatCurrency(row.total, row.currency_code)}
                       </td>
-                      <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                      <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                         {new Date(row.created_at).toLocaleString()}
                       </td>
-                      <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                      <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                         {formatDueDateRelative(row.due_date, effectiveStatus, t)}
                       </td>
                       <td className={STICKY_ACTIONS_TD_CLASS}>

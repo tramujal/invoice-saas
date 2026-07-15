@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequirementsChecklist";
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, authRequest } from "@/lib/api";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
@@ -32,12 +34,9 @@ function MissingTokenState({
         <p className="mt-3 text-sm text-red-600" role="alert">
           {t("auth.errorMissingToken")}
         </p>
-        <Link
-          href="/forgot-password"
-          className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-        >
+        <ButtonLink href="/forgot-password" className="mt-6 w-full">
           {t("auth.requestNewLink")}
-        </Link>
+        </ButtonLink>
       </div>
     </div>
   );
@@ -118,11 +117,11 @@ function ResetPasswordForm() {
             >
               {t("auth.newPasswordLabel")}
             </label>
-            <input
+            <Input
               id="new-password"
               type="password"
               autoComplete="new-password"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+              className="mt-1"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder={t("auth.passwordPlaceholderRegister")}
@@ -137,11 +136,11 @@ function ResetPasswordForm() {
             >
               {t("auth.confirmPasswordLabel")}
             </label>
-            <input
+            <Input
               id="confirm-password"
               type="password"
               autoComplete="new-password"
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+              className="mt-1"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder={t("auth.passwordPlaceholderRegister")}
@@ -155,13 +154,9 @@ function ResetPasswordForm() {
             </p>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          <Button type="submit" disabled={isSubmitting} className="w-full">
             {isSubmitting ? t("auth.resettingPassword") : t("auth.resetPasswordSubmit")}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

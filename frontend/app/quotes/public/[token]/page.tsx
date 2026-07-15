@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
+import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, authRequest, publicGet } from "@/lib/api";
 import { formatApiError } from "@/lib/format-api-error";
@@ -89,11 +90,9 @@ export default function PublicQuotePage() {
                   {t("quotePublic.quoteNumberLabel")}: {quote.quote_number}
                 </p>
               </div>
-              <span
-                className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset ${QUOTE_STATUS_BADGE_CLASS[quote.effective_status]}`}
-              >
+              <Badge className={`w-fit ${QUOTE_STATUS_BADGE_CLASS[quote.effective_status]}`}>
                 {getQuoteStatusLabel(t, quote.effective_status)}
-              </span>
+              </Badge>
             </div>
 
             {quote.customer_name ? (

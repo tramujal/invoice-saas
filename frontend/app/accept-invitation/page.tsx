@@ -1,10 +1,10 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { ApiError, apiFetch, publicGet } from "@/lib/api";
 import {
   isAuthenticated,
@@ -135,12 +135,9 @@ function AcceptInvitationContent() {
             <p className="mt-3 text-sm text-red-600" role="alert">
               {t("invitation.notFound")}
             </p>
-            <Link
-              href="/login"
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href="/login" className="mt-6 w-full">
               {t("invitation.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
 
@@ -149,12 +146,9 @@ function AcceptInvitationContent() {
             <p className="mt-3 text-sm text-red-600" role="alert">
               {t("invitation.expiredMessage")}
             </p>
-            <Link
-              href="/login"
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href="/login" className="mt-6 w-full">
               {t("invitation.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
 
@@ -163,12 +157,9 @@ function AcceptInvitationContent() {
             <p className="mt-3 text-sm text-amber-700" role="alert">
               {t("invitation.alreadyAcceptedMessage")}
             </p>
-            <Link
-              href="/login"
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href="/login" className="mt-6 w-full">
               {t("invitation.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
 
@@ -213,28 +204,22 @@ function AcceptInvitationContent() {
             ) : null}
 
             {isAuthenticated() ? (
-              <button
+              <Button
                 type="button"
                 onClick={() => void handleAccept()}
                 disabled={status === "accepting"}
-                className="mt-6 w-full rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                className="mt-6 w-full"
               >
                 {status === "accepting" ? t("invitation.accepting") : t("invitation.acceptButton")}
-              </button>
+              </Button>
             ) : (
               <div className="mt-6 flex flex-col gap-2">
-                <Link
-                  href={loginNext}
-                  className="inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-                >
+                <ButtonLink href={loginNext} className="w-full">
                   {t("invitation.signInToAccept")}
-                </Link>
-                <Link
-                  href={registerNext}
-                  className="inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-800 transition hover:bg-slate-50"
-                >
+                </ButtonLink>
+                <ButtonLink href={registerNext} variant="secondary" className="w-full">
                   {t("invitation.registerToAccept")}
-                </Link>
+                </ButtonLink>
               </div>
             )}
           </>

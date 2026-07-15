@@ -1,9 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/Badge";
+import { ButtonLink } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
+import { Select } from "@/components/ui/Input";
+import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
   STICKY_ACTIONS_TD_CLASS,
@@ -42,9 +47,6 @@ type StatusFilter = QuoteStatus | "all";
 type ActiveFilter = "active" | "archived" | "all";
 type QuoteSortBy = "created_at" | "quote_number" | "total" | "customer_name" | "expiry_date";
 
-const selectClass =
-  "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-400 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-50";
-
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -57,13 +59,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function QuoteStatusBadge({ status, t }: { status: QuoteStatus; t: ReturnType<typeof useTranslation>["t"] }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${QUOTE_STATUS_BADGE_CLASS[status]}`}
-    >
-      {getQuoteStatusLabel(t, status)}
-    </span>
-  );
+  return <Badge className={QUOTE_STATUS_BADGE_CLASS[status]}>{getQuoteStatusLabel(t, status)}</Badge>;
 }
 
 function QuotesContent() {
@@ -97,6 +93,32 @@ function QuotesContent() {
     debouncedSearch.trim() !== "" || status !== "all" || activeFilter !== "active";
   const isDefaultState =
     !hasActiveFilters && sortBy === "created_at" && sortDir === "desc";
+
+  const activeFilterLabels: Record<ActiveFilter, string> = {
+    active: t("quotes.showActive"),
+    archived: t("quotes.showArchived"),
+    all: t("quotes.showAll"),
+  };
+
+  const filterChips: ActiveFilterChip[] = [];
+  if (status !== "all") {
+    const label = `${t("quotes.filterChipStatus")}: ${getQuoteStatusLabel(t, status)}`;
+    filterChips.push({
+      key: "status",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setStatus)("all"),
+    });
+  }
+  if (activeFilter !== "active") {
+    const label = `${t("quotes.filterChipActive")}: ${activeFilterLabels[activeFilter]}`;
+    filterChips.push({
+      key: "active",
+      label,
+      removeLabel: t("common.removeFilter", { label }),
+      onRemove: () => resetToFirstPage(setActiveFilter)("active"),
+    });
+  }
 
   function resetToFirstPage<T>(setter: (v: T) => void) {
     return (value: T) => {
@@ -406,80 +428,78 @@ function QuotesContent() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{t("quotes.title")}</h1>
-          <p className="mt-1 text-sm text-slate-500">{t("quotes.subtitle")}</p>
-        </div>
-        <Link
-          href="/quotes/new"
-          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 sm:mt-0"
+      <PageHeader
+        title={t("quotes.title")}
+        subtitle={t("quotes.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+            <path d="M14 2v6h6" />
+            <path d="m9 15 2 2 4-4" />
+          </svg>
+        }
+        actions={
+          <ButtonLink href="/quotes/new" className="shrink-0">
+            {t("quotes.newQuote")}
+          </ButtonLink>
+        }
+      />
+
+      <FilterToolbar
+        searchValue={search}
+        onSearchChange={resetToFirstPage(setSearch)}
+        searchPlaceholder={t("quotes.searchPlaceholder")}
+        searchAriaLabel={t("quotes.searchAriaLabel")}
+        onReset={resetFilters}
+        resetLabel={t("quotes.resetFilters")}
+        isDefaultState={isDefaultState}
+        filtersLabel={t("common.filters")}
+        chips={filterChips}
+      >
+        <Select
+          value={status}
+          onChange={(e) => resetToFirstPage(setStatus)(e.target.value as StatusFilter)}
+          fullWidth={false}
+          aria-label={t("quotes.filterStatusAriaLabel")}
         >
-          {t("quotes.newQuote")}
-        </Link>
-      </header>
+          <option value="all">{t("quotes.allStatuses")}</option>
+          {QUOTE_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {getQuoteStatusLabel(t, s)}
+            </option>
+          ))}
+        </Select>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="quote-search" className="sr-only">
-              {t("quotes.searchAriaLabel")}
-            </label>
-            <input
-              id="quote-search"
-              type="search"
-              value={search}
-              onChange={(e) => resetToFirstPage(setSearch)(e.target.value)}
-              placeholder={t("quotes.searchPlaceholder")}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2"
-            />
-          </div>
+        <Select
+          value={activeFilter}
+          onChange={(e) => resetToFirstPage(setActiveFilter)(e.target.value as ActiveFilter)}
+          fullWidth={false}
+          aria-label={t("quotes.filterActiveAriaLabel")}
+        >
+          <option value="active">{t("quotes.showActive")}</option>
+          <option value="archived">{t("quotes.showArchived")}</option>
+          <option value="all">{t("quotes.showAll")}</option>
+        </Select>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={status}
-              onChange={(e) => resetToFirstPage(setStatus)(e.target.value as StatusFilter)}
-              className={selectClass}
-              aria-label={t("quotes.filterStatusAriaLabel")}
-            >
-              <option value="all">{t("quotes.allStatuses")}</option>
-              {QUOTE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {getQuoteStatusLabel(t, s)}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={activeFilter}
-              onChange={(e) => resetToFirstPage(setActiveFilter)(e.target.value as ActiveFilter)}
-              className={selectClass}
-              aria-label={t("quotes.filterActiveAriaLabel")}
-            >
-              <option value="active">{t("quotes.showActive")}</option>
-              <option value="archived">{t("quotes.showArchived")}</option>
-              <option value="all">{t("quotes.showAll")}</option>
-            </select>
-
-            <SortControl
-              fields={sortFields}
-              sortBy={sortBy}
-              sortDir={sortDir}
-              onSortByChange={resetToFirstPage((v: string) => setSortBy(v as QuoteSortBy))}
-              onSortDirChange={resetToFirstPage(setSortDir)}
-            />
-
-            <button
-              type="button"
-              onClick={resetFilters}
-              disabled={isDefaultState}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t("quotes.resetFilters")}
-            </button>
-          </div>
-        </div>
-      </section>
+        <SortControl
+          fields={sortFields}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSortByChange={resetToFirstPage((v: string) => setSortBy(v as QuoteSortBy))}
+          onSortDirChange={resetToFirstPage(setSortDir)}
+        />
+      </FilterToolbar>
 
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
@@ -490,14 +510,14 @@ function QuotesContent() {
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-700">
               <tr>
-                <th className="px-4 py-3 sm:px-6">{t("quotes.colQuote")}</th>
-                <th className="hidden px-4 py-3 sm:table-cell sm:px-6">{t("quotes.colCustomer")}</th>
-                <th className="px-4 py-3 sm:px-6">{t("quotes.colStatus")}</th>
-                <th className="px-4 py-3 sm:px-6">{t("quotes.colTotal")}</th>
-                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">{t("quotes.colExpiry")}</th>
-                <th className="hidden px-4 py-3 lg:table-cell lg:px-6">{t("quotes.colCreated")}</th>
+                <th className="px-4 py-2.5 sm:px-6">{t("quotes.colQuote")}</th>
+                <th className="hidden px-4 py-2.5 sm:table-cell sm:px-6">{t("quotes.colCustomer")}</th>
+                <th className="px-4 py-2.5 sm:px-6">{t("quotes.colStatus")}</th>
+                <th className="px-4 py-2.5 sm:px-6">{t("quotes.colTotal")}</th>
+                <th className="hidden px-4 py-2.5 lg:table-cell lg:px-6">{t("quotes.colExpiry")}</th>
+                <th className="hidden px-4 py-2.5 lg:table-cell lg:px-6">{t("quotes.colCreated")}</th>
                 <th className={STICKY_ACTIONS_TH_CLASS}>
                   <span className="sr-only">{t("quotes.colActions")}</span>
                 </th>
@@ -512,43 +532,72 @@ function QuotesContent() {
                 </tr>
               ) : showEmpty ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 sm:px-6">
+                  <td colSpan={7} className="px-4 py-6 sm:px-6">
                     {hasActiveFilters ? (
-                      <div className="space-y-2">
-                        <p>{t("quotes.noMatch")}</p>
-                        <button
-                          type="button"
-                          onClick={resetFilters}
-                          className="font-medium text-slate-700 underline hover:text-slate-900"
-                        >
-                          {t("quotes.resetFilters")}
-                        </button>
-                      </div>
+                      <EmptyState
+                        title={t("quotes.emptyFilteredTitle")}
+                        description={t("quotes.emptyFilteredDescription")}
+                        action={
+                          <button
+                            type="button"
+                            onClick={resetFilters}
+                            className="font-medium text-slate-700 underline hover:text-slate-900"
+                          >
+                            {t("quotes.resetFilters")}
+                          </button>
+                        }
+                      />
                     ) : (
-                      t("quotes.noneYet")
+                      <EmptyState
+                        icon={
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="22"
+                            height="22"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                            <path d="M14 2v6h6" />
+                            <path d="m9 15 2 2 4-4" />
+                          </svg>
+                        }
+                        title={t("quotes.emptyTitle")}
+                        description={t("quotes.emptyDescription")}
+                        action={
+                          <ButtonLink href="/quotes/new" size="sm">
+                            {t("quotes.newQuote")}
+                          </ButtonLink>
+                        }
+                      />
                     )}
                   </td>
                 </tr>
               ) : (
                 data?.items.map((row) => (
-                  <tr key={row.id} className="group hover:bg-slate-50/80">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-900 sm:px-6">{row.quote_number}</td>
+                  <tr key={row.id} className="group transition-colors hover:bg-slate-50/80">
+                    <td className="px-4 py-2.5 font-mono text-xs text-slate-900 sm:px-6">{row.quote_number}</td>
                     <td
-                      className="hidden max-w-[180px] truncate px-4 py-3 text-slate-600 sm:table-cell sm:px-6"
+                      className="hidden max-w-[180px] truncate px-4 py-2.5 text-slate-600 sm:table-cell sm:px-6"
                       title={row.customer_name ?? undefined}
                     >
                       {row.customer_name ?? <span className="text-slate-400">—</span>}
                     </td>
-                    <td className="px-4 py-3 sm:px-6">
+                    <td className="px-4 py-2.5 sm:px-6">
                       <QuoteStatusBadge status={row.effective_status} t={t} />
                     </td>
-                    <td className="px-4 py-3 font-medium text-slate-900 sm:px-6">
+                    <td className="px-4 py-2.5 font-medium text-slate-900 sm:px-6">
                       {formatCurrency(row.total, row.currency_code)}
                     </td>
-                    <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                    <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                       {row.expiry_date ?? <span className="text-slate-400">—</span>}
                     </td>
-                    <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                    <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                       {new Date(row.created_at).toLocaleDateString()}
                     </td>
                     <td className={STICKY_ACTIONS_TD_CLASS}>

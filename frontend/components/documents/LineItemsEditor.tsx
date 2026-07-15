@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 
+import { Input } from "@/components/ui/Input";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
 import { getCurrencyLabel, type CurrencyCode } from "@/lib/organization-settings";
@@ -142,12 +143,12 @@ export function LineItemsEditor({
                   <label className="text-xs font-medium text-slate-600">
                     {t("lineItemPicker.descriptionLabel")}
                   </label>
-                  <input
+                  <Input
                     type="text"
                     value={line.description}
                     onChange={(e) => onUpdateLine(line.id, { description: e.target.value })}
                     disabled={disabled}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                    className="mt-1"
                   />
                   {line.product_id ? (
                     <p className="mt-1 text-xs text-slate-500">
@@ -160,7 +161,7 @@ export function LineItemsEditor({
                     <label className="text-xs font-medium text-slate-600">
                       {t("lineItemPicker.qtyLabel")}
                     </label>
-                    <input
+                    <Input
                       type="number"
                       inputMode="decimal"
                       min="0"
@@ -168,14 +169,14 @@ export function LineItemsEditor({
                       value={line.quantity}
                       onChange={(e) => onUpdateLine(line.id, { quantity: e.target.value })}
                       disabled={disabled}
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                      className="mt-1"
                     />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-600">
                       {t("lineItemPicker.unitPriceLabel")}
                     </label>
-                    <input
+                    <Input
                       type="number"
                       inputMode="decimal"
                       min="0"
@@ -183,7 +184,7 @@ export function LineItemsEditor({
                       value={line.unit_price}
                       onChange={(e) => onUpdateLine(line.id, { unit_price: e.target.value })}
                       disabled={disabled}
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                      className="mt-1"
                     />
                   </div>
                 </div>

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { Button } from "@/components/ui/Button";
+import { Input, Select } from "@/components/ui/Input";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { parseQuantity, parseUnitPrice } from "@/lib/money";
 import { CURRENCY_CODES, getCurrencyLabel, type CurrencyCode } from "@/lib/organization-settings";
@@ -107,17 +109,17 @@ export function ManualLineEditor({
                 {getCurrencyLabel(t, documentCurrency)}
               </div>
             ) : (
-              <select
+              <Select
                 value={currencyCode}
                 onChange={(e) => setCurrencyCode(e.target.value as CurrencyCode)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2"
+                className="mt-1 shadow-sm"
               >
                 {CURRENCY_CODES.map((code) => (
                   <option key={code} value={code}>
                     {getCurrencyLabel(t, code)}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
           </div>
 
@@ -125,13 +127,13 @@ export function ManualLineEditor({
             <label className="text-xs font-medium text-slate-600">
               {t("lineItemPicker.descriptionLabel")}
             </label>
-            <input
+            <Input
               ref={descriptionRef}
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("lineItemPicker.descriptionPlaceholder")}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+              className="mt-1"
             />
           </div>
 
@@ -140,28 +142,28 @@ export function ManualLineEditor({
               <label className="text-xs font-medium text-slate-600">
                 {t("lineItemPicker.qtyLabel")}
               </label>
-              <input
+              <Input
                 type="number"
                 inputMode="decimal"
                 min="0"
                 step="0.0001"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                className="mt-1"
               />
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600">
                 {t("lineItemPicker.unitPriceLabel")}
               </label>
-              <input
+              <Input
                 type="number"
                 inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={unitPrice}
                 onChange={(e) => setUnitPrice(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                className="mt-1"
               />
             </div>
           </div>
@@ -173,19 +175,10 @@ export function ManualLineEditor({
           ) : null}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
-            >
+            <Button type="button" variant="secondary" onClick={onClose}>
               {t("common.cancel")}
-            </button>
-            <button
-              type="submit"
-              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              {t("lineItemPicker.addLine")}
-            </button>
+            </Button>
+            <Button type="submit">{t("lineItemPicker.addLine")}</Button>
           </div>
         </form>
       </div>

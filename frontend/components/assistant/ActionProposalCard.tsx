@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/toast";
 import { cancelAssistantAction, confirmAssistantAction } from "@/lib/api";
 import { assistantErrorMessageForApiError } from "@/lib/assistant-errors";
@@ -229,24 +230,20 @@ export function ActionProposalCard({ message, onStateChange }: ActionProposalCar
         </p>
       ) : (
         <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={() => void handleConfirm()}
-            disabled={disabled}
-            className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+          <Button type="button" size="sm" onClick={() => void handleConfirm()} disabled={disabled}>
             {message.status === "executing"
               ? t("assistant.action.stateExecuting")
               : confirmLabelForAction(t, message.action)}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void handleCancel()}
             disabled={disabled}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {t("common.cancel")}
-          </button>
+          </Button>
         </div>
       )}
     </div>

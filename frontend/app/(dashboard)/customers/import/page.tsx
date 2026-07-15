@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, apiFetchForm, ApiError, orgPath } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -129,22 +132,18 @@ function previewOutcome(preview: ImportPreviewResponse): PreviewOutcome {
 
 function StatusBadge({ status, t }: { status: string; t: TranslateFn }) {
   const styles: Record<string, string> = {
-    valid: "bg-emerald-100 text-emerald-800",
-    imported: "bg-emerald-100 text-emerald-800",
-    warning: "bg-amber-100 text-amber-800",
-    duplicate: "bg-slate-200 text-slate-700",
-    skipped: "bg-slate-200 text-slate-700",
-    invalid: "bg-red-100 text-red-800",
-    failed: "bg-red-100 text-red-800",
+    valid: "bg-emerald-100 text-emerald-900 ring-emerald-200/80",
+    imported: "bg-emerald-100 text-emerald-900 ring-emerald-200/80",
+    warning: "bg-amber-100 text-amber-900 ring-amber-200/80",
+    duplicate: "bg-slate-100 text-slate-700 ring-slate-200/80",
+    skipped: "bg-slate-100 text-slate-700 ring-slate-200/80",
+    invalid: "bg-red-100 text-red-900 ring-red-200/80",
+    failed: "bg-red-100 text-red-900 ring-red-200/80",
   };
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        styles[status] ?? "bg-slate-100 text-slate-700"
-      }`}
-    >
+    <Badge className={styles[status] ?? "bg-slate-100 text-slate-700 ring-slate-200/80"}>
       {statusLabel(t, status)}
-    </span>
+    </Badge>
   );
 }
 
@@ -434,14 +433,15 @@ export default function CustomerImportPage() {
                   {file.name} · {formatBytes(file.size)}
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => setFile(null)}
                 disabled={isUploading}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed"
               >
                 {t("import.uploadClearFile")}
-              </button>
+              </Button>
             </div>
           ) : null}
 
@@ -455,14 +455,9 @@ export default function CustomerImportPage() {
           ) : null}
 
           <div className="mt-5 flex justify-end">
-            <button
-              type="button"
-              onClick={() => void runPreview(null)}
-              disabled={!file || isUploading}
-              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+            <Button type="button" onClick={() => void runPreview(null)} disabled={!file || isUploading}>
               {isUploading ? t("import.uploadUploading") : t("import.uploadPreviewButton")}
-            </button>
+            </Button>
           </div>
         </section>
       ) : null}
@@ -482,7 +477,7 @@ export default function CustomerImportPage() {
             {preview.headers.map((header) => (
               <div key={header} className="grid grid-cols-2 items-center gap-4">
                 <span className="truncate text-sm text-slate-800">{header}</span>
-                <select
+                <Select
                   value={mapping[header] ?? "ignore"}
                   onChange={(e) =>
                     setMapping((prev) => ({
@@ -490,14 +485,13 @@ export default function CustomerImportPage() {
                       [header]: e.target.value as ImportTargetField,
                     }))
                   }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
                 >
                   {TARGET_FIELDS.map((field) => (
                     <option key={field} value={field}>
                       {targetFieldLabel(t, field)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             ))}
           </div>
@@ -519,21 +513,16 @@ export default function CustomerImportPage() {
           ) : null}
 
           <div className="mt-5 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep("upload")}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-            >
+            <Button type="button" variant="secondary" onClick={() => setStep("upload")}>
               {t("import.mappingBackButton")}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void confirmMappingAndPreview()}
               disabled={!mappingHasName() || mappingHasDuplicateTargets() || isUploading}
-              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isUploading ? t("import.uploadUploading") : t("import.mappingContinueButton")}
-            </button>
+            </Button>
           </div>
         </section>
       ) : null}
@@ -680,21 +669,16 @@ export default function CustomerImportPage() {
           <p className="text-xs text-slate-500">{t("import.confirmNote")}</p>
 
           <div className="flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep("mapping")}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-            >
+            <Button type="button" variant="secondary" onClick={() => setStep("mapping")}>
               {t("import.previewBackButton")}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void runConfirm()}
               disabled={importableCount === 0 || isConfirming}
-              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t("import.previewConfirmButton", { count: importableCount })}
-            </button>
+            </Button>
           </div>
           {importableCount === 0 ? (
             <p className="text-right text-xs text-amber-700">
@@ -777,28 +761,16 @@ export default function CustomerImportPage() {
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             {confirmResult.failed_count + confirmResult.skipped_duplicate_count > 0 ? (
-              <button
-                type="button"
-                onClick={downloadErrorReport}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-              >
+              <Button type="button" variant="secondary" onClick={downloadErrorReport}>
                 {t("import.resultDownloadErrorReport")}
-              </button>
+              </Button>
             ) : null}
-            <button
-              type="button"
-              onClick={resetWizard}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-            >
+            <Button type="button" variant="secondary" onClick={resetWizard}>
               {t("import.resultImportAnotherButton")}
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push("/customers")}
-              className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-            >
+            </Button>
+            <Button type="button" onClick={() => router.push("/customers")}>
               {t("import.resultDoneButton")}
-            </button>
+            </Button>
           </div>
         </section>
       ) : null}

@@ -34,9 +34,9 @@ const VIEWPORT_MARGIN_PX = 8;
 // (required so scrolled-under content doesn't show through) still
 // participates in the row's hover state via group-hover.
 export const STICKY_ACTIONS_TH_CLASS =
-  "sticky right-0 z-10 bg-slate-50 px-4 py-3 text-right sm:px-6";
+  "sticky right-0 z-10 bg-slate-50 px-4 py-2.5 text-right sm:px-6";
 export const STICKY_ACTIONS_TD_CLASS =
-  "sticky right-0 z-10 bg-white px-4 py-3 text-right shadow-[-8px_0_8px_-8px_rgba(15,23,42,0.12)] group-hover:bg-slate-50 sm:px-6";
+  "sticky right-0 z-10 bg-white px-4 py-2.5 text-right shadow-[-8px_0_8px_-8px_rgba(15,23,42,0.12)] group-hover:bg-slate-50 sm:px-6";
 
 type MenuContextValue = {
   close: () => void;

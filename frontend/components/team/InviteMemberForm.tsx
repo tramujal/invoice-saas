@@ -2,6 +2,8 @@
 
 import { FormEvent, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Input, Select } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { formatApiError, getApiErrorCode, isEmailNotVerifiedError } from "@/lib/format-api-error";
@@ -90,7 +92,7 @@ export function InviteMemberForm({ onInvited }: InviteMemberFormProps) {
           <label htmlFor="invite-email" className="text-sm font-medium text-slate-700">
             {t("common.email")} <span className="text-red-600">*</span>
           </label>
-          <input
+          <Input
             id="invite-email"
             type="email"
             value={email}
@@ -98,7 +100,7 @@ export function InviteMemberForm({ onInvited }: InviteMemberFormProps) {
             disabled={disabled}
             maxLength={EMAIL_MAX_LENGTH}
             placeholder="teammate@example.com"
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+            className="mt-1"
             aria-invalid={Boolean(emailError)}
             aria-describedby={emailError ? "invite-email-err" : undefined}
           />
@@ -113,28 +115,24 @@ export function InviteMemberForm({ onInvited }: InviteMemberFormProps) {
           <label htmlFor="invite-role" className="text-sm font-medium text-slate-700">
             {t("team.roleLabel")}
           </label>
-          <select
+          <Select
             id="invite-role"
             value={role}
             onChange={(e) => setRole(e.target.value as InvitationRole)}
             disabled={disabled}
-            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50 sm:w-40"
+            className="mt-1 sm:w-40"
           >
             {INVITATION_ROLES.map((r) => (
               <option key={r} value={r}>
                 {getMembershipRoleLabel(t, r)}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
-        <button
-          type="submit"
-          disabled={disabled}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-        >
+        <Button type="submit" disabled={disabled}>
           {isSubmitting ? t("common.saving") : t("team.inviteButton")}
-        </button>
+        </Button>
       </form>
     </section>
   );

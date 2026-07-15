@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { Input, Select } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
@@ -202,12 +204,12 @@ export default function NewInvoicePage() {
             <label htmlFor="customer" className="text-sm font-medium text-slate-700">
               {t("invoiceForm.billToLabel")}
             </label>
-            <select
+            <Select
               id="customer"
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
               disabled={disableCustomerSelect}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1 shadow-sm"
             >
               <option value="">{t("invoiceForm.noCustomerOption")}</option>
               {customers.map((c) => (
@@ -215,7 +217,7 @@ export default function NewInvoicePage() {
                   {c.name} — {c.email}
                 </option>
               ))}
-            </select>
+            </Select>
             {customersLoading ? (
               <p className="mt-2 text-xs text-slate-500">{t("customers.loading")}</p>
             ) : customers.length === 0 ? (
@@ -247,32 +249,32 @@ export default function NewInvoicePage() {
               <label htmlFor="paymentTerms" className="text-sm font-medium text-slate-700">
                 {t("invoiceForm.paymentTermsLabel")}
               </label>
-              <select
+              <Select
                 id="paymentTerms"
                 value={paymentTermsKey}
                 onChange={(e) => onPaymentTermsChange(e.target.value as PaymentTermsPresetKey)}
                 disabled={isSubmitting}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1 shadow-sm"
               >
                 {PAYMENT_TERMS_PRESETS.map((preset) => (
                   <option key={preset.key} value={preset.key}>
                     {getPaymentTermsLabel(t, preset.key)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label htmlFor="dueDate" className="text-sm font-medium text-slate-700">
                 {t("invoiceForm.dueDateLabel")}
               </label>
-              <input
+              <Input
                 id="dueDate"
                 type="date"
                 min={issueDate}
                 value={dueDate}
                 onChange={(e) => onCustomDueDateChange(e.target.value)}
                 disabled={isSubmitting || paymentTermsKey !== "custom"}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
           </div>
@@ -296,7 +298,7 @@ export default function NewInvoicePage() {
               <label htmlFor="tax" className="text-sm font-medium text-slate-700">
                 {t("invoiceForm.taxRateLabel")}
               </label>
-              <input
+              <Input
                 id="tax"
                 type="number"
                 inputMode="decimal"
@@ -306,7 +308,7 @@ export default function NewInvoicePage() {
                 value={taxPercent}
                 onChange={(e) => onTaxPercentChange(e.target.value)}
                 disabled={isSubmitting}
-                className="mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 sm:max-w-none"
+                className="mt-1 max-w-xs sm:max-w-none"
               />
               <p className="mt-1 text-xs text-slate-500">
                 {t("invoiceForm.taxRateHelpPrefix")}{" "}
@@ -359,17 +361,10 @@ export default function NewInvoicePage() {
         ) : null}
 
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Link
-            href="/invoices"
-            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-center text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-          >
+          <ButtonLink href="/invoices" variant="secondary">
             {t("common.cancel")}
-          </Link>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          </ButtonLink>
+          <Button type="submit" disabled={isSubmitting}>
             {isSubmitting ? (
               <>
                 <svg
@@ -397,7 +392,7 @@ export default function NewInvoicePage() {
             ) : (
               t("invoiceForm.submitCreate")
             )}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

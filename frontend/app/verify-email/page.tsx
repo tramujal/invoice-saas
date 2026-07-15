@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
+import { ButtonLink } from "@/components/ui/Button";
 import { apiFetch, authRequest } from "@/lib/api";
 import {
   isAuthenticated,
@@ -84,12 +85,9 @@ function VerifyEmailContent() {
             <p className="mt-3 text-sm text-red-600" role="alert">
               {t("verifyEmail.missingToken")}
             </p>
-            <Link
-              href="/login"
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href="/login" className="mt-6 w-full">
               {t("verifyEmail.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
 
@@ -101,12 +99,9 @@ function VerifyEmailContent() {
             <p className="mt-1 text-sm text-red-600" role="alert">
               {t("verifyEmail.errorMessage")}
             </p>
-            <Link
-              href="/login"
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href="/login" className="mt-6 w-full">
               {t("verifyEmail.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
 
@@ -118,12 +113,9 @@ function VerifyEmailContent() {
             <p className="mt-1 text-sm text-red-600" role="alert">
               {t("errors.rateLimitedVerification")}
             </p>
-            <Link
-              href="/login"
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href="/login" className="mt-6 w-full">
               {t("verifyEmail.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
 
@@ -135,14 +127,11 @@ function VerifyEmailContent() {
             <p className="mt-1 text-sm text-slate-600" role="status">
               {t("verifyEmail.successMessage")}
             </p>
-            <Link
-              href={isAuthenticated() ? "/dashboard" : "/login"}
-              className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
+            <ButtonLink href={isAuthenticated() ? "/dashboard" : "/login"} className="mt-6 w-full">
               {isAuthenticated()
                 ? t("verifyEmail.goToDashboard")
                 : t("verifyEmail.goToLogin")}
-            </Link>
+            </ButtonLink>
           </>
         ) : null}
       </div>

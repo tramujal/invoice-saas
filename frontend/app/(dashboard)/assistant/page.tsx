@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { ActionProposalCard } from "@/components/assistant/ActionProposalCard";
+import { Button } from "@/components/ui/Button";
+import { Textarea } from "@/components/ui/Input";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetchStream, orgPath } from "@/lib/api";
 import { assistantErrorMessageForCode } from "@/lib/assistant-errors";
@@ -236,22 +239,37 @@ function AssistantContent() {
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-6rem)] max-w-4xl flex-col gap-4">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            {t("assistant.title")}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">{t("assistant.subtitle")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={clearConversation}
-          disabled={isStreaming || messages.length === 0}
-          className="self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
-        >
-          {t("assistant.clear")}
-        </button>
-      </header>
+      <PageHeader
+        title={t("assistant.title")}
+        subtitle={t("assistant.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={clearConversation}
+            disabled={isStreaming || messages.length === 0}
+          >
+            {t("assistant.clear")}
+          </Button>
+        }
+      />
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
         {t("assistant.disclaimer")}
@@ -331,7 +349,7 @@ function AssistantContent() {
 
         <div className="border-t border-slate-200 p-3 sm:p-4">
           <div className="flex items-end gap-2">
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -339,25 +357,16 @@ function AssistantContent() {
               placeholder={t("assistant.placeholder")}
               rows={2}
               disabled={isStreaming}
-              className="flex-1 resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="flex-1 resize-none"
             />
             {isStreaming ? (
-              <button
-                type="button"
-                onClick={stopGenerating}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-              >
+              <Button type="button" variant="secondary" onClick={stopGenerating}>
                 {t("assistant.stop")}
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
-                onClick={() => void sendMessage()}
-                disabled={!input.trim()}
-                className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
+              <Button type="button" onClick={() => void sendMessage()} disabled={!input.trim()}>
                 {t("assistant.send")}
-              </button>
+              </Button>
             )}
           </div>
           <p className="mt-1.5 text-xs text-slate-400">{t("assistant.enterHint")}</p>

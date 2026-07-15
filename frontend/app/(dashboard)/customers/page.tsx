@@ -1,9 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CustomerForm } from "@/components/customers/CustomerForm";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { FilterToolbar } from "@/components/ui/FilterToolbar";
+import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
   STICKY_ACTIONS_TD_CLASS,
@@ -44,27 +47,25 @@ function CustomersEmptyState({
 
   if (hasActiveFilters) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center sm:px-10">
-        <h2 className="text-lg font-semibold text-slate-900">
-          {t("customers.emptyFilteredTitle")}
-        </h2>
-        <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-          {t("customers.emptyFilteredDescription")}
-        </p>
-        <button
-          type="button"
-          onClick={onReset}
-          className="mt-4 font-medium text-slate-700 underline hover:text-slate-900"
-        >
-          {t("invoices.resetFilters")}
-        </button>
-      </div>
+      <EmptyState
+        title={t("customers.emptyFilteredTitle")}
+        description={t("customers.emptyFilteredDescription")}
+        action={
+          <button
+            type="button"
+            onClick={onReset}
+            className="font-medium text-slate-700 underline hover:text-slate-900"
+          >
+            {t("invoices.resetFilters")}
+          </button>
+        }
+      />
     );
   }
 
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-6 py-12 text-center sm:px-10">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200/80 text-slate-600">
+    <EmptyState
+      icon={
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="22"
@@ -82,14 +83,10 @@ function CustomersEmptyState({
           <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
-      </div>
-      <h2 className="mt-4 text-lg font-semibold text-slate-900">
-        {t("customers.emptyTitle")}
-      </h2>
-      <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-        {t("customers.emptyDescription")}
-      </p>
-    </div>
+      }
+      title={t("customers.emptyTitle")}
+      description={t("customers.emptyDescription")}
+    />
   );
 }
 
@@ -202,44 +199,45 @@ export default function CustomersPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            {t("customers.title")}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">{t("customers.subtitle")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => void downloadTemplate("csv")}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+      <PageHeader
+        title={t("customers.title")}
+        subtitle={t("customers.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
           >
-            {t("customers.downloadCsvTemplate")}
-          </button>
-          <button
-            type="button"
-            onClick={() => void downloadTemplate("xlsx")}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-          >
-            {t("customers.downloadXlsxTemplate")}
-          </button>
-          <Link
-            href="/customers/import"
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
-          >
-            {t("customers.importButton")}
-          </Link>
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? t("common.refreshing") : t("common.refresh")}
-          </button>
-        </div>
-      </header>
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => void downloadTemplate("csv")}>
+              {t("customers.downloadCsvTemplate")}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void downloadTemplate("xlsx")}>
+              {t("customers.downloadXlsxTemplate")}
+            </Button>
+            <ButtonLink href="/customers/import" size="sm">
+              {t("customers.importButton")}
+            </ButtonLink>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+              {loading ? t("common.refreshing") : t("common.refresh")}
+            </Button>
+          </div>
+        }
+      />
 
       {editingCustomer ? (
         <CustomerForm
@@ -254,40 +252,24 @@ export default function CustomersPage() {
         <CustomerForm onSaved={() => load({ silent: true })} />
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="sm:max-w-sm sm:flex-1">
-            <label htmlFor="customer-search" className="sr-only">
-              {t("customers.searchAriaLabel")}
-            </label>
-            <input
-              id="customer-search"
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("customers.searchPlaceholder")}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2"
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <SortControl
-              fields={sortFields}
-              sortBy={sortBy}
-              sortDir={sortDir}
-              onSortByChange={(v) => setSortBy(v as CustomerSortBy)}
-              onSortDirChange={setSortDir}
-            />
-            <button
-              type="button"
-              onClick={resetFilters}
-              disabled={isDefaultState}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t("invoices.resetFilters")}
-            </button>
-          </div>
-        </div>
-      </section>
+      <FilterToolbar
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t("customers.searchPlaceholder")}
+        searchAriaLabel={t("customers.searchAriaLabel")}
+        onReset={resetFilters}
+        resetLabel={t("invoices.resetFilters")}
+        isDefaultState={isDefaultState}
+        filtersLabel={t("common.filters")}
+      >
+        <SortControl
+          fields={sortFields}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSortByChange={(v) => setSortBy(v as CustomerSortBy)}
+          onSortDirChange={setSortDir}
+        />
+      </FilterToolbar>
 
       {error ? (
         <div
@@ -312,17 +294,17 @@ export default function CustomersPage() {
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-700">
                 <tr>
-                  <th className="px-4 py-3 sm:px-6">{t("common.name")}</th>
-                  <th className="px-4 py-3 sm:px-6">{t("common.email")}</th>
-                  <th className="hidden px-4 py-3 md:table-cell md:px-6">
+                  <th className="px-4 py-2.5 sm:px-6">{t("common.name")}</th>
+                  <th className="px-4 py-2.5 sm:px-6">{t("common.email")}</th>
+                  <th className="hidden px-4 py-2.5 md:table-cell md:px-6">
                     {t("common.phone")}
                   </th>
-                  <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                  <th className="hidden px-4 py-2.5 lg:table-cell lg:px-6">
                     {t("common.address")}
                   </th>
-                  <th className="hidden px-4 py-3 lg:table-cell lg:px-6">
+                  <th className="hidden px-4 py-2.5 lg:table-cell lg:px-6">
                     {t("customers.taxIdColumn")}
                   </th>
                   <th className={STICKY_ACTIONS_TH_CLASS}>
@@ -332,23 +314,23 @@ export default function CustomersPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {items!.map((c) => (
-                  <tr key={c.id} className="group hover:bg-slate-50/80">
+                  <tr key={c.id} className="group transition-colors hover:bg-slate-50/80">
                     <td
-                      className="max-w-[200px] truncate px-4 py-3 font-medium text-slate-900 sm:px-6"
+                      className="max-w-[200px] truncate px-4 py-2.5 font-medium text-slate-900 sm:px-6"
                       title={c.name}
                     >
                       {c.name}
                     </td>
-                    <td className="max-w-[220px] truncate px-4 py-3 text-slate-700 sm:px-6" title={c.email}>
+                    <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-700 sm:px-6" title={c.email}>
                       {c.email}
                     </td>
-                    <td className="hidden px-4 py-3 text-slate-600 md:table-cell md:px-6">
+                    <td className="hidden px-4 py-2.5 text-slate-600 md:table-cell md:px-6">
                       {c.phone || "—"}
                     </td>
-                    <td className="hidden max-w-xs truncate px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                    <td className="hidden max-w-xs truncate px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                       {c.address || "—"}
                     </td>
-                    <td className="hidden px-4 py-3 text-slate-600 lg:table-cell lg:px-6">
+                    <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                       {c.tax_id || "—"}
                     </td>
                     <td className={STICKY_ACTIONS_TD_CLASS}>

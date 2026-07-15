@@ -1,9 +1,12 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 
 import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
+import { Badge } from "@/components/ui/Badge";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { Input, Select, Textarea } from "@/components/ui/Input";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import {
@@ -258,12 +261,27 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-          {t("settings.title")}
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">{t("settings.subtitle")}</p>
-      </header>
+      <PageHeader
+        title={t("settings.title")}
+        subtitle={t("settings.subtitle")}
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+          </svg>
+        }
+      />
 
       <SettingsSubNav />
 
@@ -285,11 +303,11 @@ export default function SettingsPage() {
           <p className="mt-1 text-sm text-slate-900">{userEmail ?? "—"}</p>
           <p className="mt-1 text-xs text-slate-500">{t("settings.accountEmailHelp")}</p>
           {emailVerified !== null ? (
-            <span
-              className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+            <Badge
+              className={`mt-2 gap-1.5 ${
                 emailVerified
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-amber-100 text-amber-800"
+                  ? "bg-emerald-100 text-emerald-900 ring-emerald-200/80"
+                  : "bg-amber-100 text-amber-900 ring-amber-200/80"
               }`}
             >
               <span
@@ -301,16 +319,13 @@ export default function SettingsPage() {
               {emailVerified
                 ? t("settings.emailVerifiedLabel")
                 : t("settings.emailNotVerifiedLabel")}
-            </span>
+            </Badge>
           ) : null}
         </div>
         <div className="mt-5">
-          <Link
-            href="/forgot-password"
-            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-          >
+          <ButtonLink href="/forgot-password" variant="secondary">
             {t("settings.changePasswordAction")}
-          </Link>
+          </ButtonLink>
           <p className="mt-1.5 text-xs text-slate-500">{t("settings.changePasswordHelp")}</p>
         </div>
       </section>
@@ -324,14 +339,14 @@ export default function SettingsPage() {
             <label htmlFor="org-name" className="text-sm font-medium text-slate-700">
               {t("auth.organizationNameLabel")} <span className="text-red-600">*</span>
             </label>
-            <input
+            <Input
               id="org-name"
               type="text"
               value={form.name}
               onChange={(e) => update("name", e.target.value)}
               disabled={disabled}
               maxLength={LIMITS.name}
-              className="mt-1 w-full max-w-md rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1 max-w-md"
               aria-invalid={Boolean(nameError)}
               aria-describedby={nameError ? "org-name-err" : undefined}
             />
@@ -360,7 +375,7 @@ export default function SettingsPage() {
               >
                 {t("settings.businessNameLabel")}
               </label>
-              <input
+              <Input
                 id="business-name"
                 type="text"
                 value={form.business_name}
@@ -368,7 +383,7 @@ export default function SettingsPage() {
                 disabled={disabled}
                 maxLength={LIMITS.business_name}
                 placeholder={t("settings.businessNamePlaceholder")}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
 
@@ -376,14 +391,14 @@ export default function SettingsPage() {
               <label htmlFor="tax-id" className="text-sm font-medium text-slate-700">
                 {t("settings.taxIdLabel")}
               </label>
-              <input
+              <Input
                 id="tax-id"
                 type="text"
                 value={form.tax_id}
                 onChange={(e) => update("tax_id", e.target.value)}
                 disabled={disabled}
                 maxLength={LIMITS.tax_id}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
 
@@ -391,14 +406,14 @@ export default function SettingsPage() {
               <label htmlFor="org-phone" className="text-sm font-medium text-slate-700">
                 {t("common.phone")}
               </label>
-              <input
+              <Input
                 id="org-phone"
                 type="tel"
                 value={form.phone}
                 onChange={(e) => update("phone", e.target.value)}
                 disabled={disabled}
                 maxLength={LIMITS.phone}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
 
@@ -406,14 +421,14 @@ export default function SettingsPage() {
               <label htmlFor="org-email" className="text-sm font-medium text-slate-700">
                 {t("common.email")}
               </label>
-              <input
+              <Input
                 id="org-email"
                 type="email"
                 value={form.email}
                 onChange={(e) => update("email", e.target.value)}
                 disabled={disabled}
                 maxLength={LIMITS.email}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
 
@@ -421,14 +436,14 @@ export default function SettingsPage() {
               <label htmlFor="org-address" className="text-sm font-medium text-slate-700">
                 {t("common.address")}
               </label>
-              <textarea
+              <Textarea
                 id="org-address"
                 value={form.address}
                 onChange={(e) => update("address", e.target.value)}
                 disabled={disabled}
                 maxLength={LIMITS.address}
                 rows={3}
-                className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1 resize-y"
               />
             </div>
 
@@ -436,7 +451,7 @@ export default function SettingsPage() {
               <label htmlFor="logo-url" className="text-sm font-medium text-slate-700">
                 {t("settings.logoUrlLabel")}
               </label>
-              <input
+              <Input
                 id="logo-url"
                 type="url"
                 value={form.logo_url}
@@ -444,7 +459,7 @@ export default function SettingsPage() {
                 disabled={disabled}
                 maxLength={LIMITS.logo_url}
                 placeholder="https://…"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
               <p className="mt-1 text-xs text-slate-500">{t("settings.logoUrlHelp")}</p>
             </div>
@@ -464,57 +479,57 @@ export default function SettingsPage() {
               <label htmlFor="org-language" className="text-sm font-medium text-slate-700">
                 {t("settings.languageFieldLabel")}
               </label>
-              <select
+              <Select
                 id="org-language"
                 value={form.language}
                 onChange={(e) => update("language", e.target.value as Language)}
                 disabled={disabled}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               >
                 {LANGUAGES.map((code) => (
                   <option key={code} value={code}>
                     {LANGUAGE_LABELS[code]}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div>
               <label htmlFor="org-currency" className="text-sm font-medium text-slate-700">
                 {t("settings.currencyFieldLabel")}
               </label>
-              <select
+              <Select
                 id="org-currency"
                 value={form.currency_code}
                 onChange={(e) => update("currency_code", e.target.value as CurrencyCode)}
                 disabled={disabled}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               >
                 {CURRENCY_CODES.map((code) => (
                   <option key={code} value={code}>
                     {getCurrencyLabel(t, code)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div>
               <label htmlFor="org-tax-label" className="text-sm font-medium text-slate-700">
                 {t("settings.taxLabelFieldLabel")}
               </label>
-              <select
+              <Select
                 id="org-tax-label"
                 value={form.tax_label}
                 onChange={(e) => update("tax_label", e.target.value as TaxLabelOption)}
                 disabled={disabled}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               >
                 {TAX_LABEL_OPTIONS.map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>
                 ))}
-              </select>
+              </Select>
               <p className="mt-1 text-xs text-slate-500">{t("settings.taxLabelHelp")}</p>
             </div>
 
@@ -522,19 +537,19 @@ export default function SettingsPage() {
               <label htmlFor="org-timezone" className="text-sm font-medium text-slate-700">
                 {t("settings.timezoneFieldLabel")}
               </label>
-              <select
+              <Select
                 id="org-timezone"
                 value={form.timezone}
                 onChange={(e) => update("timezone", e.target.value)}
                 disabled={disabled}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               >
                 {getTimezoneOptions(form.timezone).map((tz) => (
                   <option key={tz} value={tz}>
                     {tz}
                   </option>
                 ))}
-              </select>
+              </Select>
               <p className="mt-1 text-xs text-slate-500">{t("settings.timezoneHelp")}</p>
             </div>
           </div>
@@ -569,14 +584,14 @@ export default function SettingsPage() {
               >
                 {t("settings.reminderBeforeDueLabel")}
               </label>
-              <input
+              <Input
                 id="reminder-before-days"
                 type="text"
                 value={form.reminder_before_due_days}
                 onChange={(e) => update("reminder_before_due_days", e.target.value)}
                 disabled={disabled || !form.reminders_enabled}
                 placeholder={t("settings.reminderDaysPlaceholder")}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
 
@@ -587,14 +602,14 @@ export default function SettingsPage() {
               >
                 {t("settings.reminderAfterDueLabel")}
               </label>
-              <input
+              <Input
                 id="reminder-after-days"
                 type="text"
                 value={form.reminder_after_due_days}
                 onChange={(e) => update("reminder_after_due_days", e.target.value)}
                 disabled={disabled || !form.reminders_enabled}
                 placeholder={t("settings.reminderDaysPlaceholder")}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
 
@@ -648,27 +663,23 @@ export default function SettingsPage() {
             >
               {t("settings.quoteReminderBeforeExpiryLabel")}
             </label>
-            <input
+            <Input
               id="quote-reminder-before-expiry-days"
               type="text"
               value={form.quote_reminder_before_expiry_days}
               onChange={(e) => update("quote_reminder_before_expiry_days", e.target.value)}
               disabled={disabled || !form.quote_reminders_enabled}
               placeholder={t("settings.reminderDaysPlaceholder")}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
             />
           </div>
           <p className="mt-2 text-xs text-slate-500">{t("settings.reminderDaysHelp")}</p>
         </section>
 
         <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={disabled}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          <Button type="submit" disabled={disabled}>
             {isSubmitting ? t("common.saving") : t("common.saveChanges")}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
+import { Button, ButtonLink } from "@/components/ui/Button";
+import { Input, Select, Textarea } from "@/components/ui/Input";
 import { apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -180,12 +182,12 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
             <label htmlFor="customer" className="text-sm font-medium text-slate-700">
               {t("quoteForm.billToLabel")}
             </label>
-            <select
+            <Select
               id="customer"
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
               disabled={disableCustomerSelect}
-              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1 shadow-sm"
             >
               <option value="">{t("quoteForm.noCustomerOption")}</option>
               {customers.map((c) => (
@@ -193,7 +195,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
                   {c.name} — {c.email}
                 </option>
               ))}
-            </select>
+            </Select>
             {!customersLoading && customers.length === 0 ? (
               <p className="mt-2 text-xs text-amber-700">
                 {t("quoteForm.noCustomersMessage")}{" "}
@@ -221,14 +223,14 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
               <label htmlFor="expiryDate" className="text-sm font-medium text-slate-700">
                 {t("quoteForm.expiryDateLabel")}
               </label>
-              <input
+              <Input
                 id="expiryDate"
                 type="date"
                 min={issueDate}
                 value={expiryDate}
                 onChange={(e) => setExpiryDate(e.target.value)}
                 disabled={isSubmitting}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+                className="mt-1"
               />
             </div>
           </div>
@@ -236,14 +238,14 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
             <label htmlFor="notes" className="text-sm font-medium text-slate-700">
               {t("quoteForm.notesLabel")}
             </label>
-            <textarea
+            <Textarea
               id="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               disabled={isSubmitting}
               rows={3}
               placeholder={t("quoteForm.notesPlaceholder")}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 disabled:bg-slate-50"
+              className="mt-1"
             />
           </div>
         </section>
@@ -266,7 +268,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
               <label htmlFor="tax" className="text-sm font-medium text-slate-700">
                 {t("quoteForm.taxRateLabel")}
               </label>
-              <input
+              <Input
                 id="tax"
                 type="number"
                 inputMode="decimal"
@@ -276,7 +278,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
                 value={taxPercent}
                 onChange={(e) => onTaxPercentChange(e.target.value)}
                 disabled={isSubmitting}
-                className="mt-1 w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-slate-400 focus:ring-2 sm:max-w-none"
+                className="mt-1 max-w-xs sm:max-w-none"
               />
               <p className="mt-1 text-xs text-slate-500">
                 {t("quoteForm.taxRateHelpPrefix")} <code className="rounded bg-slate-100 px-1">{taxRateFraction}</code>{" "}
@@ -325,17 +327,10 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
         ) : null}
 
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Link
-            href={backHref}
-            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-center text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
-          >
+          <ButtonLink href={backHref} variant="secondary">
             {t("common.cancel")}
-          </Link>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          </ButtonLink>
+          <Button type="submit" disabled={isSubmitting}>
             {mode === "create"
               ? isSubmitting
                 ? t("quoteForm.submitCreating")
@@ -343,7 +338,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
               : isSubmitting
                 ? t("quoteForm.submitSaving")
                 : t("quoteForm.submitSave")}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

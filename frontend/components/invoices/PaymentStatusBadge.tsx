@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@/components/ui/Badge";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   PAYMENT_STATUS_BADGE_CLASS,
@@ -18,10 +19,8 @@ export function PaymentStatusBadge({
 }: PaymentStatusBadgeProps) {
   const { t } = useTranslation();
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${PAYMENT_STATUS_BADGE_CLASS[status]} ${className}`}
-    >
+    <Badge className={`${PAYMENT_STATUS_BADGE_CLASS[status]} ${className}`}>
       {getPaymentStatusLabel(t, status)}
-    </span>
+    </Badge>
   );
 }
