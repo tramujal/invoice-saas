@@ -12,6 +12,7 @@ import {
   getEmailVerified,
   getOrganizationId,
   getOrganizationName,
+  getUserEmail,
   isAuthenticated,
   setEmailVerified as cacheEmailVerified,
   updateActiveOrganization,
@@ -40,6 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const toast = useToast();
   const { t } = useTranslation();
   const [organizationName, setOrganizationName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   // Hydration-safe default (see getOrganizationName below for the same
   // pattern): assume verified until the first /auth/me response actually
   // says otherwise, so the banner never flashes on a verified account.
@@ -94,6 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     // /settings shows up in the sidebar without requiring a re-login.
     setOrganizationName(getOrganizationName());
     setEmailVerifiedState(getEmailVerified());
+    setUserEmail(getUserEmail());
   }, [pathname]);
 
   useEffect(() => {
@@ -266,11 +269,21 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <div className="mt-auto border-t border-slate-200 px-4 py-3 md:px-6 md:pb-6">
+        <div className="mt-auto border-t border-slate-200 px-4 py-3 md:px-6 md:py-4">
+          {userEmail || organizationName ? (
+            <div className="mb-2 min-w-0">
+              {userEmail ? (
+                <p className="truncate text-sm font-medium text-slate-800">{userEmail}</p>
+              ) : null}
+              {organizationName ? (
+                <p className="truncate text-xs text-slate-500">{organizationName}</p>
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={logout}
-            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             {t("nav.logout")}
           </button>
