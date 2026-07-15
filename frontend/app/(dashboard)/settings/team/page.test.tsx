@@ -1,10 +1,25 @@
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAuthSession } from "@/lib/auth-storage";
 import type { Member, PaginatedInvitations, PaginatedMembers } from "@/lib/types";
-import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
+import { renderWithProviders, screen, waitFor, within } from "@/tests/test-utils";
 
 import TeamPage from "./page";
+
+/** Grant ownership / Remove now live inside the shared RowActionsMenu (see
+ * components/ui/RowActionsMenu.test.tsx for its own open/close/keyboard/
+ * disabled behavior, not duplicated here) -- a row's menu items only exist
+ * in the DOM once its "More actions" trigger has been opened, and the
+ * opened panel portals to document.body rather than staying inside the
+ * row's <tr>, so callers must locate the trigger scoped to the row, click
+ * it, then query the menu items globally via `screen`. */
+async function openRowMenu(rowAccessibleText: string) {
+  const row = screen.getByText(rowAccessibleText).closest("tr");
+  if (!row) throw new Error(`row containing "${rowAccessibleText}" not found`);
+  const user = userEvent.setup();
+  await user.click(within(row).getByRole("button", { name: "More actions" }));
+}
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings/team",
@@ -69,7 +84,9 @@ describe("Team page permission-gated rendering", () => {
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /remove/i })).not.toBeInTheDocument();
+    // No actions column at all for a viewer -- not even a "More actions"
+    // trigger to open, since canManageMembers gates the whole <td>.
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
     // A viewer's own load() never even requests the invitations endpoint.
     expect(apiFetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/invitations"));
   });
@@ -99,7 +116,11 @@ describe("Team page permission-gated rendering", () => {
 
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Grant ownership" })).toBeInTheDocument();
+
+    // The admin row (not the owner's own row, which never offers itself
+    // grant-ownership) is where an owner's grant-ownership action lives.
+    await openRowMenu("admin@example.com");
+    expect(screen.getByRole("menuitem", { name: "Grant ownership" })).toBeInTheDocument();
   });
 
   it("admin (without organization.manage) sees role controls but no grant-ownership button", async () => {
@@ -120,6 +141,11 @@ describe("Team page permission-gated rendering", () => {
     await waitFor(() => expect(screen.getByText("self@example.com")).toBeInTheDocument());
 
     expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Grant ownership" })).not.toBeInTheDocument();
+
+    // members.manage alone still opens the menu (Remove is available), but
+    // without organization.manage the grant-ownership item must be absent.
+    await openRowMenu("self@example.com");
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Grant ownership" })).not.toBeInTheDocument();
   });
 });

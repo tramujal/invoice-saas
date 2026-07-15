@@ -441,6 +441,10 @@ class Invoice(Base):
         return self.customer.name if self.customer is not None else None
 
     @property
+    def customer_phone(self) -> str | None:
+        return self.customer.phone if self.customer is not None else None
+
+    @property
     def effective_payment_status(self) -> "PaymentStatus":
         """The single source of truth every surface (API, PDF, email,
         dashboard, insights, assistant) displays -- see
@@ -723,6 +727,10 @@ class Quote(Base):
     @property
     def customer_name(self) -> str | None:
         return self.customer.name if self.customer is not None else None
+
+    @property
+    def customer_phone(self) -> str | None:
+        return self.customer.phone if self.customer is not None else None
 
     @property
     def effective_status(self) -> "QuoteStatus":

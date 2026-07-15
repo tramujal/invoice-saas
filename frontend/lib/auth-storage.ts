@@ -4,6 +4,7 @@ const ORG_ID_KEY = "invoicing_organization_id";
 const ORG_NAME_KEY = "invoicing_organization_name";
 const ORG_CURRENCY_KEY = "invoicing_organization_currency";
 const ORG_LANGUAGE_KEY = "invoicing_organization_language";
+const ORG_PERMISSIONS_KEY = "invoicing_organization_permissions";
 const USER_EMAIL_KEY = "invoicing_user_email";
 // Exported so other tabs/windows of the same origin can react to a change
 // via the native `storage` event (see EMAIL_VERIFIED_STORAGE_KEY usage in
@@ -24,6 +25,7 @@ export function setAuthSession(params: {
   organizationName?: string;
   organizationCurrency?: string;
   organizationLanguage?: string;
+  organizationPermissions?: string[];
   userEmail?: string;
   emailVerified?: boolean;
 }): void {
@@ -38,6 +40,9 @@ export function setAuthSession(params: {
   }
   if (params.organizationLanguage) {
     window.localStorage.setItem(ORG_LANGUAGE_KEY, params.organizationLanguage);
+  }
+  if (params.organizationPermissions) {
+    window.localStorage.setItem(ORG_PERMISSIONS_KEY, JSON.stringify(params.organizationPermissions));
   }
   if (params.userEmail) {
     window.localStorage.setItem(USER_EMAIL_KEY, params.userEmail);
@@ -54,6 +59,7 @@ export function clearAuthSession(): void {
   window.localStorage.removeItem(ORG_NAME_KEY);
   window.localStorage.removeItem(ORG_CURRENCY_KEY);
   window.localStorage.removeItem(ORG_LANGUAGE_KEY);
+  window.localStorage.removeItem(ORG_PERMISSIONS_KEY);
   window.localStorage.removeItem(USER_EMAIL_KEY);
   window.localStorage.removeItem(EMAIL_VERIFIED_STORAGE_KEY);
 }
@@ -98,6 +104,28 @@ export function updateOrganizationLanguage(language: string): void {
   window.localStorage.setItem(ORG_LANGUAGE_KEY, language);
 }
 
+/** The caller's own effective permission set in the active organization --
+ * see app.permissions.Permission (backend) / lib/permissions.ts (frontend).
+ * Refreshed on every GET /auth/me (AppShell) and organization switch, never
+ * derived from a cached role name. Returns [] (not null) when absent so
+ * callers can pass the result straight to hasPermission() without a guard. */
+export function getOrganizationPermissions(): string[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(ORG_PERMISSIONS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function updateOrganizationPermissions(permissions: string[]): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ORG_PERMISSIONS_KEY, JSON.stringify(permissions));
+}
+
 /** Switches the active organization in place (same token, same user) --
  * used by the accept-invitation flow (a newly-accepted org must become
  * reachable immediately) and the organization switcher. Unlike
@@ -108,6 +136,7 @@ export function updateActiveOrganization(params: {
   organizationName?: string;
   organizationCurrency?: string;
   organizationLanguage?: string;
+  organizationPermissions?: string[];
 }): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(ORG_ID_KEY, params.organizationId.trim());
@@ -119,6 +148,9 @@ export function updateActiveOrganization(params: {
   }
   if (params.organizationLanguage) {
     window.localStorage.setItem(ORG_LANGUAGE_KEY, params.organizationLanguage);
+  }
+  if (params.organizationPermissions) {
+    window.localStorage.setItem(ORG_PERMISSIONS_KEY, JSON.stringify(params.organizationPermissions));
   }
 }
 

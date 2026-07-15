@@ -25,7 +25,15 @@ vi.mock("@/lib/api", async () => {
 
 const meResponse: MeResponse = {
   user: { id: "user-1", email: "owner@example.com", email_verified: true },
-  organizations: [{ id: "org-1", name: "Acme Inc", currency_code: "USD", language: "en" }],
+  organizations: [
+    {
+      id: "org-1",
+      name: "Acme Inc",
+      currency_code: "USD",
+      language: "en",
+      permissions: ["invoice.send", "quote.send"],
+    },
+  ],
 };
 
 beforeEach(() => {

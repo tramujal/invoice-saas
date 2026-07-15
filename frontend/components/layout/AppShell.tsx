@@ -16,6 +16,7 @@ import {
   isAuthenticated,
   setEmailVerified as cacheEmailVerified,
   updateActiveOrganization,
+  updateOrganizationPermissions,
 } from "@/lib/auth-storage";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -80,6 +81,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         setEmailVerifiedState(me.user.email_verified);
         cacheEmailVerified(me.user.email_verified);
         setOrganizations(me.organizations);
+        // Keeps the cached permission set for the *active* org current --
+        // a role change made by another admin (or in another tab) takes
+        // effect here on next navigation, not just on next login.
+        const active = me.organizations.find((o) => o.id === getOrganizationId());
+        if (active) updateOrganizationPermissions(active.permissions);
       })
       .catch((err) => {
         if (!cancelled && err instanceof ApiError && err.status === 401) {
@@ -187,6 +193,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       organizationName: target.name,
       organizationCurrency: target.currency_code,
       organizationLanguage: target.language,
+      organizationPermissions: target.permissions,
     });
     // A full reload, not a client-side navigation -- every already-loaded
     // page's React state (invoice lists, dashboard totals, etc.) was

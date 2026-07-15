@@ -322,10 +322,22 @@ export default function CustomersPage() {
                       {c.name}
                     </td>
                     <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-700 sm:px-6" title={c.email}>
-                      {c.email}
+                      {c.email ? (
+                        <a href={`mailto:${c.email}`} className="hover:text-slate-900 hover:underline">
+                          {c.email}
+                        </a>
+                      ) : (
+                        c.email
+                      )}
                     </td>
                     <td className="hidden px-4 py-2.5 text-slate-600 md:table-cell md:px-6">
-                      {c.phone || "—"}
+                      {c.phone ? (
+                        <a href={`tel:${c.phone}`} className="hover:text-slate-900 hover:underline">
+                          {c.phone}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="hidden max-w-xs truncate px-4 py-2.5 text-slate-600 lg:table-cell lg:px-6">
                       {c.address || "—"}

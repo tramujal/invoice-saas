@@ -17,6 +17,7 @@ import {
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
+import { getOrganizationPermissions } from "@/lib/auth-storage";
 import {
   formatApiError,
   isEmailNotVerifiedError,
@@ -24,6 +25,8 @@ import {
 } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatCurrency } from "@/lib/money";
+import { hasPermission } from "@/lib/permissions";
+import { normalizePhoneForWhatsapp } from "@/lib/phone";
 import {
   QUOTE_STATUSES,
   QUOTE_STATUS_BADGE_CLASS,
@@ -38,6 +41,7 @@ import type {
   SendQuoteEmailResponse,
 } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { buildQuoteWhatsappMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 
 const pageSize = 10;
 
@@ -67,6 +71,13 @@ function QuotesContent() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Same value for every row -- computed once rather than per row. Reused
+  // (not re-derived from a role name) from OrganizationSummary.permissions,
+  // refreshed on every AppShell /auth/me call and organization switch.
+  const canWhatsapp = hasPermission(
+    { permissions: getOrganizationPermissions() },
+    "quote.send"
+  );
 
   const [data, setData] = useState<PaginatedQuotes | null>(null);
   const [offset, setOffset] = useState(0);
@@ -234,6 +245,23 @@ function QuotesContent() {
     }
   }
 
+  // Opens the user's own WhatsApp (Web or app) with a prefilled message --
+  // never sends anything itself. No loading/error state: this is a
+  // synchronous local redirect, not a network call.
+  function openQuoteWhatsapp(row: QuoteSummary) {
+    const normalizedPhone = normalizePhoneForWhatsapp(row.customer_phone);
+    if (!normalizedPhone) return;
+    const message = buildQuoteWhatsappMessage({
+      t,
+      customerName: row.customer_name ?? t("quoteForm.noCustomerOption"),
+      quoteNumber: row.quote_number,
+      total: row.total,
+      currencyCode: row.currency_code,
+      publicUrl: row.public_url,
+    });
+    window.open(buildWhatsappUrl(normalizedPhone, message), "_blank", "noopener,noreferrer");
+  }
+
   async function markQuote(quoteId: string, action: "mark-accepted" | "mark-rejected") {
     if (busyId) return;
     setBusyId(quoteId);
@@ -352,6 +380,24 @@ function QuotesContent() {
         </RowActionsMenu.Item>
       );
     }
+
+    const normalizedPhone = normalizePhoneForWhatsapp(row.customer_phone);
+    items.push(
+      <RowActionsMenu.Item
+        key="whatsapp"
+        onSelect={() => openQuoteWhatsapp(row)}
+        disabled={!normalizedPhone || !canWhatsapp}
+        title={
+          !normalizedPhone
+            ? t("common.whatsappMissingPhone")
+            : !canWhatsapp
+              ? t("quotes.whatsappNoPermission")
+              : undefined
+        }
+      >
+        {t("common.openInWhatsapp")}
+      </RowActionsMenu.Item>
+    );
 
     if (row.effective_status === "sent") {
       items.push(

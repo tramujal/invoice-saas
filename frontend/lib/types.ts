@@ -8,6 +8,7 @@ export type InvoiceSummary = {
   invoice_number: string;
   customer_id: string | null;
   customer_name: string | null;
+  customer_phone: string | null;
   subtotal: string;
   tax_amount: string;
   total: string;
@@ -141,6 +142,9 @@ export type OrganizationSummary = {
   name: string;
   currency_code: string;
   language: string;
+  /** The caller's own effective permission set in this organization -- see
+   * lib/permissions.ts's Permission union and hasPermission(). */
+  permissions: string[];
 };
 
 /** Response from POST /auth/login and POST /auth/register */
@@ -367,6 +371,7 @@ export type QuoteSummary = {
   quote_number: string;
   customer_id: string | null;
   customer_name: string | null;
+  customer_phone: string | null;
   subtotal: string;
   tax_amount: string;
   total: string;
@@ -378,6 +383,8 @@ export type QuoteSummary = {
   expiry_date: string | null;
   active: boolean;
   converted_invoice_id: string | null;
+  /** The durable, shareable public accept/reject link for this quote. */
+  public_url: string;
   created_at: string;
 };
 

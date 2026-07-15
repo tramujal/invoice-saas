@@ -17,6 +17,7 @@ import {
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
+import { getOrganizationPermissions } from "@/lib/auth-storage";
 import {
   formatApiError,
   getApiErrorCode,
@@ -26,12 +27,14 @@ import {
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatDueDateRelative } from "@/lib/invoice-due-date";
 import { formatCurrency } from "@/lib/money";
+import { hasPermission } from "@/lib/permissions";
 import {
   PAYMENT_STATUSES,
   getPaymentStatusLabel,
   isPaymentStatus,
   type PaymentStatus,
 } from "@/lib/payment-status";
+import { normalizePhoneForWhatsapp } from "@/lib/phone";
 import type {
   InvoiceSummary,
   PaginatedInvoices,
@@ -39,6 +42,7 @@ import type {
   SendInvoiceReminderResponse,
 } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { buildInvoiceWhatsappMessage, buildWhatsappUrl } from "@/lib/whatsapp";
 
 const REMINDER_ERROR_KEYS: Record<string, string> = {
   reminders_disabled: "invoices.reminderErrorRemindersDisabled",
@@ -98,6 +102,13 @@ function InvoicesContent() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Same value for every row -- computed once rather than per row. Reused
+  // (not re-derived from a role name) from OrganizationSummary.permissions,
+  // refreshed on every AppShell /auth/me call and organization switch.
+  const canWhatsapp = hasPermission(
+    { permissions: getOrganizationPermissions() },
+    "invoice.send"
+  );
   const [data, setData] = useState<PaginatedInvoices | null>(null);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -361,6 +372,22 @@ function InvoicesContent() {
     } finally {
       setSendingId(null);
     }
+  }
+
+  // Opens the user's own WhatsApp (Web or app) with a prefilled message --
+  // never sends anything itself. No loading/error state: this is a
+  // synchronous local redirect, not a network call.
+  function openInvoiceWhatsapp(row: InvoiceSummary) {
+    const normalizedPhone = normalizePhoneForWhatsapp(row.customer_phone);
+    if (!normalizedPhone) return;
+    const message = buildInvoiceWhatsappMessage({
+      t,
+      customerName: row.customer_name ?? t("invoiceForm.noCustomerOption"),
+      invoiceNumber: row.invoice_number,
+      total: row.total,
+      currencyCode: row.currency_code,
+    });
+    window.open(buildWhatsappUrl(normalizedPhone, message), "_blank", "noopener,noreferrer");
   }
 
   async function sendReminder(row: InvoiceSummary) {
@@ -665,6 +692,19 @@ function InvoicesContent() {
                             disabled={sendingId === row.id || downloadingId === row.id}
                           >
                             {t("invoices.sendEmail")}
+                          </RowActionsMenu.Item>
+                          <RowActionsMenu.Item
+                            onSelect={() => openInvoiceWhatsapp(row)}
+                            disabled={!normalizePhoneForWhatsapp(row.customer_phone) || !canWhatsapp}
+                            title={
+                              !normalizePhoneForWhatsapp(row.customer_phone)
+                                ? t("common.whatsappMissingPhone")
+                                : !canWhatsapp
+                                  ? t("invoices.whatsappNoPermission")
+                                  : undefined
+                            }
+                          >
+                            {t("common.openInWhatsapp")}
                           </RowActionsMenu.Item>
                           {canRemind ? (
                             <RowActionsMenu.Item

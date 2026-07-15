@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
@@ -86,17 +87,36 @@ VERIFY_EMAIL_SUCCESS_MESSAGE = "Your email address has been verified."
 VERIFY_EMAIL_ERROR_MESSAGE = "Invalid or expired verification token."
 
 
-def _user_organizations(db: Session, user_id: str) -> list[Organization]:
-    return list(
-        db.scalars(
-            select(Organization)
-            .join(
-                OrganizationMember,
-                OrganizationMember.organization_id == Organization.id,
-            )
-            .where(OrganizationMember.user_id == user_id)
-            .order_by(Organization.name)
-        ).all()
+class _UserOrganization(NamedTuple):
+    """An org the caller belongs to, paired with their own membership row --
+    the membership is what carries .permissions (see
+    OrganizationMember.permissions), needed to build OrganizationSummary
+    without a second query per org."""
+
+    organization: Organization
+    member: OrganizationMember
+
+
+def _user_organizations(db: Session, user_id: str) -> list[_UserOrganization]:
+    rows = db.execute(
+        select(Organization, OrganizationMember)
+        .join(
+            OrganizationMember,
+            OrganizationMember.organization_id == Organization.id,
+        )
+        .where(OrganizationMember.user_id == user_id)
+        .order_by(Organization.name)
+    ).all()
+    return [_UserOrganization(organization=org, member=member) for org, member in rows]
+
+
+def _organization_summary(user_org: _UserOrganization) -> OrganizationSummary:
+    return OrganizationSummary(
+        id=user_org.organization.id,
+        name=user_org.organization.name,
+        currency_code=user_org.organization.currency_code,
+        language=user_org.organization.language,
+        permissions=user_org.member.permissions,
     )
 
 
@@ -132,11 +152,10 @@ def register(
     # one owner" invariant (app.services.team) has to hold from the very
     # first membership row, not just after someone later grants ownership.
     # OrganizationMember.role otherwise defaults to "member".
-    db.add(
-        OrganizationMember(
-            user_id=user.id, organization_id=organization.id, role=MembershipRole.owner.value
-        )
+    membership = OrganizationMember(
+        user_id=user.id, organization_id=organization.id, role=MembershipRole.owner.value
     )
+    db.add(membership)
     db.commit()
     db.refresh(user)
 
@@ -154,7 +173,9 @@ def register(
     return AuthResponse(
         access_token=create_access_token(user.id),
         user=UserResponse.model_validate(user),
-        organizations=[OrganizationSummary.model_validate(organization)],
+        organizations=[
+            _organization_summary(_UserOrganization(organization=organization, member=membership))
+        ],
     )
 
 
@@ -191,8 +212,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -
         access_token=create_access_token(user.id),
         user=UserResponse.model_validate(user),
         organizations=[
-            OrganizationSummary.model_validate(o)
-            for o in _user_organizations(db, user.id)
+            _organization_summary(uo) for uo in _user_organizations(db, user.id)
         ],
     )
 
@@ -205,8 +225,7 @@ def me(
     return MeResponse(
         user=UserResponse.model_validate(current_user),
         organizations=[
-            OrganizationSummary.model_validate(o)
-            for o in _user_organizations(db, current_user.id)
+            _organization_summary(uo) for uo in _user_organizations(db, current_user.id)
         ],
     )
 
@@ -449,7 +468,7 @@ def resend_verification(
         return ResendVerificationResponse(message=ALREADY_VERIFIED_MESSAGE)
 
     organizations = _user_organizations(db, current_user.id)
-    language = organizations[0].language if organizations else DEFAULT_LANGUAGE
+    language = organizations[0].organization.language if organizations else DEFAULT_LANGUAGE
     background_tasks.add_task(
         _issue_email_verification_task, current_user.id, language
     )

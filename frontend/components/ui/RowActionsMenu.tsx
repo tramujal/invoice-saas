@@ -264,6 +264,9 @@ type RowActionsMenuItemProps = {
   onSelect: () => void;
   disabled?: boolean;
   destructive?: boolean;
+  /** Native tooltip explaining why the item is disabled (e.g. missing data
+   * or permission) -- only meaningful paired with disabled. */
+  title?: string;
 };
 
 function itemClassName(destructive?: boolean): string {
@@ -279,6 +282,7 @@ function RowActionsMenuItem({
   onSelect,
   disabled,
   destructive,
+  title,
 }: RowActionsMenuItemProps) {
   const { close } = useMenuContext("RowActionsMenu.Item");
 
@@ -288,6 +292,7 @@ function RowActionsMenuItem({
       role="menuitem"
       aria-disabled={disabled || undefined}
       disabled={disabled}
+      title={title}
       tabIndex={-1}
       onClick={() => {
         if (disabled) return;

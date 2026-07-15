@@ -213,6 +213,11 @@ class OrganizationSummary(BaseModel):
     name: str
     currency_code: str
     language: str
+    # The caller's own effective permission set in this organization --
+    # same computed values as OrganizationMember.permissions / see
+    # MemberResponse.permissions's docstring for why the frontend must gate
+    # UI on these values rather than re-deriving them from a role name.
+    permissions: list[str]
 
 
 class AuthResponse(BaseModel):
@@ -529,6 +534,7 @@ class InvoiceSummaryResponse(BaseModel):
     invoice_number: str
     customer_id: str | None
     customer_name: str | None
+    customer_phone: str | None
     subtotal: Decimal
     tax_amount: Decimal
     total: Decimal
@@ -662,6 +668,7 @@ class QuoteSummaryResponse(BaseModel):
     quote_number: str
     customer_id: str | None
     customer_name: str | None
+    customer_phone: str | None
     subtotal: Decimal
     tax_amount: Decimal
     total: Decimal
@@ -673,6 +680,10 @@ class QuoteSummaryResponse(BaseModel):
     expiry_date: date | None
     active: bool
     converted_invoice_id: str | None
+    # The durable, shareable public accept/reject link -- same property as
+    # QuoteResponse.public_url, now also on the list-row shape so row
+    # actions (e.g. "Open in WhatsApp") don't need a second detail fetch.
+    public_url: str
     created_at: datetime
 
     @field_validator("quote_number", mode="before")
