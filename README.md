@@ -104,6 +104,54 @@ Runs at `http://localhost:3000`. On first load you'll land on `/login`,
 where you can either sign in or create a new account (which also creates
 your organization).
 
+## Docker
+
+An alternative to the setup above: bring up Postgres, the backend, and the
+frontend together with Docker Compose — real Postgres locally instead of
+SQLite, no local Python/Node install needed.
+
+```bash
+docker compose up --build
+```
+
+That's it — no `.env` file is required; `docker-compose.yml` already has
+safe local defaults for everything. The frontend is at
+`http://localhost:3000`, the API at `http://localhost:8000` (`/docs` for
+interactive docs), and Postgres itself is published at `localhost:5432` if
+you want to connect with `psql` or a GUI client.
+
+- Data persists across `docker compose down` / `docker compose up` (named
+  volume `pgdata`) — only `docker compose down -v` removes it.
+- To enable real email sending or the AI Business Assistant locally, copy
+  [`.env.docker.example`](.env.docker.example) to `.env` and fill in the
+  keys you want, then `docker compose up --build` again. (Docker Compose
+  auto-loads a root-level `.env` file for substitution — if you've also
+  been using the non-Docker setup above and already have a `.env` from `cp
+  .env.example .env`, that's fine: `docker-compose.yml` hardcodes its own
+  database/JWT/CORS values directly rather than reading them from `.env`,
+  so only the optional AI/email keys are ever picked up from it.)
+- The scheduled reminder jobs (normally triggered by the GitHub Actions
+  workflow in production) can be run on demand against the Dockerized
+  database:
+  ```bash
+  docker compose run --rm backend python -m app.jobs.send_due_invoice_reminders --dry-run
+  docker compose run --rm backend python -m app.jobs.send_expiring_quote_reminders --dry-run
+  ```
+  (`docker compose run` inherits the `backend` service's environment, so
+  `DATABASE_URL` already points at the Dockerized Postgres — drop
+  `--dry-run` to actually send.)
+- This is purely additive — it doesn't change the Render/Vercel/Neon
+  deployment below or the non-Docker setup above; use whichever fits what
+  you're doing.
+- Docker's own port-mapping/NAT layer means the client IP the backend's
+  rate limiter sees inside the container (`request.client.host`) may not be
+  literally `127.0.0.1`, even for requests from the same machine — commonly
+  the `docker0` bridge gateway on Linux, or something further removed via
+  the VM networking layer on Docker Desktop for Windows/Mac. This doesn't
+  weaken anything (`TRUSTED_PROXY_HOPS=0` in the compose file still ignores
+  `X-Forwarded-For` entirely, matching local dev), it just means don't be
+  surprised if rate-limit buckets key on an unfamiliar-looking IP locally.
+
 ## Deployment
 
 Three pieces, in order: a Postgres database (Neon), the API (Render), then

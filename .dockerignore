@@ -1,0 +1,60 @@
+# Backend Docker build context exclusions (see Dockerfile at repo root).
+# Mirrors .gitignore's patterns, plus things that are never needed to
+# install requirements.txt or copy app/.
+
+# --- Python / FastAPI backend ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# SQLite databases (local dev data, not source)
+*.db
+*.db-journal
+*.sqlite3
+
+# --- Node / Next.js frontend (irrelevant to the backend image) ---
+frontend/
+
+# --- Tests (not needed at runtime) ---
+tests/
+pytest.ini
+requirements-test.txt
+
+# --- Environment / secrets ---
+.env
+.env.*
+*.pem
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# --- VCS / Docker / misc ---
+.git/
+.github/
+.claude/
+Dockerfile
+frontend/Dockerfile
+.dockerignore
+frontend/.dockerignore
+docker-compose.yml
+README.md
+render.yaml
