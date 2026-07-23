@@ -118,6 +118,51 @@ def test_cancel_invitation_hard_deletes(client, db_session):
     assert db_session.query(OrganizationInvitation).filter_by(id=invitation.id).first() is None
 
 
+def test_accept_invitation_blocked_for_suspended_organization(client, db_session):
+    from app.services.team import invite_member_record
+    from app.membership_role import InvitationRole
+    from app.organization_status import OrganizationStatus
+    from tests.factories import make_user
+    from app.security import create_access_token
+
+    owner = make_org_with_owner(db_session, email="owner-suspended@example.com")
+    invitation, raw_token = invite_member_record(
+        db_session, owner.organization.id, "invitee-suspended@example.com", InvitationRole.member, owner.membership
+    )
+    invitee = make_user(db_session, email="invitee-suspended@example.com")
+    invitee_headers = {"Authorization": f"Bearer {create_access_token(invitee.id)}"}
+
+    owner.organization.status = OrganizationStatus.suspended.value
+    db_session.commit()
+
+    response = client.post(f"/invitations/public/{raw_token}/accept", headers=invitee_headers)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "organization_suspended"
+
+    assert (
+        db_session.query(OrganizationMember)
+        .filter_by(user_id=invitee.id, organization_id=owner.organization.id)
+        .first()
+        is None
+    )
+
+
+def test_view_invitation_remains_available_for_suspended_organization(client, db_session):
+    from app.services.team import invite_member_record
+    from app.membership_role import InvitationRole
+    from app.organization_status import OrganizationStatus
+
+    owner = make_org_with_owner(db_session, email="owner-suspended2@example.com")
+    invitation, raw_token = invite_member_record(
+        db_session, owner.organization.id, "invitee-suspended2@example.com", InvitationRole.member, owner.membership
+    )
+    owner.organization.status = OrganizationStatus.suspended.value
+    db_session.commit()
+
+    response = client.get(f"/invitations/public/{raw_token}")
+    assert response.status_code == 200
+
+
 def test_accept_invitation_happy_path_creates_membership(client, db_session):
     from app.services.team import invite_member_record
     from app.membership_role import InvitationRole
@@ -202,6 +247,75 @@ def test_accept_invitation_already_accepted_is_rejected(client, db_session):
     second = client.post(f"/invitations/public/{raw_token}/accept", headers=invitee_headers)
     assert second.status_code == 409
     assert second.json()["detail"]["code"] == "invitation_already_accepted"
+
+
+def test_stale_invitation_with_tampered_role_cannot_bypass_hierarchy(client, db_session):
+    """A stale/tampered invitation row whose role isn't a recognized
+    InvitationRole (e.g. hand-edited to "owner", which InvitationRole
+    never permits) must never be blindly trusted at accept time -- it's
+    rejected outright rather than materializing a membership with an
+    unvalidated role."""
+    from app.services.team import invite_member_record
+    from app.membership_role import InvitationRole
+    from tests.factories import make_user
+    from app.security import create_access_token
+
+    owner = make_org_with_owner(db_session, email="owner-stale@example.com")
+    invitation, raw_token = invite_member_record(
+        db_session, owner.organization.id, "stale-invitee@example.com", InvitationRole.member, owner.membership
+    )
+    # Simulate a tampered/stale row -- bypasses InvitationCreateRequest's
+    # schema validation entirely, which is exactly what accept-time
+    # revalidation must guard against.
+    invitation.role = "owner"
+    db_session.commit()
+
+    invitee = make_user(db_session, email="stale-invitee@example.com")
+    invitee_headers = {"Authorization": f"Bearer {create_access_token(invitee.id)}"}
+
+    response = client.post(f"/invitations/public/{raw_token}/accept", headers=invitee_headers)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "invitation_invalid"
+
+    assert (
+        db_session.query(OrganizationMember)
+        .filter_by(user_id=invitee.id, organization_id=owner.organization.id)
+        .first()
+        is None
+    )
+
+
+def test_invitation_acceptance_never_creates_an_owner(client, db_session):
+    """Explicit regression for the Phase 13D.1 pre-check: the ONLY path
+    that can ever set role="owner" is the dedicated grant-ownership
+    action (app.services.team.grant_ownership_record) -- invitation
+    acceptance materializes whatever InvitationRole was on the
+    invitation, which structurally excludes "owner" (see
+    app.membership_role.InvitationRole's docstring), and this holds even
+    for the highest role an invitation can legitimately carry (admin)."""
+    from app.services.team import invite_member_record
+    from app.membership_role import InvitationRole
+    from tests.factories import make_user
+    from app.security import create_access_token
+
+    owner = make_org_with_owner(db_session, email="owner-never-owner@example.com")
+    invitation, raw_token = invite_member_record(
+        db_session, owner.organization.id, "never-owner-invitee@example.com", InvitationRole.admin, owner.membership
+    )
+    invitee = make_user(db_session, email="never-owner-invitee@example.com")
+    invitee_headers = {"Authorization": f"Bearer {create_access_token(invitee.id)}"}
+
+    response = client.post(f"/invitations/public/{raw_token}/accept", headers=invitee_headers)
+    assert response.status_code == 200
+    assert response.json()["role"] == "admin"
+
+    membership = (
+        db_session.query(OrganizationMember)
+        .filter_by(user_id=invitee.id, organization_id=owner.organization.id)
+        .one()
+    )
+    assert membership.role != "owner"
+    assert membership.role == "admin"
 
 
 def test_invitation_token_stored_hashed_not_raw(db_session):

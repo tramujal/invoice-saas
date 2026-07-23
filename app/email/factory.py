@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 
 from app.email.base import EmailSender
 from app.email.resend_provider import ResendEmailSender
+from app.services.platform_settings import get_effective_settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,29 @@ def get_email_sender() -> EmailSender:
     Email is optional infrastructure — unlike JWT_SECRET_KEY, missing config
     here shouldn't stop the app from booting. Endpoints that need to send
     email get a clean 503 instead, only when actually invoked.
+
+    Checks the dynamic emails_enabled switch (app.services.
+    platform_settings) first -- the one shared enforcement point every
+    email-sending call site in the app goes through, so disabling email
+    here means the provider is never constructed and never called,
+    regardless of caller. Existing callers that already wrap this call in
+    `except (EmailSendError, HTTPException)` (the password-reset/
+    verification anti-enumeration paths) transparently swallow this
+    exactly as they already swallow "not configured" -- no change needed
+    there. Callers that surface failures directly to an already-
+    authenticated user (invitations, invoice/quote "send email") now
+    surface "disabled" the same clear way.
     """
+    settings = get_effective_settings()
+    if not settings.emails_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "emails_disabled",
+                "message": "Email sending is currently disabled by a platform administrator.",
+            },
+        )
+
     api_key = os.environ.get("RESEND_API_KEY")
     from_address = os.environ.get("EMAIL_FROM")
 

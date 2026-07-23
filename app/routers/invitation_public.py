@@ -5,6 +5,12 @@ invitation. Unlike the quote public flow, accept here DOES require an
 authenticated caller (get_current_user) -- the entire point is creating a
 real OrganizationMember tied to a real user_id, so "public" only means
 "doesn't require prior membership in the org being joined."
+
+Suspended organizations (see app.organization_status): view stays
+available (an invitee should at least see why the invite currently can't
+be actioned, rather than a raw error). accept is blocked -- there's no
+reason to let someone join a currently-frozen organization; they'd just
+find every org-scoped page locked out immediately afterward anyway.
 """
 
 import logging
@@ -19,6 +25,7 @@ from app.email.base import EmailMessage, EmailSendError
 from app.email.factory import get_email_sender
 from app.email.invitation_templates import build_invitation_accepted_email
 from app.models import User
+from app.organization_status import OrganizationStatus
 from app.rate_limit import (
     INVITATION_PUBLIC_ACCEPT_RULES,
     INVITATION_PUBLIC_VIEW_RULES,
@@ -28,7 +35,9 @@ from app.rate_limit import (
     user_identity,
 )
 from app.schemas import PublicInvitationAcceptResponse, PublicInvitationResponse
+from app.services.platform_settings import get_effective_settings
 from app.services.team import (
+    InvalidInvitationRoleError,
     InvitationAlreadyAcceptedError,
     InvitationEmailMismatchError,
     InvitationExpiredError,
@@ -91,6 +100,23 @@ def accept_public_invitation(
     )
     invitation = _invitation_by_token(db, token)
 
+    if invitation.organization.status == OrganizationStatus.suspended.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "organization_suspended",
+                "message": "This organization is not currently accepting new members.",
+            },
+        )
+    if get_effective_settings(db).maintenance_mode:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "maintenance_mode",
+                "message": "The platform is currently undergoing maintenance. Please try again shortly.",
+            },
+        )
+
     try:
         membership = accept_invitation_record(db, invitation, current_user)
     except InvitationAlreadyAcceptedError:
@@ -109,6 +135,14 @@ def accept_public_invitation(
             detail={
                 "code": "invitation_email_mismatch",
                 "message": "This invitation was sent to a different email address.",
+            },
+        )
+    except InvalidInvitationRoleError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "invitation_invalid",
+                "message": "This invitation is no longer valid.",
             },
         )
 

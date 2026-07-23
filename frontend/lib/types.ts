@@ -135,6 +135,13 @@ export type AuthUser = {
   id: string;
   email: string;
   email_verified: boolean;
+  /** The caller's own platform-administration role (see
+   * app.platform_permissions on the backend), entirely independent from
+   * any organization role. Null for every ordinary user. Only ever used
+   * client-side to decide whether to show the Platform Admin entry point
+   * -- never a source of truth for authorization, which the backend
+   * always re-checks live. */
+  platform_role: string | null;
 };
 
 export type OrganizationSummary = {
@@ -145,6 +152,12 @@ export type OrganizationSummary = {
   /** The caller's own effective permission set in this organization -- see
    * lib/permissions.ts's Permission union and hasPermission(). */
   permissions: string[];
+  /** Set by a platform admin via the admin console (see
+   * PlatformOrganizationDetail below) -- checked by AppShell on every
+   * /auth/me refresh: if the *active* organization is suspended, AppShell
+   * shows a blocking notice instead of its children, since every
+   * org-scoped API call would otherwise 403 anyway. */
+  status: "active" | "suspended";
 };
 
 /** Response from POST /auth/login and POST /auth/register */
@@ -634,4 +647,198 @@ export type TeamSummary = {
   by_role: TeamRoleCount[];
   owner_count: number;
   pending_invitations: number;
+};
+
+// --- Platform administration (app.routers.platform_admin, read-only) ---
+//
+// `created_at` on both org/user summary and detail types is NOT a real
+// persisted timestamp -- it's derived from the earliest active
+// membership row (see the backend schema docstrings in app/schemas.py).
+// Every page that renders it must label it as approximate/derived, never
+// as a bare "Created" field -- see admin.createdApprox in translations.ts.
+
+export type PlatformSystemHealth = {
+  database_reachable: boolean;
+  email_provider_configured: boolean;
+  email_provider: string | null;
+  ai_provider_configured: boolean;
+  ai_provider: string | null;
+  reminder_emails_pending: number;
+  reminder_emails_sent_7d: number;
+  reminder_emails_failed_7d: number;
+};
+
+export type PlatformSettings = {
+  maintenance_mode: boolean;
+  registrations_enabled: boolean;
+  ai_enabled: boolean;
+  emails_enabled: boolean;
+  invoice_reminders_enabled: boolean;
+  quote_reminders_enabled: boolean;
+  default_language: string;
+  default_currency: string;
+  updated_at: string;
+  updated_by_email: string | null;
+  version: number;
+
+  ai_provider: string | null;
+  email_provider: string | null;
+  cors_allowed_origins: string[];
+};
+
+export type PlatformSettingsUpdateRequest = {
+  reason: string;
+  expected_version: number;
+  maintenance_mode?: boolean;
+  registrations_enabled?: boolean;
+  ai_enabled?: boolean;
+  emails_enabled?: boolean;
+  invoice_reminders_enabled?: boolean;
+  quote_reminders_enabled?: boolean;
+  default_language?: string;
+  default_currency?: string;
+};
+
+/** GET /public/config -- the only two values the unauthenticated login/
+ * register UI needs. See app.schemas.PublicConfigResponse's own docstring
+ * for why nothing else belongs here. */
+export type PublicConfig = {
+  maintenance_mode: boolean;
+  registrations_enabled: boolean;
+};
+
+export type PlatformDashboard = {
+  organizations_total: number;
+  organizations_new_7d: number;
+  organizations_new_30d: number;
+  users_total: number;
+  users_new_7d: number;
+  users_new_30d: number;
+  invoices_total: number;
+  quotes_total: number;
+  customers_total: number;
+  products_total: number;
+  reminder_emails_sent_7d: number;
+  reminder_emails_failed_7d: number;
+  ai_actions_executed_7d: number;
+  health: PlatformSystemHealth;
+};
+
+export type PlatformOrganizationStatus = "active" | "suspended";
+
+export type PlatformOrganizationSummary = {
+  id: string;
+  name: string;
+  business_name: string | null;
+  status: PlatformOrganizationStatus;
+  owner_email: string | null;
+  members_count: number;
+  invoices_count: number;
+  quotes_count: number;
+  customers_count: number;
+  created_at: string | null;
+  last_activity_at: string | null;
+};
+
+export type PlatformOrganizationMember = {
+  user_id: string;
+  email: string;
+  role: string;
+  status: string;
+  joined_at: string;
+};
+
+export type PlatformOrganizationRecentDocument = {
+  type: "invoice" | "quote";
+  number: string;
+  status: string;
+  total: string;
+  currency_code: string;
+  created_at: string;
+};
+
+export type PlatformOrganizationDetail = {
+  id: string;
+  name: string;
+  business_name: string | null;
+  status: PlatformOrganizationStatus;
+  owner_email: string | null;
+  members_count: number;
+  invoices_count: number;
+  quotes_count: number;
+  customers_count: number;
+  products_count: number;
+  language: string;
+  currency_code: string;
+  timezone: string;
+  created_at: string | null;
+  last_activity_at: string | null;
+  members: PlatformOrganizationMember[];
+  recent_documents: PlatformOrganizationRecentDocument[];
+};
+
+export type PaginatedPlatformOrganizations = {
+  total: number;
+  items: PlatformOrganizationSummary[];
+};
+
+export type PlatformUserOrganization = {
+  organization_id: string;
+  organization_name: string;
+  role: string;
+  status: string;
+};
+
+export type PlatformUserStatus = "active" | "disabled";
+
+export type PlatformUserSummary = {
+  id: string;
+  email: string;
+  email_verified: boolean;
+  status: PlatformUserStatus;
+  platform_role: string | null;
+  organizations_count: number;
+  created_at: string | null;
+};
+
+export type PlatformUserDetail = {
+  id: string;
+  email: string;
+  email_verified: boolean;
+  status: PlatformUserStatus;
+  platform_role: string | null;
+  created_at: string | null;
+  organizations: PlatformUserOrganization[];
+};
+
+export type PaginatedPlatformUsers = {
+  total: number;
+  items: PlatformUserSummary[];
+};
+
+export type PlatformUserActionResponse = {
+  message: string;
+};
+
+export type PlatformAuditLogTargetType = "organization" | "user" | null;
+
+export type PlatformAuditLogEntry = {
+  id: string;
+  action: string;
+  actor_user_id: string | null;
+  actor_email: string;
+  target_type: PlatformAuditLogTargetType;
+  target_organization_id: string | null;
+  target_organization_name: string | null;
+  target_user_id: string | null;
+  target_user_email: string | null;
+  reason: string;
+  details: Record<string, unknown> | null;
+  client_ip: string | null;
+  created_at: string;
+};
+
+export type PaginatedPlatformAuditLog = {
+  total: number;
+  items: PlatformAuditLogEntry[];
 };

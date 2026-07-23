@@ -1,6 +1,30 @@
 from tests.factories import make_user
 
 
+def test_login_response_includes_platform_role_when_set(client, db_session):
+    user = make_user(db_session, email="platform-admin@example.com")
+    user.platform_role = "super_admin"
+    db_session.commit()
+
+    response = client.post(
+        "/auth/login", json={"email": "platform-admin@example.com", "password": "Correct-Horse-1"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["platform_role"] == "super_admin"
+
+
+def test_login_response_platform_role_is_null_for_ordinary_user(client, db_session):
+    make_user(db_session, email="ordinary@example.com")
+
+    response = client.post(
+        "/auth/login", json={"email": "ordinary@example.com", "password": "Correct-Horse-1"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["platform_role"] is None
+
+
 def test_login_succeeds_with_correct_credentials(client, db_session):
     make_user(db_session, email="login@example.com")
 

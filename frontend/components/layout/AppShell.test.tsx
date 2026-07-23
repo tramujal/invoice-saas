@@ -24,7 +24,7 @@ vi.mock("@/lib/api", async () => {
 });
 
 const meResponse: MeResponse = {
-  user: { id: "user-1", email: "owner@example.com", email_verified: true },
+  user: { id: "user-1", email: "owner@example.com", email_verified: true, platform_role: null },
   organizations: [
     {
       id: "org-1",
@@ -32,6 +32,7 @@ const meResponse: MeResponse = {
       currency_code: "USD",
       language: "en",
       permissions: ["invoice.send", "quote.send"],
+      status: "active",
     },
   ],
 };
@@ -104,5 +105,91 @@ describe("AppShell mobile nav", () => {
     renderWithProviders(<AppShell>content</AppShell>);
 
     await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/login"));
+  });
+});
+
+describe("AppShell platform admin entry link", () => {
+  it("is hidden when the user has no platform role", async () => {
+    renderWithProviders(<AppShell>content</AppShell>);
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+
+    expect(screen.queryByText("Platform Admin")).not.toBeInTheDocument();
+  });
+
+  it("is shown once /auth/me reports a platform role", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...meResponse,
+      user: { ...meResponse.user, platform_role: "super_admin" },
+    });
+
+    renderWithProviders(<AppShell>content</AppShell>);
+
+    await waitFor(() => expect(screen.getAllByText("Platform Admin").length).toBeGreaterThan(0));
+  });
+});
+
+describe("AppShell active-organization fallback", () => {
+  it("switches to another organization when the cached active org is missing from /auth/me (self-removal)", async () => {
+    const assignSpy = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, assign: assignSpy },
+    });
+
+    const otherOrg = {
+      id: "org-2",
+      name: "Other Org",
+      currency_code: "EUR",
+      language: "es",
+      permissions: ["invoice.send"],
+      status: "active" as const,
+    };
+    apiFetchMock.mockResolvedValue({
+      user: meResponse.user,
+      organizations: [otherOrg],
+    });
+
+    renderWithProviders(<AppShell>content</AppShell>);
+
+    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/dashboard"));
+    expect(window.localStorage.getItem("invoicing_organization_id")).toBe("org-2");
+
+    Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+  });
+
+  it("clears the session and redirects to /login when no organizations remain", async () => {
+    apiFetchMock.mockResolvedValue({
+      user: meResponse.user,
+      organizations: [],
+    });
+
+    renderWithProviders(<AppShell>content</AppShell>);
+
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/login"));
+    expect(window.localStorage.getItem("invoicing_auth_token")).toBeNull();
+  });
+});
+
+describe("AppShell suspended-organization notice", () => {
+  it("renders children normally when the active organization is active", async () => {
+    renderWithProviders(<AppShell>dashboard content</AppShell>);
+
+    await waitFor(() => expect(screen.getByText("dashboard content")).toBeInTheDocument());
+    expect(screen.queryByText("This organization has been suspended")).not.toBeInTheDocument();
+  });
+
+  it("replaces children with a blocking notice when the active organization is suspended", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...meResponse,
+      organizations: [{ ...meResponse.organizations[0], status: "suspended" }],
+    });
+
+    renderWithProviders(<AppShell>dashboard content</AppShell>);
+
+    await waitFor(() =>
+      expect(screen.getByText("This organization has been suspended")).toBeInTheDocument()
+    );
+    expect(screen.queryByText("dashboard content")).not.toBeInTheDocument();
   });
 });

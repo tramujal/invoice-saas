@@ -40,10 +40,12 @@ from sqlalchemy.orm import selectinload
 from app.database import SessionLocal
 from app.models import Invoice, InvoiceReminder, Organization, init_db
 from app.org_time import get_organization_today
+from app.organization_status import OrganizationStatus
 from app.payment_status import PaymentStatus
 from app.reminder_settings import parse_day_list
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
+from app.services.platform_settings import get_effective_settings
 from app.services.invoices import (
     CustomerEmailMissingError,
     InvoiceAlreadyPaidError,
@@ -128,8 +130,31 @@ def run(dry_run: bool) -> int:
     candidate_count = 0
 
     try:
+        # Global kill switches (see app.services.platform_settings) --
+        # maintenance mode overrides everything else (no sending of any
+        # kind while the platform is down for maintenance), and
+        # invoice_reminders_enabled is the top-level toggle independent
+        # of any organization's own reminders_enabled setting. Checked
+        # before any query runs, not per-organization -- when either is
+        # false, this entire run is a no-op.
+        settings = get_effective_settings(db)
+        if settings.maintenance_mode or not settings.invoice_reminders_enabled:
+            logger.info(
+                "send_due_invoice_reminders: skipped entire run "
+                "maintenance_mode=%s invoice_reminders_enabled=%s",
+                settings.maintenance_mode,
+                settings.invoice_reminders_enabled,
+            )
+            return 0
+
+        # Suspended organizations (see app.organization_status) are
+        # excluded outright -- there's no product reason to keep emailing
+        # a frozen tenant's customers on its behalf.
         organizations = db.scalars(
-            select(Organization).where(Organization.reminders_enabled.is_(True))
+            select(Organization).where(
+                Organization.reminders_enabled.is_(True),
+                Organization.status == OrganizationStatus.active.value,
+            )
         ).all()
 
         for organization in organizations:

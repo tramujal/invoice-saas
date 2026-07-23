@@ -28,6 +28,7 @@ from app.services.team import (
     AlreadyMemberError,
     InvitationAlreadyAcceptedError,
     InvitationAlreadyPendingError,
+    RoleAssignmentNotAllowedError,
     cancel_invitation_record,
     invite_member_record,
     resend_invitation_record,
@@ -131,6 +132,14 @@ def create_invitation(
 
     try:
         invitation, raw_token = invite_member_record(db, organization_id, body.email, body.role, actor)
+    except RoleAssignmentNotAllowedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "role_assignment_not_allowed",
+                "message": "You cannot invite someone at a role equal to or higher than your own.",
+            },
+        )
     except AlreadyMemberError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -33,10 +33,12 @@ from sqlalchemy.orm import selectinload
 from app.database import SessionLocal
 from app.models import Organization, Quote, QuoteReminder, init_db
 from app.org_time import get_organization_today
+from app.organization_status import OrganizationStatus
 from app.quote_effective_status import get_effective_quote_status
 from app.quote_status import QuoteStatus
 from app.reminder_settings import parse_day_list
 from app.reminder_status import ReminderStatus
+from app.services.platform_settings import get_effective_settings
 from app.services.quotes import (
     CustomerEmailMissingError,
     QuoteNotEligibleForReminderError,
@@ -79,8 +81,28 @@ def run(dry_run: bool) -> int:
     candidate_count = 0
 
     try:
+        # Global kill switches (see app.services.platform_settings) --
+        # same rationale as send_due_invoice_reminders.py's identical
+        # check: maintenance mode overrides everything, and
+        # quote_reminders_enabled is the top-level toggle independent of
+        # any organization's own quote_reminders_enabled setting.
+        settings = get_effective_settings(db)
+        if settings.maintenance_mode or not settings.quote_reminders_enabled:
+            logger.info(
+                "send_expiring_quote_reminders: skipped entire run "
+                "maintenance_mode=%s quote_reminders_enabled=%s",
+                settings.maintenance_mode,
+                settings.quote_reminders_enabled,
+            )
+            return 0
+
+        # Suspended organizations (see app.organization_status) are
+        # excluded outright -- same rationale as the invoice-reminder job.
         organizations = db.scalars(
-            select(Organization).where(Organization.quote_reminders_enabled.is_(True))
+            select(Organization).where(
+                Organization.quote_reminders_enabled.is_(True),
+                Organization.status == OrganizationStatus.active.value,
+            )
         ).all()
 
         for organization in organizations:

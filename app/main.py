@@ -18,8 +18,10 @@ from app.routers import (
     invitations,
     invoices,
     organizations,
+    platform_admin,
     product_imports,
     products,
+    public_config,
     quote_public,
     quotes,
     team,
@@ -89,3 +91,5 @@ app.include_router(insights.router)
 app.include_router(organizations.router)
 app.include_router(assistant.router)
 app.include_router(assistant_actions.router)
+app.include_router(platform_admin.router)
+app.include_router(public_config.router)

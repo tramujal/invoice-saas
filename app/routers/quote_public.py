@@ -3,12 +3,20 @@ accept, reject. No organization_id anywhere in these URLs: the token alone
 resolves the quote (see get_quote_by_public_token), and it is never scoped
 by anything else. Every mutating action is rate-limited by IP (see
 app.rate_limit.ip_identity) since there is no logged-in user to key on.
+
+Suspended organizations (see app.organization_status): view/pdf stay
+available -- read-only, and breaking an already-issued customer link over
+an internal platform action the customer had no part in is needless
+collateral damage. accept/reject are blocked (see
+_ensure_organization_active_for_mutation) -- a mutating business outcome
+shouldn't be recorded on behalf of a frozen tenant.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.organization_status import OrganizationStatus
 from app.quote_pdf import render_quote_pdf
 from app.quote_numbering import format_quote_number
 from app.rate_limit import (
@@ -19,6 +27,7 @@ from app.rate_limit import (
     ip_identity,
 )
 from app.schemas import PublicQuoteActionResponse, PublicQuoteResponse
+from app.services.platform_settings import get_effective_settings
 from app.services.quotes import (
     QuoteAlreadyRespondedError,
     QuoteNotFoundError,
@@ -37,6 +46,42 @@ def _quote_by_token(db: Session, token: str):
         # Never distinguishes "wrong token" from "not found" -- both are
         # exactly the same 404 to an anonymous caller.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
+
+
+def _ensure_organization_active_for_mutation(quote) -> None:
+    """Blocks accept/reject only -- never view/pdf (see this module's
+    docstring update below). A suspended tenant shouldn't have new
+    business outcomes recorded on its behalf, but a customer who already
+    holds this link did nothing wrong and shouldn't lose the ability to
+    just look at it."""
+    if quote.organization.status == OrganizationStatus.suspended.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "organization_suspended",
+                "message": "This organization is not currently accepting responses to quotes.",
+            },
+        )
+
+
+def _ensure_not_in_maintenance_mode_for_mutation(db: Session) -> None:
+    """Global sibling of _ensure_organization_active_for_mutation -- same
+    accept/reject-only, never view/pdf scope, but for the platform-wide
+    maintenance switch rather than a per-org one (see app.deps.
+    _ensure_not_in_maintenance_mode for the organization-scoped-route
+    equivalent). Takes the request's own session explicitly rather than
+    letting get_effective_settings open its own -- this route already has
+    one open, and a second self-managed connection would contend with it
+    for SQLite's single active writer in tests that hold their own
+    transaction open."""
+    if get_effective_settings(db).maintenance_mode:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "maintenance_mode",
+                "message": "The platform is currently undergoing maintenance. Please try again shortly.",
+            },
+        )
 
 
 @router.get("/{token}", response_model=PublicQuoteResponse)
@@ -84,6 +129,8 @@ def accept_public_quote(token: str, request: Request, db: Session = Depends(get_
         [RateLimitCheck(scope="quotes:public:accept", identity=ip_identity(request), rules=PUBLIC_QUOTE_ACTION_RULES)]
     )
     quote = _quote_by_token(db, token)
+    _ensure_organization_active_for_mutation(quote)
+    _ensure_not_in_maintenance_mode_for_mutation(db)
     try:
         quote = mark_quote_accepted_record(db, quote)
     except QuoteAlreadyRespondedError:
@@ -103,6 +150,8 @@ def reject_public_quote(token: str, request: Request, db: Session = Depends(get_
         [RateLimitCheck(scope="quotes:public:reject", identity=ip_identity(request), rules=PUBLIC_QUOTE_ACTION_RULES)]
     )
     quote = _quote_by_token(db, token)
+    _ensure_organization_active_for_mutation(quote)
+    _ensure_not_in_maintenance_mode_for_mutation(db)
     try:
         quote = mark_quote_rejected_record(db, quote)
     except QuoteAlreadyRespondedError:

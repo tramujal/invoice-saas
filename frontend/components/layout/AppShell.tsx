@@ -12,11 +12,13 @@ import {
   getEmailVerified,
   getOrganizationId,
   getOrganizationName,
+  getPlatformRole,
   getUserEmail,
   isAuthenticated,
   setEmailVerified as cacheEmailVerified,
   updateActiveOrganization,
   updateOrganizationPermissions,
+  updatePlatformRole,
 } from "@/lib/auth-storage";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -54,6 +56,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   // check already makes, rather than a second request.
   const [organizations, setOrganizations] = useState<OrganizationSummary[] | null>(null);
   const [isSwitchingOrg, setIsSwitchingOrg] = useState(false);
+  const [platformRole, setPlatformRole] = useState<string | null>(null);
+  // Set from the same /auth/me call as everything else above -- /auth/me
+  // is deliberately not org-scoped (no require_permission/require_org_
+  // member call), so it stays reachable even when the active organization
+  // is suspended, unlike every other endpoint this app calls (see
+  // app.deps._ensure_organization_active on the backend). This is what
+  // lets AppShell detect "the org I'm in got suspended while I was
+  // already signed in" instead of every page just 403ing individually.
+  const [activeOrgSuspended, setActiveOrgSuspended] = useState(false);
 
   // Mobile off-canvas nav -- a native <dialog> (via showModal/close) gets
   // focus-trapping, Escape-to-close, and focus-return to the triggering
@@ -85,7 +96,40 @@ export function AppShell({ children }: { children: ReactNode }) {
         // a role change made by another admin (or in another tab) takes
         // effect here on next navigation, not just on next login.
         const active = me.organizations.find((o) => o.id === getOrganizationId());
-        if (active) updateOrganizationPermissions(active.permissions);
+        if (active) {
+          updateOrganizationPermissions(active.permissions);
+        } else if (me.organizations.length > 0) {
+          // The cached active org is gone from this user's own list --
+          // most likely they just removed themselves from it (see
+          // app.services.team.remove_member_record's self-removal
+          // allowance). Rather than keep every subsequent org-scoped
+          // request 403ing against a stale id, silently switch to
+          // another org they still belong to and reload, the same way
+          // switchOrganization() below does for a deliberate switch.
+          const fallback = me.organizations[0];
+          updateActiveOrganization({
+            organizationId: fallback.id,
+            organizationName: fallback.name,
+            organizationCurrency: fallback.currency_code,
+            organizationLanguage: fallback.language,
+            organizationPermissions: fallback.permissions,
+          });
+          window.location.assign("/dashboard");
+          return;
+        } else {
+          // No organizations left at all -- nothing safe to fall back
+          // to, so end the session cleanly rather than leaving the UI
+          // pointed at an organization the user no longer belongs to.
+          clearAuthSession();
+          router.replace("/login");
+          return;
+        }
+        setActiveOrgSuspended(active?.status === "suspended");
+        // Same freshness guarantee for the platform-admin entry link --
+        // a newly-granted (or revoked) platform role takes effect here on
+        // next navigation, not just on next login.
+        updatePlatformRole(me.user.platform_role);
+        setPlatformRole(me.user.platform_role);
       })
       .catch((err) => {
         if (!cancelled && err instanceof ApiError && err.status === 401) {
@@ -103,6 +147,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     setOrganizationName(getOrganizationName());
     setEmailVerifiedState(getEmailVerified());
     setUserEmail(getUserEmail());
+    setPlatformRole(getPlatformRole());
   }, [pathname]);
 
   useEffect(() => {
@@ -287,6 +332,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               ) : null}
             </div>
           ) : null}
+          {platformRole ? (
+            <Link
+              href="/admin"
+              onClick={onNavigate}
+              className="mb-2 block w-full rounded-lg border border-slate-200 px-3 py-1.5 text-center text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            >
+              {t("adminNav.entryLink")}
+            </Link>
+          ) : null}
           <button
             type="button"
             onClick={logout}
@@ -393,23 +447,35 @@ export function AppShell({ children }: { children: ReactNode }) {
         {renderNavContent("desktop")}
       </aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 md:p-8">
-        {!emailVerified ? (
+        {activeOrgSuspended ? (
           <div
             role="status"
-            className="mb-4 flex flex-col items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+            className="mx-auto mt-12 max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center"
           >
-            <p>{t("emailBanner.message")}</p>
-            <button
-              type="button"
-              onClick={() => void resendVerification()}
-              disabled={isResending}
-              className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isResending ? t("emailBanner.resendSending") : t("emailBanner.resendAction")}
-            </button>
+            <h1 className="text-base font-semibold text-red-900">{t("orgSuspendedNotice.title")}</h1>
+            <p className="mt-2 text-sm text-red-800">{t("orgSuspendedNotice.description")}</p>
           </div>
-        ) : null}
-        {children}
+        ) : (
+          <>
+            {!emailVerified ? (
+              <div
+                role="status"
+                className="mb-4 flex flex-col items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <p>{t("emailBanner.message")}</p>
+                <button
+                  type="button"
+                  onClick={() => void resendVerification()}
+                  disabled={isResending}
+                  className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResending ? t("emailBanner.resendSending") : t("emailBanner.resendAction")}
+                </button>
+              </div>
+            ) : null}
+            {children}
+          </>
+        )}
       </main>
     </div>
   );

@@ -8,32 +8,43 @@ import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequire
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { ApiError, authRequest } from "@/lib/api";
+import { ApiError, authRequest, publicGet } from "@/lib/api";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
-import { isAuthenticated, setAuthSession } from "@/lib/auth-storage";
+import {
+  isAuthenticated,
+  isPlatformAdminAuthenticated,
+  setAuthSession,
+} from "@/lib/auth-storage";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import { isPasswordValid } from "@/lib/password-policy";
-import type { AuthResponse } from "@/lib/types";
+import type { AuthResponse, PublicConfig } from "@/lib/types";
 
 const defaultApi =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
 
 type Mode = "login" | "register";
 
+/** A platform-admin-only account (see app.platform_permissions) may have
+ * zero organization memberships -- ordinary login/register can never
+ * produce that (registration always creates exactly one organization),
+ * but an account bootstrapped via the CLI grant script can. Fails only
+ * when there's genuinely nothing to sign in to: no organization AND no
+ * platform role. */
 function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
   const organization = auth.organizations[0];
-  if (!organization) return false;
+  if (!organization && !auth.user.platform_role) return false;
 
   setAuthSession({
     token: auth.access_token,
     apiBaseUrl,
-    organizationId: organization.id,
-    organizationName: organization.name,
-    organizationCurrency: organization.currency_code,
-    organizationLanguage: organization.language,
-    organizationPermissions: organization.permissions,
+    organizationId: organization?.id,
+    organizationName: organization?.name,
+    organizationCurrency: organization?.currency_code,
+    organizationLanguage: organization?.language,
+    organizationPermissions: organization?.permissions,
     userEmail: auth.user.email,
     emailVerified: auth.user.email_verified,
+    platformRole: auth.user.platform_role,
   });
   return true;
 }
@@ -42,9 +53,19 @@ function applyAuthResponse(auth: AuthResponse, apiBaseUrl: string): boolean {
  * value as a redirect target (a "//evil.com" or absolute-URL value would
  * otherwise be a classic open-redirect). Used to send the visitor back to
  * where they came from (e.g. /accept-invitation?token=...) after signing
- * in, instead of always landing on /dashboard. */
-function safeNextPath(raw: string | null): string {
-  return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/dashboard";
+ * in, instead of always landing on the default. `fallback` lets the
+ * caller pick /dashboard vs. /admin once the auth response is known (a
+ * zero-organization platform admin has no /dashboard to land on). */
+function safeNextPath(raw: string | null, fallback: string): string {
+  return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : fallback;
+}
+
+/** Where to land after a successful sign-in with no explicit ?next= --
+ * an ordinary user (or any user with at least one organization) goes to
+ * their dashboard; a platform-admin-only account with zero organizations
+ * has nowhere else to go but the admin console. */
+function defaultLandingPath(auth: AuthResponse): string {
+  return auth.organizations[0] ? "/dashboard" : "/admin";
 }
 
 function LoginForm() {
@@ -60,11 +81,41 @@ function LoginForm() {
   const [organizationName, setOrganizationName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const nextPath = safeNextPath(searchParams.get("next"));
+  // Defaults to enabled so the tab never flickers/hides before the
+  // request resolves -- purely cosmetic either way, since the backend
+  // (app.routers.auth.register) is the authoritative gate and rejects
+  // with 403 registrations_disabled regardless of what this shows.
+  const [registrationsEnabled, setRegistrationsEnabled] = useState(true);
 
   useEffect(() => {
-    if (isAuthenticated()) router.replace(nextPath);
-  }, [router, nextPath]);
+    // Checked in this order since an account can hold both an
+    // organization and a platform role -- their organization dashboard is
+    // the more useful landing spot in that case, matching defaultLandingPath.
+    if (isAuthenticated()) {
+      router.replace(safeNextPath(searchParams.get("next"), "/dashboard"));
+    } else if (isPlatformAdminAuthenticated()) {
+      router.replace(safeNextPath(searchParams.get("next"), "/admin"));
+    }
+  }, [router, searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    publicGet<PublicConfig>(apiBaseUrl, "/public/config")
+      .then((config) => {
+        if (!cancelled) setRegistrationsEnabled(config.registrations_enabled);
+      })
+      .catch(() => {
+        // Unreachable API, wrong apiBaseUrl, etc. -- fail open on the
+        // cosmetic gate; the backend still enforces the real one.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    if (!registrationsEnabled && mode === "register") setMode("login");
+  }, [registrationsEnabled, mode]);
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -107,7 +158,7 @@ function LoginForm() {
         setError(t("auth.errorNoOrganization"));
         return;
       }
-      router.replace(nextPath);
+      router.replace(safeNextPath(searchParams.get("next"), defaultLandingPath(auth)));
     } catch (err) {
       if (isRateLimitedError(err)) {
         setError(
@@ -149,18 +200,31 @@ function LoginForm() {
           >
             {t("auth.signIn")}
           </button>
-          <button
-            type="button"
-            onClick={() => switchMode("register")}
-            className={`flex-1 rounded-md py-2 transition ${
-              mode === "register"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            {t("auth.createAccount")}
-          </button>
+          {registrationsEnabled ? (
+            <button
+              type="button"
+              onClick={() => switchMode("register")}
+              className={`flex-1 rounded-md py-2 transition ${
+                mode === "register"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {t("auth.createAccount")}
+            </button>
+          ) : (
+            <span
+              className="flex-1 cursor-not-allowed rounded-md py-2 text-center text-slate-400"
+              title={t("auth.registrationsDisabledNotice")}
+            >
+              {t("auth.createAccount")}
+            </span>
+          )}
         </div>
+
+        {!registrationsEnabled ? (
+          <p className="mt-3 text-xs text-slate-500">{t("auth.registrationsDisabledNotice")}</p>
+        ) : null}
 
         <h1 className="mt-6 text-xl font-semibold tracking-tight text-slate-900">
           {mode === "login" ? t("auth.signIn") : t("auth.headingRegister")}

@@ -16,8 +16,11 @@ from app.services.team import (
     CannotGrantOwnershipError,
     CannotRemoveLastOwnerError,
     ConfirmationRequiredError,
+    InsufficientRoleAuthorityError,
     MemberAlreadyRemovedError,
     MembershipNotFoundError,
+    RoleAssignmentNotAllowedError,
+    SelfPromotionError,
     change_member_role_record,
     get_membership_in_org,
     grant_ownership_record,
@@ -64,12 +67,20 @@ def update_member_role(
 
     try:
         return change_member_role_record(db, organization_id, target, body.role, actor)
-    except CannotGrantOwnershipError:
+    except RoleAssignmentNotAllowedError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "code": "owner_action_required",
-                "message": "Only an owner can change another owner's role.",
+                "code": "role_assignment_not_allowed",
+                "message": "You cannot assign a role equal to or higher than your own.",
+            },
+        )
+    except InsufficientRoleAuthorityError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "insufficient_role_authority",
+                "message": "You cannot modify a member whose role is equal to or higher than your own.",
             },
         )
     except CannotRemoveLastOwnerError:
@@ -95,12 +106,12 @@ def remove_member(
 
     try:
         return remove_member_record(db, organization_id, target, actor)
-    except CannotGrantOwnershipError:
+    except InsufficientRoleAuthorityError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "code": "owner_action_required",
-                "message": "Only an owner can remove another owner.",
+                "code": "insufficient_role_authority",
+                "message": "You cannot remove a member whose role is equal to or higher than your own.",
             },
         )
     except CannotRemoveLastOwnerError:
@@ -144,4 +155,9 @@ def grant_ownership(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "owner_action_required", "message": "Only an owner can grant ownership."},
+        )
+    except SelfPromotionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "self_promotion_not_allowed", "message": "You cannot promote yourself."},
         )

@@ -90,6 +90,43 @@ def test_public_quote_unknown_token_is_404(client):
     assert response.status_code == 404
 
 
+def test_public_accept_reject_blocked_for_suspended_organization(client, db_session):
+    from app.organization_status import OrganizationStatus
+
+    owner = make_org_with_owner(db_session, email="owner-suspended@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user)
+    _mark_sent(db_session, quote)
+    owner.organization.status = OrganizationStatus.suspended.value
+    db_session.commit()
+
+    accept = client.post(f"/quotes/public/{quote.public_token}/accept")
+    assert accept.status_code == 409
+    assert accept.json()["detail"]["code"] == "organization_suspended"
+
+    reject = client.post(f"/quotes/public/{quote.public_token}/reject")
+    assert reject.status_code == 409
+    assert reject.json()["detail"]["code"] == "organization_suspended"
+
+    db_session.refresh(quote)
+    assert quote.status == QuoteStatus.sent.value
+
+
+def test_public_quote_view_and_pdf_remain_available_for_suspended_organization(client, db_session):
+    from app.organization_status import OrganizationStatus
+
+    owner = make_org_with_owner(db_session, email="owner-suspended2@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user)
+    _mark_sent(db_session, quote)
+    owner.organization.status = OrganizationStatus.suspended.value
+    db_session.commit()
+
+    view = client.get(f"/quotes/public/{quote.public_token}")
+    assert view.status_code == 200
+
+    pdf = client.get(f"/quotes/public/{quote.public_token}/pdf")
+    assert pdf.status_code == 200
+
+
 def test_convert_requires_accepted_status(client, db_session):
     owner = make_org_with_owner(db_session, email="owner6@example.com")
     draft_quote = make_quote(db_session, owner.organization, owner.user)

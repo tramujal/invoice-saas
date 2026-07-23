@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.database import engine, get_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import init_db  # noqa: E402
+from app.models import PLATFORM_SETTINGS_SINGLETON_ID, PlatformSettings, init_db  # noqa: E402
 import app.rate_limit as rate_limit_module  # noqa: E402
 
 # pysqlite (the stdlib sqlite3 driver) does its own implicit transaction
@@ -46,6 +46,20 @@ def _sqlite_emit_begin(conn):
 @pytest.fixture(scope="session", autouse=True)
 def _test_database():
     init_db()
+    # Seeds the PlatformSettings singleton once, in its own committed
+    # transaction, before any per-test SAVEPOINT-nested db_session fixture
+    # opens its own connection -- app.services.platform_settings's
+    # self-managed-session callers (get_ai_provider/get_email_sender/the
+    # public quote & invitation maintenance checks) each open a brand-new
+    # SessionLocal() to read this row, and SQLite allows only one writer
+    # at a time. Without this, the FIRST such read in any given test would
+    # race the test's own held transaction to INSERT the lazily-created
+    # row and fail with "database is locked." Seeding it here means every
+    # subsequent read anywhere is a plain SELECT, never an INSERT.
+    with Session(engine) as seed_db:
+        if seed_db.get(PlatformSettings, PLATFORM_SETTINGS_SINGLETON_ID) is None:
+            seed_db.add(PlatformSettings(id=PLATFORM_SETTINGS_SINGLETON_ID))
+            seed_db.commit()
     yield
     engine.dispose()
     try:

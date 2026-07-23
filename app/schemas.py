@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any, Literal
 from zoneinfo import available_timezones
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.ai.limits import (
     AI_MAX_HISTORY_MESSAGE_LENGTH,
@@ -20,7 +20,9 @@ from app.insights.limits import (
 )
 from app.invoice_numbering import format_invoice_number
 from app.membership_role import InvitationRole, MembershipRole
+from app.organization_status import OrganizationStatus
 from app.payment_status import PaymentStatus
+from app.platform_permissions import PlatformRole
 from app.product_type import ProductType
 from app.quote_numbering import format_quote_number
 from app.quote_status import QuoteStatus
@@ -32,6 +34,7 @@ from app.reminder_settings import (
 )
 from app.reminder_type import ReminderType
 from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
+from app.user_status import UserStatus
 
 _VALID_TIMEZONES = available_timezones()
 
@@ -204,6 +207,14 @@ class UserResponse(BaseModel):
     id: str
     email: str
     email_verified: bool
+    # A user's own platform-administration role (see app.platform_permissions),
+    # entirely independent from any organization role. NULL for every
+    # ordinary user. Returned here (login/register/me all build this same
+    # schema) purely so the frontend can decide whether to show the
+    # Platform Admin entry point -- never used for backend authorization,
+    # which always re-checks the live User.platform_role via
+    # require_platform_permission, not this cached response value.
+    platform_role: str | None = None
 
 
 class OrganizationSummary(BaseModel):
@@ -218,6 +229,13 @@ class OrganizationSummary(BaseModel):
     # MemberResponse.permissions's docstring for why the frontend must gate
     # UI on these values rather than re-deriving them from a role name.
     permissions: list[str]
+    # Lets AppShell detect "the organization I'm currently in got
+    # suspended" from the same /auth/me call it already makes on every
+    # load -- this endpoint is deliberately not org-scoped (no
+    # require_permission/require_org_member call), so it stays reachable
+    # even for a suspended organization's own members, unlike every
+    # org-scoped endpoint (see app.deps._ensure_organization_active).
+    status: OrganizationStatus
 
 
 class AuthResponse(BaseModel):
@@ -1150,3 +1168,310 @@ class ImportConfirmResponse(BaseModel):
     # Every row, never capped — this is the authoritative final record and
     # (client-side) error-report source, unlike preview_rows above.
     row_results: list[ImportConfirmRowResult]
+
+
+# --- Platform administration (app.routers.platform_admin) ---
+#
+# Every field below traces to a real column or a documented derivation --
+# see that router's module docstring for exactly which. Two fields in
+# particular are NOT real stored timestamps: `created_at` on both the
+# organization and user summaries/details is derived from the earliest
+# active OrganizationMember row (organizations and their first owner
+# membership are created together at registration, so this is a faithful
+# proxy -- neither Organization nor User has its own created_at column
+# today). There is deliberately no `status`/`suspended` field on
+# organizations yet (Phase 13D adds it) and no `last_login_at` on users
+# (never tracked anywhere in this app).
+
+
+class PlatformSystemHealthResponse(BaseModel):
+    database_reachable: bool
+    email_provider_configured: bool
+    email_provider: str | None
+    ai_provider_configured: bool
+    ai_provider: str | None
+    reminder_emails_pending: int
+    reminder_emails_sent_7d: int
+    reminder_emails_failed_7d: int
+
+
+class PlatformSettingsResponse(BaseModel):
+    """GET /admin/settings -- dynamic settings (persisted in the
+    PlatformSettings singleton, editable via PATCH) plus infrastructure
+    readiness (environment-derived, read-only, never a secret value --
+    see app.models.PlatformSettings's own docstring for why infra config
+    has no column in that table at all). ai_provider/email_provider are
+    None when not configured, which already functions as the required
+    "boolean/status," not a raw dump of the underlying credentials."""
+
+    maintenance_mode: bool
+    registrations_enabled: bool
+    ai_enabled: bool
+    emails_enabled: bool
+    invoice_reminders_enabled: bool
+    quote_reminders_enabled: bool
+    default_language: str
+    default_currency: str
+    updated_at: datetime
+    updated_by_email: str | None
+    version: int
+
+    ai_provider: str | None
+    email_provider: str | None
+    cors_allowed_origins: list[str]
+
+
+class PlatformSettingsUpdateRequest(BaseModel):
+    """Body for PATCH /admin/settings -- every setting field is optional
+    (a genuine partial update), but `reason` is always required and at
+    least one setting field must actually be provided; both are enforced
+    below rather than left to the router, so an empty or reason-less
+    request never reaches it. default_language/default_currency reuse
+    the exact enums RegisterRequest already validates against
+    (OrganizationLanguage/CurrencyCode) -- an unrecognized value fails
+    closed with a plain 422, the same guarantee PlatformRoleActionRequest
+    gets from reusing PlatformRole for platform_role.
+
+    expected_version is required on every PATCH -- the optimistic-
+    concurrency token the caller must have read from a prior GET (or a
+    prior PATCH's own response). It is deliberately kept separate from
+    the editable setting fields below (excluded from the diff the router
+    computes) since it is never itself a persisted setting, only a
+    precondition on the write."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_version: int = Field(gt=0)
+    maintenance_mode: bool | None = None
+    registrations_enabled: bool | None = None
+    ai_enabled: bool | None = None
+    emails_enabled: bool | None = None
+    invoice_reminders_enabled: bool | None = None
+    quote_reminders_enabled: bool | None = None
+    default_language: OrganizationLanguage | None = None
+    default_currency: CurrencyCode | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+    @model_validator(mode="after")
+    def _reject_empty_update(self) -> "PlatformSettingsUpdateRequest":
+        setting_fields = (
+            "maintenance_mode",
+            "registrations_enabled",
+            "ai_enabled",
+            "emails_enabled",
+            "invoice_reminders_enabled",
+            "quote_reminders_enabled",
+            "default_language",
+            "default_currency",
+        )
+        if all(getattr(self, field) is None for field in setting_fields):
+            raise ValueError("At least one setting field must be provided.")
+        return self
+
+
+class PublicConfigResponse(BaseModel):
+    """GET /public/config -- the ONLY two values the unauthenticated
+    login/register UI needs, and deliberately nothing else: never
+    internal readiness, feature-provider configuration, or any
+    admin-only setting."""
+
+    maintenance_mode: bool
+    registrations_enabled: bool
+
+
+class PlatformDashboardResponse(BaseModel):
+    organizations_total: int
+    organizations_new_7d: int
+    organizations_new_30d: int
+    users_total: int
+    users_new_7d: int
+    users_new_30d: int
+    invoices_total: int
+    quotes_total: int
+    customers_total: int
+    products_total: int
+    reminder_emails_sent_7d: int
+    reminder_emails_failed_7d: int
+    ai_actions_executed_7d: int
+    health: PlatformSystemHealthResponse
+
+
+class PlatformOrganizationSummary(BaseModel):
+    id: str
+    name: str
+    business_name: str | None
+    status: OrganizationStatus
+    owner_email: str | None
+    members_count: int
+    invoices_count: int
+    quotes_count: int
+    customers_count: int
+    created_at: datetime | None
+    last_activity_at: datetime | None
+
+
+class PlatformOrganizationMember(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    status: str
+    joined_at: datetime
+
+
+class PlatformOrganizationRecentDocument(BaseModel):
+    type: Literal["invoice", "quote"]
+    number: str
+    status: str
+    total: Decimal
+    currency_code: str
+    created_at: datetime
+
+
+class PlatformOrganizationDetail(BaseModel):
+    id: str
+    name: str
+    business_name: str | None
+    status: OrganizationStatus
+    owner_email: str | None
+    members_count: int
+    invoices_count: int
+    quotes_count: int
+    customers_count: int
+    products_count: int
+    language: str
+    currency_code: str
+    timezone: str
+    created_at: datetime | None
+    last_activity_at: datetime | None
+    members: list[PlatformOrganizationMember]
+    recent_documents: list[PlatformOrganizationRecentDocument]
+
+
+class PaginatedPlatformOrganizationsResponse(BaseModel):
+    total: int
+    items: list[PlatformOrganizationSummary]
+
+
+def _require_non_blank_reason(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("reason must not be empty")
+    return stripped
+
+
+class PlatformOrganizationActionRequest(BaseModel):
+    """Body for POST /admin/organizations/{id}/suspend|reactivate. `reason`
+    is mandatory and must be non-empty after stripping whitespace -- a
+    string of only spaces is not a reason, and both actions are recorded
+    verbatim in PlatformAuditLog.reason."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+
+class PlatformUserOrganization(BaseModel):
+    organization_id: str
+    organization_name: str
+    role: str
+    status: str
+
+
+class PlatformUserSummary(BaseModel):
+    id: str
+    email: str
+    email_verified: bool
+    status: UserStatus
+    platform_role: str | None
+    organizations_count: int
+    created_at: datetime | None
+
+
+class PlatformUserDetail(BaseModel):
+    id: str
+    email: str
+    email_verified: bool
+    status: UserStatus
+    platform_role: str | None
+    created_at: datetime | None
+    organizations: list[PlatformUserOrganization]
+
+
+class PaginatedPlatformUsersResponse(BaseModel):
+    total: int
+    items: list[PlatformUserSummary]
+
+
+class PlatformUserActionRequest(BaseModel):
+    """Body for POST /admin/users/{id}/disable|enable. Same non-blank
+    `reason` contract as PlatformOrganizationActionRequest."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+
+class PlatformRoleActionRequest(BaseModel):
+    """Body for POST /admin/users/{id}/platform-role. `role` being
+    PlatformRole | None (never a bare str) is what makes an unknown role
+    value fail closed at the schema layer with a plain 422, before the
+    request ever reaches the service layer -- None means "revoke,"
+    "super_admin" is the only grantable value today (see
+    app.platform_permissions.PlatformRole)."""
+
+    role: PlatformRole | None
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+
+class PlatformUserActionResponse(BaseModel):
+    """Generic success message for actions that don't return the full
+    PlatformUserDetail shape (force-verify-email, send-password-reset) --
+    deliberately never includes a token, hash, or other secret."""
+
+    message: str
+
+
+class PlatformAuditLogEntry(BaseModel):
+    """One row, already sanitized before this schema ever sees it --
+    `details` has been through app.platform_audit_sanitize.
+    sanitize_audit_details and `client_ip` through mask_client_ip by the
+    time the router builds this. target_type is derived (never a stored
+    column) from which of target_organization_id/target_user_id is set;
+    the *_name/*_email pair for whichever target type doesn't apply is
+    normalized to None here, even though the underlying row stores ""
+    for target_organization_name as its "not applicable" sentinel (see
+    PlatformAuditLog's own docstring) -- API consumers should never have
+    to know about that storage-level convention."""
+
+    id: str
+    action: str
+    actor_user_id: str | None
+    actor_email: str
+    target_type: Literal["organization", "user"] | None
+    target_organization_id: str | None
+    target_organization_name: str | None
+    target_user_id: str | None
+    target_user_email: str | None
+    reason: str
+    details: dict[str, Any] | None
+    client_ip: str | None
+    created_at: datetime
+
+
+class PaginatedPlatformAuditLogResponse(BaseModel):
+    total: int
+    items: list[PlatformAuditLogEntry]

@@ -6,13 +6,24 @@ a router and a future AI tool could translate them independently), every
 function takes an explicit organization_id or an already org-scoped row,
 never trusts a caller-supplied id without filtering on it.
 
-The two invariants a single Permission check can't express live here:
-granting/revoking the "owner" role requires the *caller* to already be an
-owner (CannotGrantOwnershipError otherwise), and demoting or removing an
-owner additionally requires at least one *other* active owner to remain
-afterward (CannotRemoveLastOwnerError otherwise). Both are data-dependent
-facts about the current membership table, not static role facts, which is
-why they can't live in app.permissions's static ROLE_PERMISSIONS map.
+Two families of invariant live here rather than in app.permissions's
+static ROLE_PERMISSIONS map, because both are relational (actor rank vs.
+target/requested rank) or data-dependent (current membership table state),
+not "what can this role do in general":
+
+1. Role hierarchy (app.role_hierarchy.can_manage_member / can_assign_role):
+   an actor may never assign a role at or above their own rank (blocks
+   self-promotion and admin-granting-admin/owner alike), and may never
+   modify or remove another member whose current role is at or above
+   their own rank (blocks admin-vs-admin and admin-vs-owner). Self-
+   modification is exempt from the second rule by design -- see
+   can_manage_member's docstring.
+2. Ownership headcount: granting/revoking the "owner" role requires the
+   *caller* to already be an owner (enforced today via can_manage_member's
+   owner-vs-owner special case, since only an owner ever reaches that
+   branch), and demoting or removing an owner additionally requires at
+   least one *other* active owner to remain afterward
+   (CannotRemoveLastOwnerError otherwise).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -29,6 +40,7 @@ from app.membership_role import InvitationRole, MembershipRole
 from app.membership_status import MembershipStatus
 from app.models import Organization, OrganizationInvitation, OrganizationMember, User
 from app.permissions import Permission, check_permission, roles_with_permission
+from app.role_hierarchy import can_assign_role, can_manage_member, parse_membership_role
 
 
 class MembershipNotFoundError(Exception):
@@ -65,6 +77,44 @@ class CannotRemoveLastOwnerError(Exception):
 class CannotGrantOwnershipError(Exception):
     """Only an existing owner may grant ownership to someone else, or
     demote/remove an existing owner."""
+
+
+class RoleAssignmentNotAllowedError(Exception):
+    """The actor's rank isn't high enough to hand out the requested role
+    -- covers "admin may assign only member or viewer" (never admin or
+    owner) and "a user may never assign a role at or above their own,"
+    which together also make self-promotion structurally impossible: see
+    app.role_hierarchy.can_assign_role."""
+
+
+class InsufficientRoleAuthorityError(Exception):
+    """The actor's rank isn't high enough to modify or remove this
+    *other* member, given the member's current role -- covers admin
+    acting on another admin or on an owner. Never raised for a target
+    that is the actor's own membership; see
+    app.role_hierarchy.can_manage_member."""
+
+
+class SelfPromotionError(Exception):
+    """An owner may never grant ownership to their own membership --
+    ownership can only ever be granted to someone else, even though every
+    caller who can reach this action is already an owner and the action
+    would otherwise be a harmless no-op."""
+
+
+class InvalidRoleError(Exception):
+    """A stored role value (actor's or target's) isn't a recognized
+    MembershipRole -- hand-edited or corrupted data. Fails closed: no
+    role/removal decision is ever made from data that can't be parsed."""
+
+
+class InvalidInvitationRoleError(Exception):
+    """An invitation's stored role isn't a recognized InvitationRole --
+    hand-edited or corrupted data, or (defense in depth) a value that
+    somehow bypassed InvitationCreateRequest's schema validation.
+    Acceptance must never blindly trust a stale/tampered invitation row;
+    this rejects it outright rather than materializing a membership with
+    an unvalidated role."""
 
 
 class AlreadyMemberError(Exception):
@@ -159,10 +209,28 @@ def change_member_role_record(
     InvitationRole (never "owner" -- see that enum's docstring), but
     target_membership's CURRENT role may already be owner-equivalent, in
     which case this is a demotion and gets the same owner-count guard
-    removal does."""
+    removal does.
+
+    Two hierarchy checks, in order: (1) can_assign_role -- would this
+    grant new_role at or above the actor's own rank? Applies whether the
+    target is someone else or the actor themself, which is exactly what
+    makes self-promotion structurally impossible here, with no separate
+    self-check needed. (2) can_manage_member -- for a target that is NOT
+    the actor, is the actor senior enough to touch a member currently
+    holding target's role at all (blocks admin-vs-admin, admin-vs-owner)?
+    Skipped for self-targeting by design -- see that function's
+    docstring."""
+    actor_role = parse_membership_role(actor.role)
+    if not can_assign_role(actor_role, MembershipRole(new_role.value)):
+        raise RoleAssignmentNotAllowedError(actor.id)
+
+    is_self = target_membership.user_id == actor.user_id
+    if not is_self:
+        target_role = parse_membership_role(target_membership.role)
+        if not can_manage_member(actor_role, target_role):
+            raise InsufficientRoleAuthorityError(actor.id)
+
     if _grants_ownership(target_membership.role):
-        if not _grants_ownership(actor.role):
-            raise CannotGrantOwnershipError(actor.id)
         if (
             _count_members_with_permission(
                 db, organization_id, Permission.organization_manage, exclude_membership_id=target_membership.id
@@ -197,6 +265,12 @@ def grant_ownership_record(
         raise ConfirmationRequiredError()
     if not _grants_ownership(actor.role):
         raise CannotGrantOwnershipError(actor.id)
+    if target_membership.user_id == actor.user_id:
+        # Every caller who reaches this line is already an owner (see
+        # above), so granting ownership to themselves would be a harmless
+        # no-op in practice -- rejected anyway, since "a user may never
+        # promote themselves" is an absolute rule with no no-op exception.
+        raise SelfPromotionError(actor.id)
 
     target_membership.role = MembershipRole.owner.value
     target_membership.role_changed_by = actor.user_id
@@ -214,12 +288,21 @@ def remove_member_record(
     """Soft removal only -- status flips to removed, the row (and its
     invited_by/accepted_at audit trail) is kept forever. Every business
     record the removed member ever created (invoices, quotes, customers,
-    products) is entirely untouched -- nothing here cascades to them."""
+    products) is entirely untouched -- nothing here cascades to them.
+
+    The hierarchy check (can_manage_member, skipped for self -- a user may
+    remove themselves) runs before the already-removed check, so an
+    unauthorized actor never learns a target's removal state either."""
+    actor_role = parse_membership_role(actor.role)
+    is_self = target_membership.user_id == actor.user_id
+    if not is_self:
+        target_role = parse_membership_role(target_membership.role)
+        if not can_manage_member(actor_role, target_role):
+            raise InsufficientRoleAuthorityError(actor.id)
+
     if target_membership.status == MembershipStatus.removed.value:
         raise MemberAlreadyRemovedError(target_membership.id)
     if _grants_ownership(target_membership.role):
-        if not _grants_ownership(actor.role):
-            raise CannotGrantOwnershipError(actor.id)
         if (
             _count_members_with_permission(
                 db, organization_id, Permission.organization_manage, exclude_membership_id=target_membership.id
@@ -240,7 +323,16 @@ def invite_member_record(
 ) -> tuple[OrganizationInvitation, str]:
     """Returns (invitation, raw_token) -- the raw token exists only in
     memory for exactly long enough to build the invitation email link
-    (see app.routers.invitations); only its hash is ever persisted."""
+    (see app.routers.invitations); only its hash is ever persisted.
+
+    The same can_assign_role check change_member_role_record uses gates
+    the requested role here too -- an admin inviting someone as "admin"
+    is exactly as disallowed as an admin promoting an existing member to
+    "admin"; both are just "assign a role at or above your own rank"."""
+    actor_role = parse_membership_role(actor.role)
+    if not can_assign_role(actor_role, MembershipRole(role.value)):
+        raise RoleAssignmentNotAllowedError(actor.id)
+
     existing_member = db.scalar(
         select(OrganizationMember)
         .join(User, User.id == OrganizationMember.user_id)
@@ -328,6 +420,14 @@ def accept_invitation_record(
         raise InvitationExpiredError(invitation.id)
     if current_user.email.strip().lower() != invitation.email.strip().lower():
         raise InvitationEmailMismatchError(invitation.id)
+    try:
+        InvitationRole(invitation.role)
+    except ValueError:
+        # Never blindly trust a stale/tampered invitation row -- a role
+        # that isn't a recognized InvitationRole (hand-edited data, or a
+        # value that somehow bypassed InvitationCreateRequest's schema
+        # validation) must never materialize into a real membership.
+        raise InvalidInvitationRoleError(invitation.id)
 
     existing = db.scalar(
         select(OrganizationMember).where(

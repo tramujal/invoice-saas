@@ -29,6 +29,8 @@ import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import {
   INVITATION_ROLES,
   MEMBERSHIP_ROLE_BADGE_CLASS,
+  assignableRolesFor,
+  canManageMember,
   getMembershipRoleLabel,
   type InvitationRole,
 } from "@/lib/membership-role";
@@ -59,6 +61,9 @@ function roleChangeErrorMessage(t: TranslateFn, err: unknown): string {
   if (code === "cannot_remove_last_owner") return t("team.errorCannotRemoveLastOwner");
   if (code === "confirmation_required") return t("team.errorConfirmationRequired");
   if (code === "member_already_removed") return t("team.errorMemberAlreadyRemoved");
+  if (code === "role_assignment_not_allowed") return t("team.errorRoleAssignmentNotAllowed");
+  if (code === "insufficient_role_authority") return t("team.errorInsufficientRoleAuthority");
+  if (code === "self_promotion_not_allowed") return t("team.errorSelfPromotionNotAllowed");
   return formatApiError(err, t("team.toastActionError"));
 }
 
@@ -261,6 +266,15 @@ export default function TeamPage() {
                 members.map((member) => {
                   const isSelf = member.user_email === userEmail;
                   const rowBusy = busyId === member.id;
+                  // Self-modification is exempt from the rank check (the
+                  // backend allows it too, subject only to the last-owner
+                  // invariant) -- everyone else is only manageable if the
+                  // caller actually out-ranks their current role. Hiding
+                  // the controls here (rather than showing them and
+                  // letting the request 403) avoids offering an action
+                  // that's guaranteed to fail.
+                  const canManageThisMember = isSelf || (self ? canManageMember(self.role, member.role) : false);
+                  const assignableRoles = self ? assignableRolesFor(self.role) : [];
                   return (
                     <tr key={member.id} className={TABLE_ROW_CLASS}>
                       <td className={`max-w-[180px] truncate ${TABLE_CELL_CLASS}`} title={member.user_email}>
@@ -280,6 +294,7 @@ export default function TeamPage() {
                       </td>
                       {canManageMembers ? (
                         <td className={STICKY_ACTIONS_TD_CLASS}>
+                          {canManageThisMember ? (
                           <div className="flex items-center justify-end gap-2">
                             <label htmlFor={`role-select-${member.id}`} className="sr-only">
                               {t("team.changeRoleLabel", { email: member.user_email })}
@@ -296,7 +311,9 @@ export default function TeamPage() {
                                   {getMembershipRoleLabel(t, member.role)}
                                 </option>
                               ) : null}
-                              {INVITATION_ROLES.map((r) => (
+                              {INVITATION_ROLES.filter(
+                                (r) => assignableRoles.includes(r) || r === member.role
+                              ).map((r) => (
                                 <option key={r} value={r}>
                                   {getMembershipRoleLabel(t, r)}
                                 </option>
@@ -320,6 +337,9 @@ export default function TeamPage() {
                               </RowActionsMenu.Item>
                             </RowActionsMenu>
                           </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                       ) : null}
                     </tr>

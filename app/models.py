@@ -22,11 +22,13 @@ from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
 from app.membership_role import MembershipRole
 from app.membership_status import MembershipStatus
+from app.organization_status import OrganizationStatus
 from app.payment_status import PaymentStatus
 from app.product_type import ProductType
 from app.quote_status import QuoteStatus
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
+from app.user_status import UserStatus
 from app.schema_migrations import run_startup_migrations
 
 
@@ -101,6 +103,16 @@ class Organization(Base):
     quote_reminder_before_expiry_days: Mapped[str] = mapped_column(
         String(64), nullable=False, default="3", server_default="3"
     )
+    # Platform-administration axis (see app.organization_status) -- set only
+    # via POST /admin/organizations/{id}/suspend|reactivate
+    # (platform.organizations.manage). Never a soft-delete: memberships,
+    # invoices, quotes, and customers are untouched by a status change.
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=OrganizationStatus.active.value,
+        server_default=OrganizationStatus.active.value,
+    )
 
     members: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="organization"
@@ -128,6 +140,22 @@ class User(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Platform-administration authorization axis -- entirely independent
+    # from OrganizationMember.role (see app.platform_permissions). NULL
+    # means "not a platform admin"; deliberately distinct from an empty
+    # string to avoid a falsy-but-set footgun. Set only via the
+    # app.scripts.grant_platform_role bootstrap CLI or a future
+    # platform.roles.manage endpoint -- never through ordinary signup.
+    platform_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Account-level access axis (see app.user_status) -- entirely separate
+    # from platform_role above and from OrganizationMember.role. Disabling
+    # blocks authentication itself (app.deps.get_current_user), before
+    # either other axis is ever consulted. Deliberately no disabled_at/
+    # disabled_reason columns here: app.models.PlatformAuditLog already
+    # records the timestamp and reason for every disable/enable action,
+    # and duplicating them on User would be two sources of truth for the
+    # same fact with no way to keep them in sync.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=UserStatus.active.value)
 
     memberships: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="user", foreign_keys="OrganizationMember.user_id"
@@ -861,6 +889,119 @@ class AssistantAction(Base):
     executed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class PlatformAuditLog(Base):
+    """One row per platform-administration mutation (see
+    app.platform_audit_action.PlatformAuditAction) -- append-only, exactly
+    like AssistantAction's own lifecycle-as-audit-trail philosophy above,
+    except here there is no lifecycle to piggyback on (a suspend/reactivate
+    is a single instantaneous action), so a dedicated table is the minimum
+    that satisfies "who did what, to which org, and why."
+
+    actor_email, target_organization_name, and target_user_email are
+    snapshots, not joins -- mirrors OrganizationInvitation.created_by_email's
+    exact rationale: the record must stay meaningful even if the acting
+    user or the target organization/user is later deleted (every FK here
+    is ON DELETE SET NULL, never CASCADE, so a deletion elsewhere can
+    never silently erase audit history). No route ever updates or deletes
+    a row here.
+
+    Exactly one of target_organization_id/target_user_id is populated per
+    row, depending on the action (Phase 13D's organization actions vs.
+    Phase 13E's user-management actions) -- never both. The *_name/*_email
+    snapshot for whichever target type doesn't apply is left at its
+    default ("" for target_organization_name, NULL for target_user_email)
+    rather than making target_organization_name nullable, which would
+    require an unsupported SQLite column-constraint change; "" already
+    means "not applicable" in this codebase (see Customer.tax_id).
+
+    details is an optional JSON-encoded string (e.g. {"old_role": ...,
+    "new_role": ...} for a platform-role change) -- a plain TEXT column,
+    not a native JSON type, so this works identically on SQLite and
+    Postgres without a dialect-specific column type.
+    """
+
+    __tablename__ = "platform_audit_log"
+    __table_args__ = (
+        Index("ix_platform_audit_log_target_org", "target_organization_id"),
+        Index("ix_platform_audit_log_target_user", "target_user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_organization_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    target_organization_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    target_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    target_user_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+PLATFORM_SETTINGS_SINGLETON_ID = "platform_settings"
+
+
+class PlatformSettings(Base):
+    """The single row of dynamic, runtime-editable global application
+    behavior (see app.services.platform_settings for how it's read and
+    written) -- deliberately NOT arbitrary JSON key/value storage: every
+    field here is a real, typed column with its own validation and its
+    own enforcement point, exactly like every other setting in this app.
+
+    Enforced as a true singleton by using a fixed, non-random primary key
+    (PLATFORM_SETTINGS_SINGLETON_ID) rather than a generated UUID -- "does
+    a row with this exact id exist yet" is a trivially safe idempotent
+    check, unlike "is there already any row in this table" under
+    concurrent first-reads. Lazily created on first read with these
+    column defaults; there is no migration-time INSERT.
+
+    Infrastructure configuration (AI/email provider credentials, CORS
+    origins) deliberately has NO column here -- it stays environment-only
+    and read-only, surfaced in GET /admin/settings as derived status
+    booleans (see app.routers.platform_admin), never persisted or
+    editable through this table.
+    """
+
+    __tablename__ = "platform_settings"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    maintenance_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    registrations_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    emails_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    invoice_reminders_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    quote_reminders_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    default_language: Mapped[str] = mapped_column(String(8), nullable=False, default="en")
+    default_currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Optimistic-concurrency token for PATCH /admin/settings -- callers
+    # must supply the version they last read as expected_version; the
+    # update is applied via a single conditional
+    # `UPDATE ... WHERE id = ... AND version = expected_version`
+    # (see app.routers.platform_admin.update_platform_settings), never by
+    # reading this value into Python and writing it back unconditionally.
+    # That conditional UPDATE's rowcount, not this column's presence
+    # alone, is what makes concurrent PATCHes safe.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 def init_db() -> None:

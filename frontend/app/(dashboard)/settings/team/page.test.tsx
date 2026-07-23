@@ -148,4 +148,94 @@ describe("Team page permission-gated rendering", () => {
     expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Grant ownership" })).not.toBeInTheDocument();
   });
+
+  it("hides management controls immediately after self-demotion, with no reload needed", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const adminSelf = makeMember({
+      id: "self-id",
+      user_email: "self@example.com",
+      role: "admin",
+      permissions: ["members.manage"],
+    });
+    const viewerSelf = makeMember({
+      id: "self-id",
+      user_email: "self@example.com",
+      role: "viewer",
+      permissions: [],
+    });
+    const user = userEvent.setup();
+
+    let membersLoadCount = 0;
+    apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.includes("/invitations")) return Promise.resolve(emptyInvitations);
+      if (path.includes("/members/self-id") && init?.method === "PATCH") {
+        return Promise.resolve(viewerSelf);
+      }
+      if (path.includes("/members")) {
+        membersLoadCount += 1;
+        const items = membersLoadCount === 1 ? [adminSelf] : [viewerSelf];
+        return Promise.resolve({ total: 1, items } satisfies PaginatedMembers);
+      }
+      return Promise.reject(new Error(`unexpected call: ${path}`));
+    });
+
+    renderWithProviders(<TeamPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send invitation" })).toBeInTheDocument());
+
+    const roleSelect = screen.getByRole("combobox", { name: "Change role for self@example.com" });
+    await user.selectOptions(roleSelect, "viewer");
+
+    // No page reload anywhere in this flow -- the reduced permission set
+    // (canManageMembers/canGrantOwnership) is recomputed purely from the
+    // freshly-reloaded `self` row returned by the second GET /members.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  it("admin sees no role select or actions menu for another admin's row -- only for self and lower-ranked members", async () => {
+    const adminSelf = makeMember({
+      id: "self-id",
+      user_email: "self@example.com",
+      role: "admin",
+      permissions: ["members.manage"],
+    });
+    const otherAdmin = makeMember({
+      id: "other-admin-id",
+      user_email: "other-admin@example.com",
+      role: "admin",
+      permissions: ["members.manage"],
+    });
+    const viewerMember = makeMember({
+      id: "viewer-id",
+      user_email: "viewer@example.com",
+      role: "viewer",
+      permissions: [],
+    });
+    const membersResponse: PaginatedMembers = { total: 3, items: [adminSelf, otherAdmin, viewerMember] };
+    apiFetchMock.mockImplementation((path: string) => {
+      if (path.includes("/invitations")) return Promise.resolve(emptyInvitations);
+      if (path.includes("/members")) return Promise.resolve(membersResponse);
+      return Promise.reject(new Error(`unexpected call: ${path}`));
+    });
+
+    renderWithProviders(<TeamPage />);
+    await waitFor(() => expect(screen.getByText("other-admin@example.com")).toBeInTheDocument());
+
+    const otherAdminRow = screen.getByText("other-admin@example.com").closest("tr");
+    expect(otherAdminRow).not.toBeNull();
+    expect(within(otherAdminRow as HTMLElement).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(otherAdminRow as HTMLElement).queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+
+    // The viewer's row (lower rank) still gets full controls.
+    const viewerRow = screen.getByText("viewer@example.com").closest("tr");
+    expect(within(viewerRow as HTMLElement).getByRole("combobox")).toBeInTheDocument();
+    expect(within(viewerRow as HTMLElement).getByRole("button", { name: "More actions" })).toBeInTheDocument();
+
+    // Self's own row still gets controls (self-modification is exempt).
+    const selfRow = screen.getByText("self@example.com").closest("tr");
+    expect(within(selfRow as HTMLElement).getByRole("button", { name: "More actions" })).toBeInTheDocument();
+  });
 });

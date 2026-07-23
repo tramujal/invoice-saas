@@ -19,6 +19,7 @@ from app.email_verification import (
 )
 from app.localization import DEFAULT_LANGUAGE
 from app.membership_role import MembershipRole
+from app.organization_status import OrganizationStatus
 from app.models import (
     EmailVerificationToken,
     Organization,
@@ -26,6 +27,8 @@ from app.models import (
     PasswordResetToken,
     User,
 )
+from app.user_status import UserStatus
+from app.services.platform_settings import get_effective_settings
 from app.password_reset import (
     RESET_TOKEN_TTL_MINUTES,
     build_reset_link,
@@ -117,6 +120,7 @@ def _organization_summary(user_org: _UserOrganization) -> OrganizationSummary:
         currency_code=user_org.organization.currency_code,
         language=user_org.organization.language,
         permissions=user_org.member.permissions,
+        status=OrganizationStatus(user_org.organization.status),
     )
 
 
@@ -133,6 +137,29 @@ def register(
         [RateLimitCheck(scope="auth:register:ip", identity=ip_identity(request), rules=REGISTER_RULES)]
     )
 
+    # Registering creates a brand-new tenant -- exactly the kind of
+    # "ordinary application use" maintenance mode exists to pause, so
+    # it's blocked here too, not just the dedicated registrations_enabled
+    # toggle below. Checked before the email-uniqueness query so neither
+    # condition can be probed independently of the other.
+    settings = get_effective_settings(db)
+    if settings.maintenance_mode:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "maintenance_mode",
+                "message": "The platform is currently undergoing maintenance. Please try again shortly.",
+            },
+        )
+    if not settings.registrations_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "registrations_disabled",
+                "message": "New registrations are currently disabled.",
+            },
+        )
+
     existing = db.scalar(select(User).where(User.email == body.email))
     if existing is not None:
         raise HTTPException(
@@ -144,7 +171,17 @@ def register(
     db.add(user)
     db.flush()
 
-    organization = Organization(name=body.organization_name)
+    # default_language/default_currency are the platform's current
+    # dynamic defaults (app.services.platform_settings) -- applied only
+    # here, at creation of a brand-new organization; changing them in
+    # Platform Settings never touches any existing organization's own
+    # language/currency_code, which stay permanently whatever they were
+    # set to at their own creation time.
+    organization = Organization(
+        name=body.organization_name,
+        language=settings.default_language,
+        currency_code=settings.default_currency,
+    )
     db.add(organization)
     db.flush()
 
@@ -206,6 +243,17 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+        )
+
+    # Checked only after the password has already been proven correct --
+    # never before, so a wrong-password attempt against a disabled
+    # account gets exactly the same generic "Invalid email or password"
+    # as any other failed login, revealing nothing about the account's
+    # status to someone who hasn't actually authenticated as it.
+    if user.status == UserStatus.disabled.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "account_disabled", "message": "This account has been disabled."},
         )
 
     return AuthResponse(

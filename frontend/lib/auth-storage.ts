@@ -6,6 +6,11 @@ const ORG_CURRENCY_KEY = "invoicing_organization_currency";
 const ORG_LANGUAGE_KEY = "invoicing_organization_language";
 const ORG_PERMISSIONS_KEY = "invoicing_organization_permissions";
 const USER_EMAIL_KEY = "invoicing_user_email";
+// Deliberately separate from ORG_PERMISSIONS_KEY -- a platform role is not
+// scoped to any organization (see app.platform_permissions on the
+// backend), so it must never be cleared or overwritten by an organization
+// switch the way ORG_PERMISSIONS_KEY is.
+const PLATFORM_ROLE_KEY = "invoicing_platform_role";
 // Exported so other tabs/windows of the same origin can react to a change
 // via the native `storage` event (see EMAIL_VERIFIED_STORAGE_KEY usage in
 // AppShell/verify-email) — this is what lets the "email not verified"
@@ -21,17 +26,24 @@ export function getAuthToken(): string | null {
 export function setAuthSession(params: {
   token: string;
   apiBaseUrl: string;
-  organizationId: string;
+  // Optional -- a platform-admin-only account (zero organization
+  // memberships, see isPlatformAdminAuthenticated) has no organization to
+  // set. Ordinary login/register always pass this, since every
+  // registration creates exactly one organization.
+  organizationId?: string;
   organizationName?: string;
   organizationCurrency?: string;
   organizationLanguage?: string;
   organizationPermissions?: string[];
   userEmail?: string;
   emailVerified?: boolean;
+  platformRole?: string | null;
 }): void {
   window.localStorage.setItem(TOKEN_KEY, params.token.trim());
   window.localStorage.setItem(API_BASE_KEY, params.apiBaseUrl.trim().replace(/\/$/, ""));
-  window.localStorage.setItem(ORG_ID_KEY, params.organizationId.trim());
+  if (params.organizationId) {
+    window.localStorage.setItem(ORG_ID_KEY, params.organizationId.trim());
+  }
   if (params.organizationName) {
     window.localStorage.setItem(ORG_NAME_KEY, params.organizationName);
   }
@@ -50,6 +62,13 @@ export function setAuthSession(params: {
   if (params.emailVerified !== undefined) {
     window.localStorage.setItem(EMAIL_VERIFIED_STORAGE_KEY, String(params.emailVerified));
   }
+  if (params.platformRole !== undefined) {
+    if (params.platformRole) {
+      window.localStorage.setItem(PLATFORM_ROLE_KEY, params.platformRole);
+    } else {
+      window.localStorage.removeItem(PLATFORM_ROLE_KEY);
+    }
+  }
 }
 
 export function clearAuthSession(): void {
@@ -62,6 +81,7 @@ export function clearAuthSession(): void {
   window.localStorage.removeItem(ORG_PERMISSIONS_KEY);
   window.localStorage.removeItem(USER_EMAIL_KEY);
   window.localStorage.removeItem(EMAIL_VERIFIED_STORAGE_KEY);
+  window.localStorage.removeItem(PLATFORM_ROLE_KEY);
 }
 
 export function getApiBaseUrl(): string | null {
@@ -178,4 +198,34 @@ export function setEmailVerified(verified: boolean): void {
 
 export function isAuthenticated(): boolean {
   return Boolean(getAuthToken() && getApiBaseUrl() && getOrganizationId());
+}
+
+/** A user's own platform-administration role, or null -- see
+ * app.platform_permissions on the backend. Refreshed from GET /auth/me by
+ * both AppShell (to decide whether to show the Platform Admin entry
+ * link) and PlatformAdminShell (to re-verify on every load, since a role
+ * can be revoked mid-session). */
+export function getPlatformRole(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(PLATFORM_ROLE_KEY);
+}
+
+/** Writes the latest known platform role, including clearing it (pass
+ * null) when a previously-granted role has been revoked -- never merely
+ * skipped, so a stale cached role can't outlive the server's own record
+ * of it for longer than the next /auth/me refresh. */
+export function updatePlatformRole(role: string | null): void {
+  if (typeof window === "undefined") return;
+  if (role) {
+    window.localStorage.setItem(PLATFORM_ROLE_KEY, role);
+  } else {
+    window.localStorage.removeItem(PLATFORM_ROLE_KEY);
+  }
+}
+
+/** The platform-admin equivalent of isAuthenticated() -- deliberately
+ * does NOT require an organization id, since a platform operator may
+ * have zero organization memberships. */
+export function isPlatformAdminAuthenticated(): boolean {
+  return Boolean(getAuthToken() && getApiBaseUrl() && getPlatformRole());
 }

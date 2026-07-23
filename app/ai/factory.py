@@ -8,6 +8,7 @@ from app.ai.base import AIProvider
 from app.ai.gemini_provider import GeminiProvider
 from app.ai.limits import AI_MAX_OUTPUT_TOKENS, AI_REQUEST_TIMEOUT_SECONDS
 from app.security import ENVIRONMENT
+from app.services.platform_settings import get_effective_settings
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,27 @@ def get_ai_provider(*, timeout_seconds: float | None = None) -> AIProvider:
     which sits on the critical path of a page load rather than a chat the
     user is already waiting on. Every existing caller that doesn't pass
     this keeps behaving exactly as before.
+
+    Checks the dynamic ai_enabled switch (app.services.platform_settings)
+    BEFORE anything else -- this is the one shared enforcement point
+    every AI surface in the app goes through (assistant chat, the AI
+    agent's tool-confirm path, insights narration), so disabling AI here
+    means the provider is never constructed and never called, regardless
+    of caller. Deliberately independent of is_ai_configured()/the env
+    checks below: "configured but disabled," "enabled but not
+    configured," and "enabled and configured" are three different states
+    the admin settings page needs to be able to show separately.
     """
+    settings = get_effective_settings()
+    if not settings.ai_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "ai_disabled",
+                "message": "The AI assistant is currently disabled by a platform administrator.",
+            },
+        )
+
     provider_name = (os.environ.get("AI_PROVIDER") or _DEFAULT_PROVIDER).strip().lower()
 
     if provider_name not in _PROVIDER_API_KEY_ENV_VARS:

@@ -34,6 +34,14 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_quote_reminders_table(engine)
     _add_organization_member_role_fields(engine)
     _add_organization_invitations_table(engine)
+    _add_user_platform_role(engine)
+    _add_organization_status(engine)
+    _add_platform_audit_log_table(engine)
+    _add_user_status(engine)
+    _add_platform_audit_log_user_target_and_details(engine)
+    _add_platform_audit_log_query_indexes(engine)
+    _add_platform_settings_table(engine)
+    _add_platform_settings_version(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -695,6 +703,189 @@ def _add_organization_invitations_table(engine: Engine) -> None:
                 "ON organization_invitations (organization_id, email)"
             )
         )
+
+
+def _add_user_platform_role(engine: Engine) -> None:
+    """Adds User.platform_role -- a nullable column backing the
+    platform-administration authorization axis, entirely independent from
+    OrganizationMember.role/organization membership. NULL means "not a
+    platform admin". See app.platform_permissions for the role/permission
+    map and app.scripts.grant_platform_role for how the first platform
+    admin is bootstrapped (never through the ordinary signup/API surface).
+    """
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("users")}
+    if "platform_role" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN platform_role VARCHAR(32)"))
+
+
+def _add_organization_status(engine: Engine) -> None:
+    """Adds Organization.status -- the DEFAULT clause backfills every
+    existing row to 'active' atomically as part of the ALTER TABLE itself
+    (same proven pattern as _add_organization_localization_fields), so no
+    separate backfill step is needed."""
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("organizations")}
+    if "status" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE organizations ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active'"))
+
+
+def _add_platform_audit_log_table(engine: Engine) -> None:
+    """Creates platform_audit_log if it's missing -- same idempotent
+    safety net as _add_organization_invitations_table (Base.metadata.
+    create_all() already creates this table on a fresh database since
+    PlatformAuditLog is a declared model). Append-only: no migration here
+    ever alters or removes a row, and no route exposes update/delete."""
+    inspector = inspect(engine)
+    if "platform_audit_log" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS platform_audit_log ("
+                "id CHAR(36) PRIMARY KEY, "
+                "actor_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "actor_email VARCHAR(255) NOT NULL, "
+                "action VARCHAR(64) NOT NULL, "
+                "target_organization_id CHAR(36) NULL REFERENCES organizations(id) ON DELETE SET NULL, "
+                "target_organization_name VARCHAR(255) NOT NULL, "
+                "reason TEXT NOT NULL, "
+                "client_ip VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_platform_audit_log_target_org "
+                "ON platform_audit_log (target_organization_id)"
+            )
+        )
+
+
+def _add_user_status(engine: Engine) -> None:
+    """Adds User.status -- the DEFAULT clause backfills every existing
+    row to 'active' atomically as part of the ALTER TABLE itself, same
+    proven pattern as _add_organization_status."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("users")}
+    if "status" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active'"))
+
+
+def _add_platform_audit_log_user_target_and_details(engine: Engine) -> None:
+    """Adds target_user_id/target_user_email/details to platform_audit_log
+    -- all nullable, so this is a pure additive change with no backfill
+    needed (every existing row is an organization-targeted action, which
+    correctly leaves these three new columns NULL)."""
+    inspector = inspect(engine)
+    if "platform_audit_log" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("platform_audit_log")}
+    new_columns = {
+        "target_user_id": "CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL",
+        "target_user_email": "VARCHAR(255) NULL",
+        "details": "TEXT NULL",
+    }
+    missing = {name: ddl for name, ddl in new_columns.items() if name not in columns}
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for name, ddl in missing.items():
+            conn.execute(text(f"ALTER TABLE platform_audit_log ADD COLUMN {name} {ddl}"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_platform_audit_log_target_user "
+                "ON platform_audit_log (target_user_id)"
+            )
+        )
+
+
+def _add_platform_audit_log_query_indexes(engine: Engine) -> None:
+    """Adds the indexes Phase 13F's filterable/sortable audit-log listing
+    needs -- created_at (the default sort key), action, and actor_user_id
+    (all frequently filtered/ordered on) -- target_organization_id/
+    target_user_id already have their own indexes from earlier phases.
+    CREATE INDEX IF NOT EXISTS is itself idempotent, so this needs no
+    inspector column/table check first, unlike every ALTER TABLE
+    migration in this file."""
+    inspector = inspect(engine)
+    if "platform_audit_log" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_platform_audit_log_created_at ON platform_audit_log (created_at)")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_platform_audit_log_action ON platform_audit_log (action)")
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_platform_audit_log_actor_user_id "
+                "ON platform_audit_log (actor_user_id)"
+            )
+        )
+
+
+def _add_platform_settings_table(engine: Engine) -> None:
+    """Creates platform_settings if it's missing -- same idempotent safety
+    net as _add_platform_audit_log_table (Base.metadata.create_all()
+    already creates this table on a fresh database since PlatformSettings
+    is a declared model). No row is ever inserted here -- the singleton
+    row is lazily created on first read with code-defined defaults (see
+    app.services.platform_settings.get_or_create_settings_row), which is
+    what "deterministic defaults when the row does not yet exist" means
+    in practice."""
+    inspector = inspect(engine)
+    if "platform_settings" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS platform_settings ("
+                "id CHAR(36) PRIMARY KEY, "
+                "maintenance_mode BOOLEAN NOT NULL DEFAULT FALSE, "
+                "registrations_enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "ai_enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "emails_enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "invoice_reminders_enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "quote_reminders_enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "default_language VARCHAR(8) NOT NULL DEFAULT 'en', "
+                "default_currency VARCHAR(8) NOT NULL DEFAULT 'USD', "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_by_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "version INTEGER NOT NULL DEFAULT 1"
+                ")"
+            )
+        )
+
+
+def _add_platform_settings_version(engine: Engine) -> None:
+    """Adds PlatformSettings.version -- the optimistic-concurrency token
+    PATCH /admin/settings uses to detect two admins editing at once (see
+    that endpoint's own docstring). The DEFAULT clause backfills any
+    pre-existing singleton row to version 1 atomically as part of the
+    ALTER TABLE itself, same proven pattern as _add_user_status."""
+    inspector = inspect(engine)
+    if "platform_settings" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("platform_settings")}
+    if "version" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE platform_settings ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))
 
 
 def _backfill_invoice_numbers(conn) -> None:
