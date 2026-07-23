@@ -771,10 +771,108 @@ export type PlatformOrganizationDetail = {
   language: string;
   currency_code: string;
   timezone: string;
+  plan_id: string;
+  plan_code: string;
+  plan_name: string;
   created_at: string | null;
   last_activity_at: string | null;
   members: PlatformOrganizationMember[];
   recent_documents: PlatformOrganizationRecentDocument[];
+};
+
+// NULL = unlimited, 0 = unavailable, positive integer = hard limit --
+// see app.models.Plan's own docstring. Shared shape between the
+// platform-admin plan response and the organization-facing entitlements
+// response.
+export type PlanLimits = {
+  max_users: number | null;
+  max_customers: number | null;
+  max_products: number | null;
+  max_invoices_per_month: number | null;
+  max_quotes_per_month: number | null;
+  max_ai_actions_per_month: number | null;
+  storage_limit_mb: number | null;
+};
+
+export type PlanFeatures = {
+  custom_branding_enabled: boolean;
+  api_access_enabled: boolean;
+  advanced_reports_enabled: boolean;
+};
+
+export type Plan = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  is_default: boolean;
+  sort_order: number;
+  limits: PlanLimits;
+  features: PlanFeatures;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlansListResponse = {
+  items: Plan[];
+};
+
+export type PlanCreateRequest = {
+  code: string;
+  name: string;
+  description?: string | null;
+  sort_order?: number;
+  max_users?: number | null;
+  max_customers?: number | null;
+  max_products?: number | null;
+  max_invoices_per_month?: number | null;
+  max_quotes_per_month?: number | null;
+  max_ai_actions_per_month?: number | null;
+  storage_limit_mb?: number | null;
+  custom_branding_enabled?: boolean;
+  api_access_enabled?: boolean;
+  advanced_reports_enabled?: boolean;
+  reason: string;
+};
+
+export type PlanUpdateRequest = {
+  reason: string;
+  expected_version: number;
+  name?: string;
+  description?: string | null;
+  sort_order?: number;
+  max_users?: number | null;
+  max_customers?: number | null;
+  max_products?: number | null;
+  max_invoices_per_month?: number | null;
+  max_quotes_per_month?: number | null;
+  max_ai_actions_per_month?: number | null;
+  storage_limit_mb?: number | null;
+  custom_branding_enabled?: boolean;
+  api_access_enabled?: boolean;
+  advanced_reports_enabled?: boolean;
+};
+
+export type PlanActionRequest = {
+  reason: string;
+  expected_version: number;
+};
+
+export type OrganizationPlanChangeRequest = {
+  plan_id: string;
+  reason: string;
+};
+
+// GET /organizations/{id}/entitlements -- the tenant-facing, read-only
+// view of what an organization's current plan allows.
+export type OrganizationEntitlements = {
+  plan_id: string;
+  plan_code: string;
+  plan_name: string;
+  limits: PlanLimits;
+  features: PlanFeatures;
 };
 
 export type PaginatedPlatformOrganizations = {

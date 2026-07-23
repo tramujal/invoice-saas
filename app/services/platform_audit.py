@@ -21,10 +21,14 @@ def record_organization_action(
     organization: Organization,
     reason: str,
     client_ip: str | None,
+    details: dict | None = None,
 ) -> PlatformAuditLog:
     """Does not commit -- the caller adds this to the same transaction as
     the actual status change, so the audit row and the mutation it
-    describes either both persist or neither does."""
+    describes either both persist or neither does. `details` is optional
+    (suspend/reactivate never needed it; organization.plan_changed uses
+    it for the old/new plan and old/new version -- see
+    app.routers.platform_admin.update_organization_plan)."""
     entry = PlatformAuditLog(
         actor_user_id=actor.id,
         actor_email=actor.email,
@@ -32,6 +36,7 @@ def record_organization_action(
         target_organization_id=organization.id,
         target_organization_name=organization.business_name or organization.name,
         reason=reason,
+        details=json.dumps(details) if details is not None else None,
         client_ip=client_ip,
     )
     db.add(entry)
@@ -92,6 +97,35 @@ def record_settings_action(
         actor_user_id=actor.id,
         actor_email=actor.email,
         action=PlatformAuditAction.platform_settings_updated.value,
+        reason=reason,
+        details=json.dumps(details) if details is not None else None,
+        client_ip=client_ip,
+    )
+    db.add(entry)
+    return entry
+
+
+def record_plan_action(
+    db: Session,
+    *,
+    actor: User,
+    action: PlatformAuditAction,
+    reason: str,
+    client_ip: str | None,
+    details: dict | None = None,
+) -> PlatformAuditLog:
+    """Sibling of record_settings_action for the plan.* actions
+    (plan_created/updated/activated/deactivated/default_changed) --
+    plans have no organization/user target of their own, so both
+    target_organization_id/target_user_id stay None, same "not
+    applicable" convention as record_settings_action. `details` carries
+    the changed-field diff (PATCH) or old/new plan info
+    (activate/deactivate/make-default) -- never a secret, since every
+    Plan field is a non-secret commercial entitlement by construction."""
+    entry = PlatformAuditLog(
+        actor_user_id=actor.id,
+        actor_email=actor.email,
+        action=action.value,
         reason=reason,
         details=json.dumps(details) if details is not None else None,
         client_ip=client_ip,

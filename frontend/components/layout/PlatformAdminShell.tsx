@@ -18,6 +18,7 @@ import type { MeResponse } from "@/lib/types";
 const links = [
   { href: "/admin", labelKey: "adminNav.dashboard" },
   { href: "/admin/organizations", labelKey: "adminNav.organizations" },
+  { href: "/admin/plans", labelKey: "adminNav.plans" },
   { href: "/admin/users", labelKey: "adminNav.users" },
   { href: "/admin/system-health", labelKey: "adminNav.systemHealth" },
   { href: "/admin/audit-log", labelKey: "adminNav.auditLog" },

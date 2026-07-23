@@ -1282,6 +1282,219 @@ class PublicConfigResponse(BaseModel):
     registrations_enabled: bool
 
 
+_PLAN_LIMIT_FIELD_NAMES = (
+    "max_users",
+    "max_customers",
+    "max_products",
+    "max_invoices_per_month",
+    "max_quotes_per_month",
+    "max_ai_actions_per_month",
+    "storage_limit_mb",
+)
+_PLAN_FEATURE_FIELD_NAMES = (
+    "custom_branding_enabled",
+    "api_access_enabled",
+    "advanced_reports_enabled",
+)
+
+
+class PlanLimits(BaseModel):
+    """NULL = unlimited, 0 = unavailable, positive integer = hard limit
+    for every field here -- see app.models.Plan's own docstring. Shared
+    by the platform admin plan response and the organization-facing
+    entitlements response so both render "unlimited" the same way."""
+
+    max_users: int | None
+    max_customers: int | None
+    max_products: int | None
+    max_invoices_per_month: int | None
+    max_quotes_per_month: int | None
+    max_ai_actions_per_month: int | None
+    storage_limit_mb: int | None
+
+
+class PlanFeatures(BaseModel):
+    """Commercial entitlement only -- whether the plan is *supposed* to
+    allow the capability, not whether it's actually wired up and
+    enforced anywhere yet (enforcement is a later phase)."""
+
+    custom_branding_enabled: bool
+    api_access_enabled: bool
+    advanced_reports_enabled: bool
+
+
+class PlanResponse(BaseModel):
+    """GET/POST/PATCH /admin/plans(/{id}) -- the full plan definition,
+    including the optimistic-concurrency `version` every mutation must
+    round-trip as expected_version (see PlanUpdateRequest)."""
+
+    id: str
+    code: str
+    name: str
+    description: str | None
+    is_active: bool
+    is_default: bool
+    sort_order: int
+    limits: PlanLimits
+    features: PlanFeatures
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlansListResponse(BaseModel):
+    """GET /admin/plans -- deliberately a plain list, no pagination
+    wrapper: this app has exactly 4 built-in plans today and plans are
+    never deleted, so the total count stays small by construction (see
+    Plan's own docstring on why deletion isn't supported)."""
+
+    items: list[PlanResponse]
+
+
+def _validate_plan_code(value: str) -> str:
+    value = value.strip()
+    if not value or not all(c.islower() or c.isdigit() or c in "_-" for c in value):
+        raise ValueError("code must be lowercase letters, digits, underscores, or hyphens only")
+    return value
+
+
+class PlanCreateRequest(BaseModel):
+    """Body for POST /admin/plans. `code` is required and immutable
+    forever after creation (see Plan's own docstring) -- PlanUpdateRequest
+    below has no code field at all, which is what makes it impossible to
+    change through the API, not a runtime check. `reason` is mandatory
+    for consistency with every other platform-admin mutation in this
+    app (suspend/reactivate, settings updates, user actions)."""
+
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    sort_order: int = 0
+    max_users: int | None = None
+    max_customers: int | None = None
+    max_products: int | None = None
+    max_invoices_per_month: int | None = None
+    max_quotes_per_month: int | None = None
+    max_ai_actions_per_month: int | None = None
+    storage_limit_mb: int | None = None
+    custom_branding_enabled: bool = False
+    api_access_enabled: bool = False
+    advanced_reports_enabled: bool = False
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("code")
+    @classmethod
+    def _code_valid(cls, value: str) -> str:
+        return _validate_plan_code(value)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+    @field_validator(*_PLAN_LIMIT_FIELD_NAMES)
+    @classmethod
+    def _limit_non_negative(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("must be a non-negative integer, or null for unlimited")
+        return value
+
+
+class PlanUpdateRequest(BaseModel):
+    """Body for PATCH /admin/plans/{id} -- a genuine partial update
+    (every field but reason/expected_version is optional), matching
+    PlatformSettingsUpdateRequest's exact shape and exclude_unset
+    contract. No `code` or `is_active`/`is_default` field exists here on
+    purpose: code is immutable, and is_active/is_default only ever
+    change through their own dedicated endpoints (activate/deactivate/
+    make-default), which have their own audit actions and, for
+    make-default, a second plan's row to update in the same
+    transaction -- folding them into a generic PATCH would blur that."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_version: int = Field(gt=0)
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    sort_order: int | None = None
+    max_users: int | None = None
+    max_customers: int | None = None
+    max_products: int | None = None
+    max_invoices_per_month: int | None = None
+    max_quotes_per_month: int | None = None
+    max_ai_actions_per_month: int | None = None
+    storage_limit_mb: int | None = None
+    custom_branding_enabled: bool | None = None
+    api_access_enabled: bool | None = None
+    advanced_reports_enabled: bool | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+    @field_validator(*_PLAN_LIMIT_FIELD_NAMES)
+    @classmethod
+    def _limit_non_negative(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("must be a non-negative integer, or null for unlimited")
+        return value
+
+    @model_validator(mode="after")
+    def _reject_empty_update(self) -> "PlanUpdateRequest":
+        editable_fields = ("name", "description", "sort_order", *_PLAN_LIMIT_FIELD_NAMES, *_PLAN_FEATURE_FIELD_NAMES)
+        if all(getattr(self, field) is None for field in editable_fields):
+            raise ValueError("At least one field must be provided.")
+        return self
+
+
+class PlanActionRequest(BaseModel):
+    """Body for POST /admin/plans/{id}/activate|deactivate|make-default
+    -- same optimistic-concurrency contract as PlanUpdateRequest (this
+    plan's own version must match), plus the same mandatory-reason
+    convention as every other platform-admin mutation."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_version: int = Field(gt=0)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+
+class OrganizationPlanChangeRequest(BaseModel):
+    """Body for PATCH /admin/organizations/{id}/plan. `plan_id` must
+    resolve to an active plan (see app.routers.platform_admin.
+    update_organization_plan) -- inactive plans can never be newly
+    assigned, only kept by an organization that was already on them
+    before it was deactivated. Typed confirmation (matching the
+    organization name) is enforced only on the frontend, same precedent
+    as suspend/reactivate -- the API's own guarantee is just the
+    mandatory, non-blank reason."""
+
+    plan_id: str
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+
+class OrganizationEntitlementsResponse(BaseModel):
+    """GET /organizations/{id}/entitlements -- the tenant-facing,
+    read-only view of what an organization's current plan allows. Never
+    includes anything about other plans, pricing, or billing (out of
+    scope for this phase) -- only this organization's own resolved
+    entitlements, via app.services.entitlements."""
+
+    plan_id: str
+    plan_code: str
+    plan_name: str
+    limits: PlanLimits
+    features: PlanFeatures
+
+
 class PlatformDashboardResponse(BaseModel):
     organizations_total: int
     organizations_new_7d: int
@@ -1344,6 +1557,9 @@ class PlatformOrganizationDetail(BaseModel):
     language: str
     currency_code: str
     timezone: str
+    plan_id: str
+    plan_code: str
+    plan_name: str
     created_at: datetime | None
     last_activity_at: datetime | None
     members: list[PlatformOrganizationMember]

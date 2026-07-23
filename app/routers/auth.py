@@ -28,6 +28,7 @@ from app.models import (
     User,
 )
 from app.user_status import UserStatus
+from app.services.entitlements import get_default_plan
 from app.services.platform_settings import get_effective_settings
 from app.password_reset import (
     RESET_TOKEN_TTL_MINUTES,
@@ -177,10 +178,16 @@ def register(
     # Platform Settings never touches any existing organization's own
     # language/currency_code, which stay permanently whatever they were
     # set to at their own creation time.
+    # Every new organization starts on the platform's current default
+    # plan (app.services.entitlements.get_default_plan) -- resolved fresh
+    # at creation time, never hardcoded, so a later change to which plan
+    # is default is honored by the very next signup.
+    default_plan = get_default_plan(db)
     organization = Organization(
         name=body.organization_name,
         language=settings.default_language,
         currency_code=settings.default_currency,
+        plan_id=default_plan.id,
     )
     db.add(organization)
     db.flush()

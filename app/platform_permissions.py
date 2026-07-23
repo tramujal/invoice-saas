@@ -32,6 +32,8 @@ class PlatformPermission(str, Enum):
     settings_manage = "platform.settings.manage"  # reserved: future settings *writes*
     audit_view = "platform.audit.view"
     roles_manage = "platform.roles.manage"  # grant/revoke platform_role
+    plans_view = "platform.plans.view"
+    plans_manage = "platform.plans.manage"  # create/edit/activate/deactivate/make-default
 
 
 _SUPER_ADMIN_PERMISSIONS: frozenset[PlatformPermission] = frozenset(PlatformPermission)

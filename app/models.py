@@ -36,6 +36,94 @@ class Base(DeclarativeBase):
     pass
 
 
+# Fixed codes for the four built-in plans seeded by
+# _seed_default_plans (see app.schema_migrations) -- referenced here, not
+# just in the migration, so app.services.entitlements and registration
+# (app.routers.auth.register) never have to hardcode the string again.
+PLAN_CODE_FREE = "free"
+PLAN_CODE_STARTER = "starter"
+PLAN_CODE_PRO = "pro"
+PLAN_CODE_ENTERPRISE = "enterprise"
+
+# Fixed, non-random primary keys for the four seeded plan rows -- same
+# rationale as PLATFORM_SETTINGS_SINGLETON_ID: a literal, known-ahead-of-
+# time id is what lets the idempotent migration that adds
+# Organization.plan_id use a plain SQL-level DEFAULT (see
+# _add_organization_plan_id) instead of needing a data migration step to
+# backfill a randomly-generated UUID it couldn't have known in advance.
+PLAN_ID_FREE = "plan_free"
+PLAN_ID_STARTER = "plan_starter"
+PLAN_ID_PRO = "plan_pro"
+PLAN_ID_ENTERPRISE = "plan_enterprise"
+
+
+class Plan(Base):
+    """A commercial plan definition -- what an organization is entitled
+    to, never what it has actually used (usage tracking/enforcement is
+    explicitly out of scope for this phase; see app.services.entitlements
+    for the one place that reads these columns).
+
+    `code` is immutable forever once created (enforced at the API layer,
+    app.routers.platform_admin -- PATCH never accepts it) since it's the
+    stable identifier registration and any future billing integration
+    would key off of, unlike `name`/`description` which are just display
+    text. Plans are never deleted, only deactivated (`is_active=False`);
+    an inactive plan can still be read (an org already on it keeps its
+    entitlements) but can never be newly assigned -- see
+    app.routers.platform_admin.update_organization_plan.
+
+    Exactly one row must have `is_default=True` at all times -- enforced
+    transactionally by POST .../make-default (clears the old default and
+    sets the new one in the same UPDATE-guarded transaction), never by a
+    database constraint alone, since flipping a boolean on two rows
+    safely needs a transaction regardless.
+
+    Every *_per_month / max_* limit and storage_limit_mb follow one rule,
+    documented once here rather than on each column: NULL means
+    unlimited, 0 means unavailable, and a positive integer is a hard
+    limit. The *_enabled feature booleans are commercial entitlements
+    only -- whether the plan is SUPPOSED to allow the capability, not
+    whether it's actually wired up and enforced anywhere yet (this phase
+    defines entitlements; enforcement is a later phase).
+
+    `version` is the same optimistic-concurrency token PlatformSettings
+    already uses (see app.routers.platform_admin.update_platform_settings
+    for the exact pattern) -- PATCH/activate/deactivate/make-default all
+    go through one atomic `UPDATE ... WHERE version = expected_version`,
+    never ORM attribute mutation followed by a blind commit.
+    """
+
+    __tablename__ = "plans"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    code: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    max_users: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_customers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_products: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_invoices_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_quotes_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_ai_actions_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    storage_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    custom_branding_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    api_access_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    advanced_reports_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organizations: Mapped[list["Organization"]] = relationship(back_populates="plan")
+
+
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -113,6 +201,17 @@ class Organization(Base):
         default=OrganizationStatus.active.value,
         server_default=OrganizationStatus.active.value,
     )
+    # ON DELETE RESTRICT (not CASCADE/SET NULL): a plan being referenced
+    # by any organization must never simply vanish out from under it --
+    # see Plan's own docstring on why plans are deactivated, never
+    # deleted, which is what makes RESTRICT here safe in practice (there
+    # is no code path that ever attempts to delete a Plan row at all).
+    plan_id: Mapped[str] = mapped_column(
+        CHAR(36),
+        ForeignKey("plans.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=PLAN_ID_FREE,
+    )
 
     members: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="organization"
@@ -121,6 +220,7 @@ class Organization(Base):
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="organization")
     products: Mapped[list["Product"]] = relationship(back_populates="organization")
     quotes: Mapped[list["Quote"]] = relationship(back_populates="organization")
+    plan: Mapped["Plan"] = relationship(back_populates="organizations")
 
 
 class User(Base):

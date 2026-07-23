@@ -42,6 +42,7 @@ from app.models import (
     InvoiceReminder,
     Organization,
     OrganizationMember,
+    Plan,
     PlatformAuditLog,
     PlatformSettings,
     Product,
@@ -58,9 +59,17 @@ from app.rate_limit import get_client_ip
 from app.reminder_status import ReminderStatus
 from app.routers.auth import issue_password_reset
 from app.schemas import (
+    OrganizationPlanChangeRequest,
     PaginatedPlatformAuditLogResponse,
     PaginatedPlatformOrganizationsResponse,
     PaginatedPlatformUsersResponse,
+    PlanActionRequest,
+    PlanCreateRequest,
+    PlanFeatures,
+    PlanLimits,
+    PlanResponse,
+    PlansListResponse,
+    PlanUpdateRequest,
     PlatformAuditLogEntry,
     PlatformDashboardResponse,
     PlatformOrganizationActionRequest,
@@ -78,7 +87,13 @@ from app.schemas import (
     PlatformUserOrganization,
     PlatformUserSummary,
 )
-from app.services.platform_audit import record_organization_action, record_settings_action, record_user_action
+from app.services.entitlements import get_default_plan
+from app.services.platform_audit import (
+    record_organization_action,
+    record_plan_action,
+    record_settings_action,
+    record_user_action,
+)
 from app.services.platform_settings import get_effective_settings, get_or_create_settings_row
 from app.user_status import UserStatus
 
@@ -477,6 +492,9 @@ def _build_organization_detail(db: Session, organization: Organization) -> Platf
         language=organization.language,
         currency_code=organization.currency_code,
         timezone=organization.timezone,
+        plan_id=organization.plan.id,
+        plan_code=organization.plan.code,
+        plan_name=organization.plan.name,
         created_at=created_at,
         last_activity_at=last_activity_at,
         members=members,
@@ -557,6 +575,58 @@ def reactivate_platform_organization(
         organization=organization,
         reason=body.reason,
         client_ip=get_client_ip(request),
+    )
+    db.commit()
+    db.refresh(organization)
+    return _build_organization_detail(db, organization)
+
+
+@router.patch("/organizations/{organization_id}/plan", response_model=PlatformOrganizationDetail)
+def update_organization_plan(
+    organization_id: str,
+    body: OrganizationPlanChangeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformOrganizationDetail:
+    """Assigns a different plan to an organization. Gated by the same
+    platform.organizations.manage permission as suspend/reactivate --
+    this is an organization-management action, not a plan-management one
+    (see platform.plans.manage, which governs the plan *definitions*
+    themselves). Typed confirmation is enforced only on the frontend
+    (matching SuspendReactivateDialog's precedent); the API's own
+    guarantee is the mandatory, non-blank reason."""
+    require_platform_permission(current_user, PlatformPermission.organizations_manage)
+    organization = _organization_or_404(db, organization_id)
+
+    new_plan = db.get(Plan, body.plan_id)
+    if new_plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    if not new_plan.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "plan_inactive", "message": "This plan is inactive and cannot be assigned."},
+        )
+
+    old_plan = db.get(Plan, organization.plan_id)
+    if old_plan is not None and old_plan.id == new_plan.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "no_changes", "message": "This organization is already on that plan."},
+        )
+
+    organization.plan_id = new_plan.id
+    record_organization_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.organization_plan_changed,
+        organization=organization,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={
+            "old_plan": {"id": old_plan.id, "code": old_plan.code} if old_plan is not None else None,
+            "new_plan": {"id": new_plan.id, "code": new_plan.code},
+        },
     )
     db.commit()
     db.refresh(organization)
@@ -1046,6 +1116,361 @@ def update_platform_settings(
     db.commit()
     db.refresh(row)
     return _build_settings_response(db, row)
+
+
+def _plan_or_404(db: Session, plan_id: str) -> Plan:
+    plan = db.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    return plan
+
+
+def _build_plan_response(plan: Plan) -> PlanResponse:
+    return PlanResponse(
+        id=plan.id,
+        code=plan.code,
+        name=plan.name,
+        description=plan.description,
+        is_active=plan.is_active,
+        is_default=plan.is_default,
+        sort_order=plan.sort_order,
+        limits=PlanLimits(
+            max_users=plan.max_users,
+            max_customers=plan.max_customers,
+            max_products=plan.max_products,
+            max_invoices_per_month=plan.max_invoices_per_month,
+            max_quotes_per_month=plan.max_quotes_per_month,
+            max_ai_actions_per_month=plan.max_ai_actions_per_month,
+            storage_limit_mb=plan.storage_limit_mb,
+        ),
+        features=PlanFeatures(
+            custom_branding_enabled=plan.custom_branding_enabled,
+            api_access_enabled=plan.api_access_enabled,
+            advanced_reports_enabled=plan.advanced_reports_enabled,
+        ),
+        version=plan.version,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at,
+    )
+
+
+@router.get("/plans", response_model=PlansListResponse)
+def list_platform_plans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlansListResponse:
+    require_platform_permission(current_user, PlatformPermission.plans_view)
+    plans = db.scalars(select(Plan).order_by(Plan.sort_order.asc(), Plan.created_at.asc())).all()
+    return PlansListResponse(items=[_build_plan_response(plan) for plan in plans])
+
+
+@router.get("/plans/{plan_id}", response_model=PlanResponse)
+def get_platform_plan(
+    plan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    require_platform_permission(current_user, PlatformPermission.plans_view)
+    plan = _plan_or_404(db, plan_id)
+    return _build_plan_response(plan)
+
+
+@router.post("/plans", response_model=PlanResponse, status_code=status.HTTP_201_CREATED)
+def create_platform_plan(
+    body: PlanCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    require_platform_permission(current_user, PlatformPermission.plans_manage)
+
+    if db.scalar(select(Plan).where(Plan.code == body.code)) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "plan_code_taken", "message": f"A plan with code {body.code!r} already exists."},
+        )
+
+    plan = Plan(
+        code=body.code,
+        name=body.name,
+        description=body.description,
+        sort_order=body.sort_order,
+        max_users=body.max_users,
+        max_customers=body.max_customers,
+        max_products=body.max_products,
+        max_invoices_per_month=body.max_invoices_per_month,
+        max_quotes_per_month=body.max_quotes_per_month,
+        max_ai_actions_per_month=body.max_ai_actions_per_month,
+        storage_limit_mb=body.storage_limit_mb,
+        custom_branding_enabled=body.custom_branding_enabled,
+        api_access_enabled=body.api_access_enabled,
+        advanced_reports_enabled=body.advanced_reports_enabled,
+    )
+    db.add(plan)
+    db.flush()
+
+    record_plan_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.plan_created,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={"code": plan.code, "name": plan.name},
+    )
+    db.commit()
+    db.refresh(plan)
+    return _build_plan_response(plan)
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanResponse)
+def update_platform_plan(
+    plan_id: str,
+    body: PlanUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    """Optimistic-concurrency partial update -- identical contract to
+    PATCH /admin/settings (see update_platform_settings's own docstring
+    for the full rationale): body.expected_version must match the row's
+    current version, applied via a single conditional
+    `UPDATE ... WHERE id = :id AND version = :expected_version`, never
+    ORM attribute mutation followed by a blind commit."""
+    require_platform_permission(current_user, PlatformPermission.plans_manage)
+    plan = _plan_or_404(db, plan_id)
+
+    provided = body.model_dump(exclude_unset=True, exclude={"reason", "expected_version"}, mode="json")
+    changes: dict[str, dict[str, object]] = {}
+    for field, new_value in provided.items():
+        old_value = getattr(plan, field)
+        if old_value != new_value:
+            changes[field] = {"old": old_value, "new": new_value}
+
+    if not changes:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "no_changes", "message": "The provided values already match the current plan."},
+        )
+
+    new_version = body.expected_version + 1
+    result = db.execute(
+        update(Plan)
+        .where(Plan.id == plan_id, Plan.version == body.expected_version)
+        .values(**{field: provided[field] for field in changes}, version=new_version)
+    )
+    if result.rowcount == 0:
+        db.rollback()
+        current_version = db.scalar(select(Plan.version).where(Plan.id == plan_id))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "plan_version_conflict",
+                "message": "This plan was changed by another administrator. Reload and try again.",
+                "current_version": current_version,
+            },
+        )
+
+    record_plan_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.plan_updated,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={"old_version": body.expected_version, "new_version": new_version, **changes},
+    )
+    db.commit()
+    db.refresh(plan)
+    return _build_plan_response(plan)
+
+
+def _toggle_plan_active(
+    db: Session,
+    request: Request,
+    current_user: User,
+    plan_id: str,
+    body: PlanActionRequest,
+    *,
+    target_is_active: bool,
+    already_state_code: str,
+    already_state_message: str,
+    action: PlatformAuditAction,
+) -> PlanResponse:
+    """Shared by activate/deactivate -- both are a single-field
+    optimistic-concurrency toggle with their own audit action, differing
+    only in which value they set and which action/error they record."""
+    require_platform_permission(current_user, PlatformPermission.plans_manage)
+    plan = _plan_or_404(db, plan_id)
+
+    if plan.is_active == target_is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": already_state_code, "message": already_state_message},
+        )
+    if not target_is_active and plan.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "cannot_deactivate_default_plan",
+                "message": "The default plan cannot be deactivated. Make another plan the default first.",
+            },
+        )
+
+    new_version = body.expected_version + 1
+    result = db.execute(
+        update(Plan)
+        .where(Plan.id == plan_id, Plan.version == body.expected_version)
+        .values(is_active=target_is_active, version=new_version)
+    )
+    if result.rowcount == 0:
+        db.rollback()
+        current_version = db.scalar(select(Plan.version).where(Plan.id == plan_id))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "plan_version_conflict",
+                "message": "This plan was changed by another administrator. Reload and try again.",
+                "current_version": current_version,
+            },
+        )
+
+    record_plan_action(
+        db,
+        actor=current_user,
+        action=action,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={"code": plan.code, "old_version": body.expected_version, "new_version": new_version},
+    )
+    db.commit()
+    db.refresh(plan)
+    return _build_plan_response(plan)
+
+
+@router.post("/plans/{plan_id}/activate", response_model=PlanResponse)
+def activate_platform_plan(
+    plan_id: str,
+    body: PlanActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    return _toggle_plan_active(
+        db,
+        request,
+        current_user,
+        plan_id,
+        body,
+        target_is_active=True,
+        already_state_code="plan_already_active",
+        already_state_message="This plan is already active.",
+        action=PlatformAuditAction.plan_activated,
+    )
+
+
+@router.post("/plans/{plan_id}/deactivate", response_model=PlanResponse)
+def deactivate_platform_plan(
+    plan_id: str,
+    body: PlanActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    return _toggle_plan_active(
+        db,
+        request,
+        current_user,
+        plan_id,
+        body,
+        target_is_active=False,
+        already_state_code="plan_already_inactive",
+        already_state_message="This plan is already inactive.",
+        action=PlatformAuditAction.plan_deactivated,
+    )
+
+
+@router.post("/plans/{plan_id}/make-default", response_model=PlanResponse)
+def make_default_platform_plan(
+    plan_id: str,
+    body: PlanActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlanResponse:
+    """Clears the old default and sets the new one in the same
+    transaction -- the "exactly one active default plan" invariant is
+    enforced here, transactionally, never by a database constraint
+    alone (see Plan's own docstring). The target plan's own optimistic-
+    concurrency check (expected_version) protects against two admins
+    racing to make-default the *same* plan.
+
+    The clearing step deliberately does NOT reuse a plan row fetched at
+    the top of this function: two admins concurrently making two
+    *different* plans the default would otherwise both pass their own
+    (distinct) version checks and both proceed to clear whatever they
+    each believed was "the old default" -- if that belief was captured
+    before either commit, both could still leave their own target
+    marked is_default=True, violating the single-default invariant. The
+    clearing UPDATE below instead uses a live predicate
+    (`is_default = TRUE AND id != :plan_id`) evaluated at execution
+    time, in the same transaction as the version-gated target update,
+    so it always clears whichever row is *actually* still marked
+    default at that moment -- including a just-committed different
+    target from a racing request -- leaving exactly one default no
+    matter the interleaving."""
+    require_platform_permission(current_user, PlatformPermission.plans_manage)
+    plan = _plan_or_404(db, plan_id)
+
+    if not plan.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "plan_inactive", "message": "An inactive plan cannot be made the default."},
+        )
+    if plan.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "plan_already_default", "message": "This plan is already the default."},
+        )
+
+    new_version = body.expected_version + 1
+    result = db.execute(
+        update(Plan)
+        .where(Plan.id == plan_id, Plan.version == body.expected_version)
+        .values(is_default=True, version=new_version)
+    )
+    if result.rowcount == 0:
+        db.rollback()
+        current_version = db.scalar(select(Plan.version).where(Plan.id == plan_id))
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "plan_version_conflict",
+                "message": "This plan was changed by another administrator. Reload and try again.",
+                "current_version": current_version,
+            },
+        )
+
+    # Read for the audit row only, immediately before the unconditional
+    # clear -- informational, not a correctness dependency (see the
+    # docstring above for why the clear itself never keys off this id).
+    old_default = db.scalar(select(Plan).where(Plan.is_default.is_(True), Plan.id != plan_id))
+    db.execute(
+        update(Plan).where(Plan.is_default.is_(True), Plan.id != plan_id).values(is_default=False)
+    )
+
+    record_plan_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.plan_default_changed,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={
+            "old_default": {"id": old_default.id, "code": old_default.code} if old_default is not None else None,
+            "new_default": {"id": plan.id, "code": plan.code},
+        },
+    )
+    db.commit()
+    db.refresh(plan)
+    return _build_plan_response(plan)
 
 
 def _audit_log_entry(row: PlatformAuditLog) -> PlatformAuditLogEntry:

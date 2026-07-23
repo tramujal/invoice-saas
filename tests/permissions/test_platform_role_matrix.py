@@ -60,6 +60,24 @@ def test_every_admin_endpoint_denies_a_user_with_no_platform_role(client, db_ses
         "/admin/users/does-not-exist",
         "/admin/system/health",
         "/admin/settings",
+        "/admin/plans",
+        "/admin/plans/does-not-exist",
     ):
         response = client.get(path, headers=headers)
         assert response.status_code == 403, f"{path} should deny a non-platform-admin"
+
+
+def test_organization_member_role_grants_no_platform_plan_access(client, db_session):
+    """An ordinary organization member -- even an owner -- holds zero
+    platform permissions; the two authorization axes (app.permissions
+    vs app.platform_permissions) never leak into each other. Mirrors
+    test_platform_admin_suspending_their_own_organization_loses_org_
+    access_but_keeps_admin_access's converse case."""
+    from tests.factories import make_org_with_owner
+
+    owner = make_org_with_owner(db_session, email="plan-owner@example.com", org_name="Plan Co")
+
+    response = client.get("/admin/plans", headers=owner.auth_headers)
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "platform_permission_denied"

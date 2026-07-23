@@ -8,6 +8,7 @@ import { useTranslation } from "@/lib/i18n/useTranslation";
 const TABS = [
   { href: "/settings", labelKey: "settingsNav.organization" },
   { href: "/settings/team", labelKey: "settingsNav.team" },
+  { href: "/settings/plan", labelKey: "settingsNav.plan" },
 ] as const;
 
 /** The only tab UI this page has ever had -- kept intentionally minimal

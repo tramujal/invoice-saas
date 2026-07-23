@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { OrganizationPlanChangeDialog } from "@/components/admin/OrganizationPlanChangeDialog";
 import { SuspendReactivateDialog } from "@/components/admin/SuspendReactivateDialog";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -21,7 +22,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { PlatformOrganizationDetail } from "@/lib/types";
+import type { Plan, PlansListResponse, PlatformOrganizationDetail } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "__generic_load_error__";
 
@@ -41,6 +42,11 @@ export default function PlatformOrganizationDetailPage() {
   const [dialogMode, setDialogMode] = useState<"suspend" | "reactivate" | null>(null);
   const [mutating, setMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [planMutating, setPlanMutating] = useState(false);
+  const [planMutationError, setPlanMutationError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -93,6 +99,40 @@ export default function PlatformOrganizationDetailPage() {
       setMutationError(e instanceof ApiError ? e.message : t("admin.mutationErrorGeneric"));
     } finally {
       setMutating(false);
+    }
+  }
+
+  async function openPlanDialog() {
+    setPlanMutationError(null);
+    setPlanDialogOpen(true);
+    setPlansLoading(true);
+    try {
+      const json = await apiFetch<PlansListResponse>("/admin/plans");
+      setPlans(json.items.filter((plan) => plan.is_active));
+    } catch {
+      setPlans([]);
+    } finally {
+      setPlansLoading(false);
+    }
+  }
+
+  async function handleConfirmPlanChange(planId: string, reason: string) {
+    setPlanMutating(true);
+    setPlanMutationError(null);
+    try {
+      // The mutation response IS the refreshed detail -- never an
+      // optimistic local update, matching handleConfirmMutation above.
+      const updated = await apiFetch<PlatformOrganizationDetail>(`/admin/organizations/${params.id}/plan`, {
+        method: "PATCH",
+        body: JSON.stringify({ plan_id: planId, reason }),
+      });
+      setData(updated);
+      setPlanDialogOpen(false);
+      toast.success(t("adminPlans.orgPlanChangedToast"));
+    } catch (e) {
+      setPlanMutationError(e instanceof ApiError ? e.message : t("admin.mutationErrorGeneric"));
+    } finally {
+      setPlanMutating(false);
     }
   }
 
@@ -178,6 +218,21 @@ export default function PlatformOrganizationDetailPage() {
                 >
                   {data?.status === "active" ? t("admin.statusActive") : t("admin.statusSuspended")}
                 </Badge>
+              )}
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 px-5 py-3">
+            <dt className="text-sm font-medium text-slate-700">{t("adminPlans.currentPlanLabel")}</dt>
+            <dd className="flex items-center gap-3">
+              {loading ? (
+                <span className="inline-flex h-4 w-24 animate-pulse rounded bg-slate-100" aria-hidden />
+              ) : (
+                <>
+                  <span className="text-sm text-slate-900">{data?.plan_name}</span>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => void openPlanDialog()}>
+                    {t("adminPlans.changePlanButton")}
+                  </Button>
+                </>
               )}
             </dd>
           </div>
@@ -305,6 +360,24 @@ export default function PlatformOrganizationDetailPage() {
             setMutationError(null);
           }}
           onConfirm={(reason) => void handleConfirmMutation(reason)}
+        />
+      ) : null}
+
+      {data ? (
+        <OrganizationPlanChangeDialog
+          open={planDialogOpen}
+          organizationName={data.name}
+          currentPlanId={data.plan_id}
+          plans={plans}
+          loadingPlans={plansLoading}
+          submitting={planMutating}
+          error={planMutationError}
+          onClose={() => {
+            if (planMutating) return;
+            setPlanDialogOpen(false);
+            setPlanMutationError(null);
+          }}
+          onConfirm={(planId, reason) => void handleConfirmPlanChange(planId, reason)}
         />
       ) : null}
     </div>

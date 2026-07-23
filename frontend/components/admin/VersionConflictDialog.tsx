@@ -11,17 +11,33 @@ type VersionConflictDialogProps = {
   reloading: boolean;
   onReload: () => void;
   onCancel: () => void;
+  /** Defaults to the Platform Settings copy (this component's original,
+   * still-only caller) -- other resources with their own optimistic
+   * concurrency (e.g. Plans) pass their own i18n keys so the dialog
+   * never says "settings" about something else. */
+  titleKey?: string;
+  messageKey?: string;
+  reloadButtonKey?: string;
 };
 
-/** Shown when PATCH /admin/settings returns 409
- * platform_settings_version_conflict -- another admin saved a change
- * after this page's data was loaded. Never fixes anything on its own:
- * the user's own unsaved draft is left exactly as they had it (see
- * PlatformSettingsPage's conflict handler, which never touches
- * draft/data itself on a 409), and "Reload latest settings" is the one
- * explicit action that discards it -- there is no automatic retry and
- * no silent merge anywhere in this flow. */
-export function VersionConflictDialog({ open, reloading, onReload, onCancel }: VersionConflictDialogProps) {
+/** Shown whenever a versioned mutation returns its resource's own
+ * "changed by someone else" 409 (platform_settings_version_conflict,
+ * plan_version_conflict, ...) -- another admin saved a change after
+ * this page's data was loaded. Never fixes anything on its own: the
+ * user's own unsaved draft is left exactly as they had it (see each
+ * caller's own conflict handler, which never touches its draft/data on
+ * a 409), and "Reload latest" is the one explicit action that discards
+ * it -- there is no automatic retry and no silent merge anywhere in
+ * this flow. */
+export function VersionConflictDialog({
+  open,
+  reloading,
+  onReload,
+  onCancel,
+  titleKey = "admin.versionConflictTitle",
+  messageKey = "admin.versionConflictMessage",
+  reloadButtonKey = "admin.versionConflictReloadButton",
+}: VersionConflictDialogProps) {
   const { t } = useTranslation();
   const [mounted, setMounted] = useState(false);
 
@@ -46,18 +62,18 @@ export function VersionConflictDialog({ open, reloading, onReload, onCancel }: V
       <div
         role="alertdialog"
         aria-modal="true"
-        aria-label={t("admin.versionConflictTitle")}
+        aria-label={t(titleKey)}
         className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
       >
-        <h2 className="text-sm font-semibold text-slate-900">{t("admin.versionConflictTitle")}</h2>
-        <p className="mt-2 text-sm text-slate-600">{t("admin.versionConflictMessage")}</p>
+        <h2 className="text-sm font-semibold text-slate-900">{t(titleKey)}</h2>
+        <p className="mt-2 text-sm text-slate-600">{t(messageKey)}</p>
 
         <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button type="button" variant="secondary" onClick={onCancel} disabled={reloading}>
             {t("admin.versionConflictCancelButton")}
           </Button>
           <Button type="button" onClick={onReload} disabled={reloading}>
-            {reloading ? t("common.refreshing") : t("admin.versionConflictReloadButton")}
+            {reloading ? t("common.refreshing") : t(reloadButtonKey)}
           </Button>
         </div>
       </div>

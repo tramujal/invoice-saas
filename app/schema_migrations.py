@@ -42,6 +42,9 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_platform_audit_log_query_indexes(engine)
     _add_platform_settings_table(engine)
     _add_platform_settings_version(engine)
+    _add_plans_table(engine)
+    _seed_default_plans(engine)
+    _add_organization_plan_id(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -886,6 +889,174 @@ def _add_platform_settings_version(engine: Engine) -> None:
         return
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE platform_settings ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))
+
+
+def _add_plans_table(engine: Engine) -> None:
+    """Creates plans if it's missing -- same idempotent safety net as
+    _add_platform_settings_table (Base.metadata.create_all() already
+    creates this table on a fresh database since Plan is a declared
+    model). Seeding the four built-in rows is a separate step
+    (_seed_default_plans), which must run after this one."""
+    inspector = inspect(engine)
+    if "plans" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS plans ("
+                "id CHAR(36) PRIMARY KEY, "
+                "code VARCHAR(32) NOT NULL UNIQUE, "
+                "name VARCHAR(100) NOT NULL, "
+                "description VARCHAR(500) NULL, "
+                "is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+                "is_default BOOLEAN NOT NULL DEFAULT FALSE, "
+                "sort_order INTEGER NOT NULL DEFAULT 0, "
+                "max_users INTEGER NULL, "
+                "max_customers INTEGER NULL, "
+                "max_products INTEGER NULL, "
+                "max_invoices_per_month INTEGER NULL, "
+                "max_quotes_per_month INTEGER NULL, "
+                "max_ai_actions_per_month INTEGER NULL, "
+                "storage_limit_mb INTEGER NULL, "
+                "custom_branding_enabled BOOLEAN NOT NULL DEFAULT FALSE, "
+                "api_access_enabled BOOLEAN NOT NULL DEFAULT FALSE, "
+                "advanced_reports_enabled BOOLEAN NOT NULL DEFAULT FALSE, "
+                "version INTEGER NOT NULL DEFAULT 1, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+
+
+# (id, code, name, is_default, max_users, max_customers, max_products,
+#  max_invoices_per_month, max_quotes_per_month, max_ai_actions_per_month,
+#  storage_limit_mb, custom_branding_enabled, api_access_enabled,
+#  advanced_reports_enabled, sort_order)
+_DEFAULT_PLAN_SEEDS = [
+    ("plan_free", "free", "Free", True, 2, 100, 100, 50, 50, 25, 500, False, False, False, 0),
+    ("plan_starter", "starter", "Starter", False, 10, 1000, 1000, 500, 500, 250, 5000, False, False, True, 1),
+    ("plan_pro", "pro", "Pro", False, 50, 10000, 10000, 10000, 10000, 5000, 50000, True, True, True, 2),
+    (
+        "plan_enterprise",
+        "enterprise",
+        "Enterprise",
+        False,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        True,
+        True,
+        True,
+        3,
+    ),
+]
+
+
+def _seed_default_plans(engine: Engine) -> None:
+    """Inserts the four built-in commercial plans (see the phase's own
+    "no billing yet" scope note) by fixed code, one INSERT per plan
+    missing by that code -- never touches a plan that already exists, so
+    an operator's later edits (via PATCH /admin/plans) are never
+    overwritten by a re-run of this migration on the next startup. Plan
+    ids are fixed literals (app.models.PLAN_ID_FREE etc.), not generated
+    UUIDs, specifically so _add_organization_plan_id below can reference
+    "plan_free" as a plain SQL-level DEFAULT for existing organizations
+    without a separate backfill step."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        existing_codes = {row[0] for row in conn.execute(text("SELECT code FROM plans")).all()}
+        for (
+            plan_id,
+            code,
+            name,
+            is_default,
+            max_users,
+            max_customers,
+            max_products,
+            max_invoices,
+            max_quotes,
+            max_ai_actions,
+            storage_mb,
+            branding,
+            api_access,
+            advanced_reports,
+            sort_order,
+        ) in _DEFAULT_PLAN_SEEDS:
+            if code in existing_codes:
+                continue
+            conn.execute(
+                text(
+                    "INSERT INTO plans ("
+                    "id, code, name, is_active, is_default, sort_order, "
+                    "max_users, max_customers, max_products, max_invoices_per_month, "
+                    "max_quotes_per_month, max_ai_actions_per_month, storage_limit_mb, "
+                    "custom_branding_enabled, api_access_enabled, advanced_reports_enabled, version"
+                    ") VALUES ("
+                    ":id, :code, :name, TRUE, :is_default, :sort_order, "
+                    ":max_users, :max_customers, :max_products, :max_invoices, "
+                    ":max_quotes, :max_ai_actions, :storage_mb, "
+                    ":branding, :api_access, :advanced_reports, 1"
+                    ")"
+                ),
+                {
+                    "id": plan_id,
+                    "code": code,
+                    "name": name,
+                    "is_default": is_default,
+                    "sort_order": sort_order,
+                    "max_users": max_users,
+                    "max_customers": max_customers,
+                    "max_products": max_products,
+                    "max_invoices": max_invoices,
+                    "max_quotes": max_quotes,
+                    "max_ai_actions": max_ai_actions,
+                    "storage_mb": storage_mb,
+                    "branding": branding,
+                    "api_access": api_access,
+                    "advanced_reports": advanced_reports,
+                },
+            )
+
+
+def _add_organization_plan_id(engine: Engine) -> None:
+    """Adds Organization.plan_id -- every existing organization is
+    backfilled to the free plan atomically as part of the ALTER TABLE
+    itself (DEFAULT 'plan_free'), the same proven pattern as every other
+    NOT-NULL-with-backfill column in this file, made possible here only
+    because the seeded free plan has a fixed, known-ahead-of-time id
+    (see _seed_default_plans) rather than a randomly generated UUID.
+    Must run after _add_plans_table/_seed_default_plans so the
+    referenced row already exists.
+
+    SQLite's ALTER TABLE flatly refuses to combine a REFERENCES clause
+    with a non-NULL DEFAULT on the same ADD COLUMN ("Cannot add a
+    REFERENCES column with non-NULL default value") -- a hard engine
+    limitation, not a style choice, so the column is added without the
+    inline FK there; the ORM model still declares the FK for any table
+    SQLAlchemy creates fresh (create_all(), including the test suite).
+    Postgres (production, see docker-compose.yml/render.yaml) supports
+    the combined form directly."""
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("organizations")}
+    if "plan_id" in columns:
+        return
+    references_clause = "" if engine.dialect.name == "sqlite" else " REFERENCES plans(id)"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"ALTER TABLE organizations ADD COLUMN plan_id CHAR(36) "
+                f"NOT NULL DEFAULT 'plan_free'{references_clause}"
+            )
+        )
 
 
 def _backfill_invoice_numbers(conn) -> None:

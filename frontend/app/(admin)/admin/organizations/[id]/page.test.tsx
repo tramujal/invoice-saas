@@ -2,7 +2,7 @@ import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PlatformOrganizationDetail } from "@/lib/types";
+import type { Plan, PlansListResponse, PlatformOrganizationDetail } from "@/lib/types";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
 
 import PlatformOrganizationDetailPage from "./page";
@@ -36,6 +36,9 @@ const activeOrg: PlatformOrganizationDetail = {
   language: "en",
   currency_code: "USD",
   timezone: "UTC",
+  plan_id: "plan_free",
+  plan_code: "free",
+  plan_name: "Free",
   created_at: "2026-01-01T00:00:00Z",
   last_activity_at: null,
   members: [],
@@ -115,5 +118,129 @@ describe("PlatformOrganizationDetailPage suspend/reactivate", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     // Status must not have changed optimistically.
     expect(screen.getByText("Active")).toBeInTheDocument();
+  });
+});
+
+function makePlan(overrides: Partial<Plan> = {}): Plan {
+  return {
+    id: "plan_pro",
+    code: "pro",
+    name: "Pro",
+    description: null,
+    is_active: true,
+    is_default: false,
+    sort_order: 2,
+    limits: {
+      max_users: 50,
+      max_customers: 10000,
+      max_products: 10000,
+      max_invoices_per_month: 10000,
+      max_quotes_per_month: 10000,
+      max_ai_actions_per_month: 5000,
+      storage_limit_mb: null,
+    },
+    features: { custom_branding_enabled: true, api_access_enabled: true, advanced_reports_enabled: true },
+    version: 1,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("PlatformOrganizationDetailPage change plan", () => {
+  it("shows the current plan name and a Change plan button", async () => {
+    apiFetchMock.mockResolvedValueOnce(activeOrg);
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Change plan" })).toBeInTheDocument();
+  });
+
+  it("lazily loads active plans, excludes the current plan from the options, and requires typed name + reason", async () => {
+    apiFetchMock.mockResolvedValueOnce(activeOrg);
+    const user = userEvent.setup();
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Change plan" })).toBeInTheDocument());
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+
+    const proPlan = makePlan();
+    const inactivePlan = makePlan({ id: "plan_legacy", code: "legacy", name: "Legacy", is_active: false });
+    apiFetchMock.mockResolvedValueOnce({ items: [proPlan, inactivePlan] } satisfies PlansListResponse);
+    await user.click(screen.getByRole("button", { name: "Change plan" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(apiFetchMock.mock.calls[1][0]).toBe("/admin/plans");
+
+    const select = within(dialog).getByLabelText("New plan");
+    expect(within(select).getByText("Pro")).toBeInTheDocument();
+    expect(within(select).queryByText("Legacy")).not.toBeInTheDocument();
+    expect(within(select).queryByText("Free")).not.toBeInTheDocument();
+
+    const confirmButton = within(dialog).getByRole("button", { name: "Change plan" });
+    expect(confirmButton).toBeDisabled();
+
+    await user.selectOptions(select, "plan_pro");
+    expect(confirmButton).toBeDisabled();
+
+    await user.type(within(dialog).getByLabelText("Type Rivera Design Studio to confirm"), "Rivera Design Studio");
+    await user.type(within(dialog).getByLabelText("Reason"), "upgrading customer");
+    expect(confirmButton).not.toBeDisabled();
+  });
+
+  it("changes the plan successfully, replaces state from the mutation response, and never auto-retries", async () => {
+    apiFetchMock.mockResolvedValueOnce(activeOrg);
+    const user = userEvent.setup();
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Change plan" })).toBeInTheDocument());
+
+    const proPlan = makePlan();
+    apiFetchMock.mockResolvedValueOnce({ items: [proPlan] } satisfies PlansListResponse);
+    await user.click(screen.getByRole("button", { name: "Change plan" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("New plan"), "plan_pro");
+    await user.type(within(dialog).getByLabelText("Type Rivera Design Studio to confirm"), "Rivera Design Studio");
+    await user.type(within(dialog).getByLabelText("Reason"), "upgrading customer");
+
+    apiFetchMock.mockResolvedValueOnce({ ...activeOrg, plan_id: "plan_pro", plan_code: "pro", plan_name: "Pro" });
+    await user.click(within(dialog).getByRole("button", { name: "Change plan" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText("Pro")).toBeInTheDocument();
+    expect(apiFetchMock).toHaveBeenCalledTimes(3);
+    expect(apiFetchMock.mock.calls[2][0]).toBe("/admin/organizations/org-1/plan");
+    expect(apiFetchMock.mock.calls[2][1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ plan_id: "plan_pro", reason: "upgrading customer" }),
+    });
+  });
+
+  it("shows a controlled error and keeps the dialog open when the plan-change mutation fails", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiFetchMock.mockResolvedValueOnce(activeOrg);
+    const user = userEvent.setup();
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Change plan" })).toBeInTheDocument());
+
+    const proPlan = makePlan();
+    apiFetchMock.mockResolvedValueOnce({ items: [proPlan] } satisfies PlansListResponse);
+    await user.click(screen.getByRole("button", { name: "Change plan" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("New plan"), "plan_pro");
+    await user.type(within(dialog).getByLabelText("Type Rivera Design Studio to confirm"), "Rivera Design Studio");
+    await user.type(within(dialog).getByLabelText("Reason"), "upgrading customer");
+
+    apiFetchMock.mockRejectedValueOnce(new ApiError("This plan is inactive.", 409));
+    await user.click(within(dialog).getByRole("button", { name: "Change plan" }));
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole("alert")).toHaveTextContent("This plan is inactive.")
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Free")).toBeInTheDocument();
   });
 });

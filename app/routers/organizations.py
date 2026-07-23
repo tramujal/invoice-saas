@@ -6,7 +6,14 @@ from app.deps import get_current_user, require_org_member, require_permission, r
 from app.models import Organization, User
 from app.permissions import Permission
 from app.reminder_settings import format_day_list
-from app.schemas import OrganizationProfileResponse, OrganizationUpdateRequest
+from app.schemas import (
+    OrganizationEntitlementsResponse,
+    OrganizationProfileResponse,
+    OrganizationUpdateRequest,
+    PlanFeatures,
+    PlanLimits,
+)
+from app.services.entitlements import get_organization_entitlements
 
 # The ORM columns for these two are comma-separated strings (see
 # app.reminder_settings), but the API's wire shape for them is a plain
@@ -43,6 +50,42 @@ def get_organization(
     # member already implicitly needs (name, currency, localization, etc).
     require_org_member(current_user, organization_id, db)
     return _organization_or_404(db, organization_id)
+
+
+@router.get("/entitlements", response_model=OrganizationEntitlementsResponse)
+def get_organization_entitlements_endpoint(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OrganizationEntitlementsResponse:
+    """Read-only view of what this organization's current plan allows --
+    same low-sensitivity, "every member already implicitly needs this"
+    gate as GET /organizations/{id} above (require_org_member only, no
+    specific Permission). Every value here comes from
+    app.services.entitlements.get_organization_entitlements -- this
+    router never reads app.models.Plan columns directly."""
+    require_org_member(current_user, organization_id, db)
+    _organization_or_404(db, organization_id)
+    entitlements = get_organization_entitlements(db, organization_id)
+    return OrganizationEntitlementsResponse(
+        plan_id=entitlements.plan_id,
+        plan_code=entitlements.plan_code,
+        plan_name=entitlements.plan_name,
+        limits=PlanLimits(
+            max_users=entitlements.max_users,
+            max_customers=entitlements.max_customers,
+            max_products=entitlements.max_products,
+            max_invoices_per_month=entitlements.max_invoices_per_month,
+            max_quotes_per_month=entitlements.max_quotes_per_month,
+            max_ai_actions_per_month=entitlements.max_ai_actions_per_month,
+            storage_limit_mb=entitlements.storage_limit_mb,
+        ),
+        features=PlanFeatures(
+            custom_branding_enabled=entitlements.custom_branding_enabled,
+            api_access_enabled=entitlements.api_access_enabled,
+            advanced_reports_enabled=entitlements.advanced_reports_enabled,
+        ),
+    )
 
 
 @router.patch("", response_model=OrganizationProfileResponse)
