@@ -35,6 +35,7 @@ from app.rate_limit import (
     user_identity,
 )
 from app.schemas import PublicInvitationAcceptResponse, PublicInvitationResponse
+from app.services.plan_limits import PlanLimitExceededError
 from app.services.platform_settings import get_effective_settings
 from app.services.team import (
     InvalidInvitationRoleError,
@@ -145,6 +146,8 @@ def accept_public_invitation(
                 "message": "This invitation is no longer valid.",
             },
         )
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
     organization = invitation.organization
 

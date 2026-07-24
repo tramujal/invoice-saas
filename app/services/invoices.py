@@ -49,6 +49,7 @@ from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
+from app.services.plan_limits import LimitedResource, check_limit
 from app.services.products import ProductNotFoundError, get_product_in_org
 from app.schemas import (
     CurrencyCode,
@@ -186,6 +187,7 @@ def create_invoice_record(
     must not be before the organization's local today (see
     app.org_time.get_organization_today); this is the only validation
     performed here, since a due date has no other constraints."""
+    check_limit(db, organization_id, LimitedResource.invoices)
     # A line's product_id is purely an analytics tag (see
     # InvoiceLineItem.product_id's docstring) -- validated to resolve
     # within this organization here, but description/quantity/unit_price

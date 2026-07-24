@@ -37,6 +37,7 @@ from app.rate_limit import (
     user_ip_identity,
 )
 from app.schemas import AssistantActionCancelResponse, AssistantActionConfirmResponse
+from app.services.plan_limits import PlanLimitExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,17 @@ def confirm_assistant_action(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=_detail("assistant_action_execution_failed", EXECUTION_FAILED_MESSAGE),
         )
+    except PlanLimitExceededError as exc:
+        # The same centralized check every direct-create endpoint goes
+        # through (see app.services.plan_limits) -- an AI-confirmed
+        # invoice/quote creation is never a backdoor around the
+        # organization's plan limit. Surfaced with the same structured
+        # 409 body as everywhere else, not the generic execution-failed
+        # shape, so the frontend's one shared dialog handles this too.
+        action.status = AssistantActionStatus.failed.value
+        action.failure_code = "plan_limit_reached"
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
     action.status = AssistantActionStatus.executed.value
     action.executed_at = datetime.now(timezone.utc)

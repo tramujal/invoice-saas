@@ -22,3 +22,16 @@ export function formatUsage(used: number, limit: number | null, t: TranslateFn):
   if (limit === 0) return t("planLimits.unavailable");
   return `${used.toLocaleString()} / ${limit.toLocaleString()}`;
 }
+
+/** Phase 14C's purely-visual sibling of formatUsage above -- never blocks
+ * anything from wherever it's rendered, it just flags a resource that's
+ * at or close to its plan limit so the tenant/admin can see it coming.
+ * Only meaningful against a real, positive limit: unlimited (null) and
+ * unavailable (0) resources can never be "reached" or "near" in any
+ * useful sense, so both return null for them. */
+export function getLimitStatus(used: number, limit: number | null): "reached" | "near" | null {
+  if (limit === null || limit <= 0) return null;
+  if (used >= limit) return "reached";
+  if (used / limit > 0.9) return "near";
+  return null;
+}

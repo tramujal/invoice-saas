@@ -3,13 +3,15 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { cancelAssistantAction, confirmAssistantAction } from "@/lib/api";
 import { assistantErrorMessageForApiError } from "@/lib/assistant-errors";
+import { getPlanLimitReachedDetail } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import { getPaymentStatusLabel, isPaymentStatus } from "@/lib/payment-status";
-import type { AssistantChatMessage } from "@/lib/types";
+import type { AssistantChatMessage, PlanLimitReachedDetail } from "@/lib/types";
 
 type ProposalMessage = Extract<AssistantChatMessage, { kind: "proposal" }>;
 
@@ -162,6 +164,7 @@ export function ActionProposalCard({ message, onStateChange }: ActionProposalCar
   const { t } = useTranslation();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   const isTerminal =
     message.status === "executed" || message.status === "cancelled" || message.status === "error";
@@ -177,7 +180,12 @@ export function ActionProposalCard({ message, onStateChange }: ActionProposalCar
       toast.success(t("assistant.action.toastConfirmed"));
     } catch (err) {
       onStateChange({ status: "error" });
-      toast.error(assistantErrorMessageForApiError(t, err));
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(assistantErrorMessageForApiError(t, err));
+      }
     } finally {
       setBusy(false);
     }
@@ -246,6 +254,8 @@ export function ActionProposalCard({ message, onStateChange }: ActionProposalCar
           </Button>
         </div>
       )}
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </div>
   );
 }

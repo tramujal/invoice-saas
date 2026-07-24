@@ -10,10 +10,20 @@ import {
   isAuthenticated,
   updateActiveOrganization,
 } from "@/lib/auth-storage";
-import { formatApiError, getApiErrorCode, isRateLimitedError } from "@/lib/format-api-error";
+import {
+  formatApiError,
+  getApiErrorCode,
+  getPlanLimitReachedDetail,
+  isRateLimitedError,
+} from "@/lib/format-api-error";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import { getMembershipRoleLabel } from "@/lib/membership-role";
-import type { OrganizationProfile, PublicInvitation, PublicInvitationAcceptResponse } from "@/lib/types";
+import type {
+  OrganizationProfile,
+  PlanLimitReachedDetail,
+  PublicInvitation,
+  PublicInvitationAcceptResponse,
+} from "@/lib/types";
 
 const defaultApi =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
@@ -29,6 +39,7 @@ type Status =
   | "accepted"
   | "email-mismatch"
   | "rate-limited"
+  | "plan-limit-reached"
   | "error";
 
 function AcceptInvitationContent() {
@@ -40,6 +51,7 @@ function AcceptInvitationContent() {
   const [status, setStatus] = useState<Status>(token ? "loading" : "missing-token");
   const [invitation, setInvitation] = useState<PublicInvitation | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
   const hasLoaded = useRef(false);
 
   const load = useCallback(async () => {
@@ -91,6 +103,7 @@ function AcceptInvitationContent() {
       router.replace("/dashboard");
     } catch (err) {
       const code = getApiErrorCode(err);
+      const planLimit = getPlanLimitReachedDetail(err);
       if (code === "invitation_email_mismatch") {
         setStatus("email-mismatch");
       } else if (code === "invitation_expired") {
@@ -99,6 +112,9 @@ function AcceptInvitationContent() {
         setStatus("already-accepted");
       } else if (isRateLimitedError(err)) {
         setStatus("rate-limited");
+      } else if (planLimit) {
+        setPlanLimitDetail(planLimit);
+        setStatus("plan-limit-reached");
       } else {
         setErrorMessage(formatApiError(err, t("invitation.errorGeneric")));
         setStatus("error");
@@ -181,6 +197,26 @@ function AcceptInvitationContent() {
           <p className="mt-3 text-sm text-red-600" role="alert">
             {errorMessage ?? t("invitation.errorGeneric")}
           </p>
+        ) : null}
+
+        {status === "plan-limit-reached" && planLimitDetail ? (
+          <>
+            <p className="mt-3 text-sm text-red-600" role="alert">
+              {t("invitation.planLimitReachedMessage", { organization: invitation?.organization_name ?? "" })}
+            </p>
+            <dl className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-500">{t("planAndLimits.rowUsers")}</dt>
+                <dd className="font-medium text-slate-900">
+                  {planLimitDetail.used.toLocaleString()} / {planLimitDetail.limit.toLocaleString()}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-500">{t("planAndLimits.currentPlanLabel")}</dt>
+                <dd className="font-medium text-slate-900">{planLimitDetail.plan.name}</dd>
+              </div>
+            </dl>
+          </>
         ) : null}
 
         {status === "accepted" ? (

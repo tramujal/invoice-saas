@@ -14,6 +14,7 @@ test_role_hierarchy.py for the pure app.role_hierarchy unit tests."""
 import pytest
 
 from app.membership_role import MembershipRole
+from app.models import PLAN_ID_ENTERPRISE
 from tests.factories import make_member_in_org, make_org_with_owner
 
 
@@ -21,6 +22,15 @@ from tests.factories import make_member_in_org, make_org_with_owner
 def four_roles(db_session):
     owner = make_org_with_owner(db_session, email="owner@example.com")
     org = owner.organization
+    # This fixture tests the permission system, an axis entirely
+    # independent of plan limits (Phase 14C) -- on the Free plan's
+    # default 2-user cap, the 4 members created here (plus whichever
+    # test invites a 5th to test who's *allowed* to invite) would
+    # incidentally hit the user limit and fail for the wrong reason.
+    # Enterprise's unlimited users keeps this fixture testing only what
+    # it says it tests.
+    org.plan_id = PLAN_ID_ENTERPRISE
+    db_session.commit()
     admin = make_member_in_org(db_session, org, email="admin@example.com", role=MembershipRole.admin)
     member = make_member_in_org(db_session, org, email="member@example.com", role=MembershipRole.member)
     viewer = make_member_in_org(db_session, org, email="viewer@example.com", role=MembershipRole.viewer)

@@ -53,6 +53,7 @@ from app.services.invoices import (
     send_manual_invoice_reminder,
     update_invoice_payment_status_record,
 )
+from app.services.plan_limits import PlanLimitExceededError
 
 router = APIRouter(prefix="/organizations/{organization_id}/invoices", tags=["invoices"])
 
@@ -356,6 +357,8 @@ def create_invoice(
                 ),
             },
         )
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
 
 @router.post(

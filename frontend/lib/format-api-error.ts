@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api";
+import type { PlanLimitReachedDetail } from "@/lib/types";
 
 /** Shared shape check behind isEmailNotVerifiedError/isRateLimitedError:
  * both recognize a structured `detail: {code, message}` object (rather
@@ -45,6 +46,17 @@ export function getApiErrorCode(err: unknown): string | null {
   if (!detail || typeof detail !== "object") return null;
   const code = (detail as { code?: unknown }).code;
   return typeof code === "string" ? code : null;
+}
+
+/** Recognizes the structured 409 plan_limit_reached (see
+ * app.services.plan_limits.PlanLimitExceededError) and returns its full
+ * detail payload -- not just the code, since every caller needs
+ * resource/used/limit/plan to render the dialog, never the human
+ * `message` string. Returns null for any other error shape. */
+export function getPlanLimitReachedDetail(err: unknown): PlanLimitReachedDetail | null {
+  if (!hasDetailCode(err, 409, "plan_limit_reached")) return null;
+  const body = (err as ApiError).body as { detail: PlanLimitReachedDetail };
+  return body.detail;
 }
 
 export function formatApiError(err: unknown, fallback: string): string {

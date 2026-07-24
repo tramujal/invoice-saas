@@ -151,4 +151,32 @@ describe("PlanAndLimitsPage", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Server exploded"));
   });
+
+  it("shows a Reached badge when usage equals its limit, and Almost full when over 90%", async () => {
+    mockUsageAndEntitlements(freeEntitlements, {
+      ...freeUsage,
+      // exactly at the limit
+      users: { used: 2, limit: 2, unlimited: false },
+      // 92% of 25 -> "near", not "reached"
+      ai_actions: { used: 23, limit: 25, unlimited: false },
+      // comfortably below -- no badge at all
+      customers: { used: 18, limit: 100, unlimited: false },
+    });
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
+    expect(screen.getByText("Reached")).toBeInTheDocument();
+    expect(screen.getByText("Almost full")).toBeInTheDocument();
+    // Still purely visual -- no blocking UI, no button anywhere on the page.
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("shows no Reached/Almost full badge for unlimited or comfortably-under-limit resources", async () => {
+    mockUsageAndEntitlements(freeEntitlements, freeUsage);
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
+    expect(screen.queryByText("Reached")).not.toBeInTheDocument();
+    expect(screen.queryByText("Almost full")).not.toBeInTheDocument();
+  });
 });

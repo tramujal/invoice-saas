@@ -21,6 +21,7 @@ from app.currency import get_currency_code
 from app.models import Organization, Product
 from app.product_type import ProductType
 from app.schemas import CurrencyCode
+from app.services.plan_limits import LimitedResource, check_limit
 
 
 class ProductNotFoundError(Exception):
@@ -50,6 +51,7 @@ def create_product_record(
     currency_code: CurrencyCode | None,
     default_tax_rate: Decimal,
 ) -> Product:
+    check_limit(db, organization_id, LimitedResource.products)
     organization = db.get(Organization, organization_id)
     resolved_currency_code = (
         currency_code.value if currency_code else get_currency_code(organization)
@@ -95,7 +97,12 @@ def archive_product_record(db: Session, product: Product) -> Product:
 
 
 def restore_product_record(db: Session, product: Product) -> Product:
+    """Restoring an archived product increases the standing active-
+    product count exactly like creating a new one does, so it's gated
+    by the same limit -- see Product.active's docstring: archive/
+    restore is this app's only "removal"/"return" mechanism."""
     if not product.active:
+        check_limit(db, product.organization_id, LimitedResource.products)
         product.active = True
         db.commit()
         db.refresh(product)

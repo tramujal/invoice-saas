@@ -4,17 +4,19 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { QuoteForm, type QuoteFormValues } from "@/components/quotes/QuoteForm";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { Quote } from "@/lib/types";
+import type { PlanLimitReachedDetail, Quote } from "@/lib/types";
 
 export default function NewQuotePage() {
   const router = useRouter();
   const toast = useToast();
   const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   async function handleSubmit(values: QuoteFormValues) {
     const payload: Record<string, unknown> = {
@@ -39,17 +41,25 @@ export default function NewQuotePage() {
       router.refresh();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(
-        isEmailNotVerifiedError(err)
-          ? t("errors.emailNotVerified")
-          : formatApiError(err, t("quoteForm.toastCreateError"))
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(err, t("quoteForm.toastCreateError"))
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <QuoteForm mode="create" backHref="/quotes" onSubmit={handleSubmit} isSubmitting={isSubmitting} />
+    <>
+      <QuoteForm mode="create" backHref="/quotes" onSubmit={handleSubmit} isSubmitting={isSubmitting} />
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
+    </>
   );
 }

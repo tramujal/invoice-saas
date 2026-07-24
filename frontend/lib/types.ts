@@ -539,7 +539,8 @@ export type AssistantStreamEvent =
       expires_at: string;
     }
   | { type: "clarification_needed"; code: string; candidates: string[] }
-  | { type: "error"; code: string };
+  | { type: "error"; code: string }
+  | ({ type: "error"; code: "plan_limit_reached" } & Omit<PlanLimitReachedDetail, "code">);
 
 /** Response from POST .../assistant/actions/{id}/confirm */
 export type AssistantActionConfirmResponse = {
@@ -893,6 +894,28 @@ export type OrganizationUsage = {
   quotes: UsageResourceSnapshot;
   ai_actions: UsageResourceSnapshot;
   storage: UsageResourceSnapshot;
+};
+
+// Phase 14C -- the structured 409 body every plan-limit-enforced create
+// endpoint returns (see app.services.plan_limits.PlanLimitExceededError
+// .to_error_detail()). `resource` matches OrganizationUsage's own field
+// names (never a Plan column name like "max_users"), and `message` is
+// never parsed -- every UI decision is made from the structured fields.
+export type PlanLimitReachedResource =
+  | "users"
+  | "customers"
+  | "products"
+  | "invoices"
+  | "quotes"
+  | "ai_actions";
+
+export type PlanLimitReachedDetail = {
+  code: "plan_limit_reached";
+  resource: PlanLimitReachedResource;
+  used: number;
+  limit: number;
+  plan: { id: string; code: string; name: string };
+  message: string;
 };
 
 export type PaginatedPlatformOrganizations = {

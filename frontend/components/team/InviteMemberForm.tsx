@@ -4,12 +4,18 @@ import { FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, getApiErrorCode, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import {
+  formatApiError,
+  getApiErrorCode,
+  getPlanLimitReachedDetail,
+  isEmailNotVerifiedError,
+} from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { INVITATION_ROLES, getMembershipRoleLabel, type InvitationRole } from "@/lib/membership-role";
-import type { Invitation } from "@/lib/types";
+import type { Invitation, PlanLimitReachedDetail } from "@/lib/types";
 
 const EMAIL_MAX_LENGTH = 255;
 
@@ -28,6 +34,7 @@ export function InviteMemberForm({ onInvited }: InviteMemberFormProps) {
   const [role, setRole] = useState<InvitationRole>("member");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -61,18 +68,23 @@ export function InviteMemberForm({ onInvited }: InviteMemberFormProps) {
       await onInvited();
     } catch (err) {
       toast.dismiss(loadingId);
-      const code = getApiErrorCode(err);
-      let message: string;
-      if (isEmailNotVerifiedError(err)) {
-        message = t("errors.emailNotVerified");
-      } else if (code === "already_member") {
-        message = t("team.errorAlreadyMember");
-      } else if (code === "invitation_already_pending") {
-        message = t("team.errorInvitationAlreadyPending");
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
       } else {
-        message = formatApiError(err, t("team.toastInviteError"));
+        const code = getApiErrorCode(err);
+        let message: string;
+        if (isEmailNotVerifiedError(err)) {
+          message = t("errors.emailNotVerified");
+        } else if (code === "already_member") {
+          message = t("team.errorAlreadyMember");
+        } else if (code === "invitation_already_pending") {
+          message = t("team.errorInvitationAlreadyPending");
+        } else {
+          message = formatApiError(err, t("team.toastInviteError"));
+        }
+        toast.error(message);
       }
-      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -134,6 +146,8 @@ export function InviteMemberForm({ onInvited }: InviteMemberFormProps) {
           {isSubmitting ? t("common.saving") : t("team.inviteButton")}
         </Button>
       </form>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </section>
   );
 }

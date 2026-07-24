@@ -7,10 +7,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatCurrency, formatMoney, parseQuantity, parseUnitPrice } from "@/lib/money";
 import {
@@ -21,7 +22,7 @@ import {
 } from "@/lib/invoice-due-date";
 import { resolveDefaultInvoiceCurrency } from "@/lib/organization-settings";
 import { useDocumentLines } from "@/lib/use-document-lines";
-import type { Customer, InvoiceCreatedResponse } from "@/lib/types";
+import type { Customer, InvoiceCreatedResponse, PlanLimitReachedDetail } from "@/lib/types";
 
 function todayDateString(): string {
   return new Date().toISOString().slice(0, 10);
@@ -86,6 +87,7 @@ export default function NewInvoicePage() {
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   const loadCustomers = useCallback(async () => {
     setCustomersLoading(true);
@@ -162,11 +164,16 @@ export default function NewInvoicePage() {
       router.refresh();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(
-        isEmailNotVerifiedError(err)
-          ? t("errors.emailNotVerified")
-          : formatApiError(err, t("invoiceForm.toastCreateError"))
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(err, t("invoiceForm.toastCreateError"))
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -395,6 +402,8 @@ export default function NewInvoicePage() {
           </Button>
         </div>
       </form>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </div>
   );
 }

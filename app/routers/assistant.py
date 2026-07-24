@@ -32,6 +32,7 @@ from app.rate_limit import (
     user_ip_identity,
 )
 from app.schemas import AssistantChatRequest
+from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +260,20 @@ def assistant_chat(
                 user_hash,
             )
             yield _ndjson({"type": "error", "code": "assistant_action_invalid"})
+            return
+
+        # Checked right before the insert, after the (possibly slow)
+        # provider round-trip and build_proposal() have already
+        # completed -- never held across the external AI call itself
+        # (see app.services.plan_limits._lock_organization's own
+        # docstring on why that lock's held duration matters). This is a
+        # streaming NDJSON response, not an ordinary JSON endpoint, so a
+        # 409 can't be raised as a fresh HTTP status here -- surfaced as
+        # an error event instead, same as the rate-limit check above.
+        try:
+            check_limit(db, organization_id, LimitedResource.ai_actions)
+        except PlanLimitExceededError as exc:
+            yield _ndjson({"type": "error", **exc.to_error_detail()})
             return
 
         now = datetime.now(timezone.utc)

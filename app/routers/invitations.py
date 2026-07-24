@@ -24,6 +24,7 @@ from app.schemas import (
     InvitationResponse,
     PaginatedInvitationsResponse,
 )
+from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
 from app.services.team import (
     AlreadyMemberError,
     InvitationAlreadyAcceptedError,
@@ -131,6 +132,13 @@ def create_invitation(
     organization = db.get(Organization, organization_id)
 
     try:
+        # Proactive only -- creating an invitation never itself creates a
+        # member row (see app.services.team.accept_invitation_record,
+        # the actual authoritative gate), so this doesn't need to hold
+        # the lock through anything beyond this one check. Rejecting an
+        # invite an org is already out of seats for is far more useful to
+        # the admin than letting the invitee hit a wall at accept time.
+        check_limit(db, organization_id, LimitedResource.users)
         invitation, raw_token = invite_member_record(db, organization_id, body.email, body.role, actor)
     except RoleAssignmentNotAllowedError:
         raise HTTPException(
@@ -153,6 +161,8 @@ def create_invitation(
                 "message": "An invitation is already pending for this email. Resend it instead.",
             },
         )
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
     _send_invitation_email(invitation, organization, raw_token)
     return invitation

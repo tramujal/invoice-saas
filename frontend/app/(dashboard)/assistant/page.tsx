@@ -8,12 +8,13 @@ import { ActionProposalCard } from "@/components/assistant/ActionProposalCard";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Input";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetchStream, orgPath } from "@/lib/api";
 import { assistantErrorMessageForCode } from "@/lib/assistant-errors";
 import { isEmailNotVerifiedError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { AssistantChatMessage, AssistantStreamEvent } from "@/lib/types";
+import type { AssistantChatMessage, AssistantStreamEvent, PlanLimitReachedDetail } from "@/lib/types";
 
 // Mirrors the backend's AI_MAX_HISTORY_MESSAGES default (app/ai/limits.py)
 // so we never even try to send more than the server will accept.
@@ -40,6 +41,7 @@ function AssistantContent() {
   const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
   const [isAwaitingFirstEvent, setIsAwaitingFirstEvent] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -162,7 +164,18 @@ function AssistantContent() {
         ]);
       } else if (event.type === "error") {
         currentTextIndex = null;
-        toast.error(assistantErrorMessageForCode(t, event.code));
+        if ("resource" in event) {
+          setPlanLimitDetail({
+            code: "plan_limit_reached",
+            resource: event.resource,
+            used: event.used,
+            limit: event.limit,
+            plan: event.plan,
+            message: event.message,
+          });
+        } else {
+          toast.error(assistantErrorMessageForCode(t, event.code));
+        }
       }
     }
 
@@ -372,6 +385,8 @@ function AssistantContent() {
           <p className="mt-1.5 text-xs text-slate-400">{t("assistant.enterHint")}</p>
         </div>
       </div>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </div>
   );
 }

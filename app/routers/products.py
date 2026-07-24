@@ -17,6 +17,7 @@ from app.schemas import (
     ProductUpdateRequest,
     SortDirection,
 )
+from app.services.plan_limits import PlanLimitExceededError
 from app.services.products import (
     ProductNotFoundError,
     archive_product_record,
@@ -56,17 +57,20 @@ def create_product(
 ) -> Product:
     require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
-    return create_product_record(
-        db,
-        organization_id,
-        body.name,
-        body.description,
-        body.type,
-        body.sku,
-        body.default_unit_price,
-        body.currency_code,
-        body.default_tax_rate,
-    )
+    try:
+        return create_product_record(
+            db,
+            organization_id,
+            body.name,
+            body.description,
+            body.type,
+            body.sku,
+            body.default_unit_price,
+            body.currency_code,
+            body.default_tax_rate,
+        )
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
 
 @router.get("", response_model=PaginatedProductsResponse)
@@ -158,4 +162,7 @@ def restore_product(
     require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
     product = _product_or_404(db, organization_id, product_id)
-    return restore_product_record(db, product)
+    try:
+        return restore_product_record(db, product)
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())

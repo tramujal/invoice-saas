@@ -52,6 +52,7 @@ from app.quote_public_links import build_quote_public_link, generate_quote_publi
 from app.quote_status import QuoteStatus
 from app.reminder_status import ReminderStatus
 from app.services.invoices import compute_invoice_totals, create_invoice_record
+from app.services.plan_limits import LimitedResource, check_limit
 from app.services.products import ProductNotFoundError, get_product_in_org
 from app.schemas import CurrencyCode, InvoiceLineItemCreate, QuoteLineItemCreate, SendQuoteEmailResponse
 
@@ -179,6 +180,7 @@ def create_quote_record(
     creation time, exactly mirroring create_invoice_record. Totals are
     always recomputed here from `line_items` -- never accepted as a
     parameter."""
+    check_limit(db, organization_id, LimitedResource.quotes)
     resolved_products_by_id = _validate_line_item_products(db, organization_id, line_items)
 
     # compute_invoice_totals is a pure function of any object exposing

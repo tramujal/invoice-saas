@@ -286,4 +286,24 @@ describe("PlatformOrganizationDetailPage usage", () => {
 
     expect(screen.queryByText("1 / 2")).not.toBeInTheDocument();
   });
+
+  it("shows a Reached badge when a resource is exactly at its limit", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...activeOrg,
+      usage: { ...emptyUsage, users: { used: 2, limit: 2, unlimited: false } },
+    } satisfies PlatformOrganizationDetail);
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByText("Reached")).toBeInTheDocument());
+  });
+
+  it("shows an Almost full badge past 90% usage, without blocking anything", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...activeOrg,
+      usage: { ...emptyUsage, ai_actions: { used: 23, limit: 25, unlimited: false } },
+    } satisfies PlatformOrganizationDetail);
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByText("Almost full")).toBeInTheDocument());
+  });
 });

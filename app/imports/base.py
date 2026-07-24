@@ -42,8 +42,11 @@ from app.imports.types import (
     PreviewRowStatus,
 )
 from app.imports.validation import apply_column_mapping
+from app.services.plan_limits import PlanLimitExceededError
 
 logger = logging.getLogger(__name__)
+
+REASON_PLAN_LIMIT_REACHED = "plan_limit_reached"
 
 RowProcessor = Callable[[dict[str, str]], tuple[PreviewRowStatus, str | None]]
 PersistFn = Callable[[Session, dict[str, str]], None]
@@ -117,6 +120,20 @@ def build_confirm(
                     ConfirmRow(row_number=index, status=ConfirmRowStatus.imported, reason_code=None, values=values)
                 )
                 imported += 1
+            except PlanLimitExceededError:
+                # Not an unexpected error -- the organization's plan
+                # limit was reached partway through this import. Every
+                # row from here on will hit the same cap, so they're all
+                # reported the same way rather than logged as failures.
+                rows.append(
+                    ConfirmRow(
+                        row_number=index,
+                        status=ConfirmRowStatus.failed,
+                        reason_code=REASON_PLAN_LIMIT_REACHED,
+                        values=values,
+                    )
+                )
+                failed += 1
             except Exception:
                 logger.exception(
                     "customer_import: unexpected DB error on row %d (row values not logged)",

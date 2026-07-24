@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import { formatUsage } from "@/lib/plan-limits";
+import { formatUsage, getLimitStatus } from "@/lib/plan-limits";
 import type { OrganizationEntitlements, OrganizationUsage } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "__generic_load_error__";
@@ -92,18 +92,36 @@ export default function PlanAndLimitsPage() {
         </div>
 
         <dl className="divide-y divide-slate-100">
-          {usageRows.map(({ labelKey, used, limit }) => (
-            <div key={labelKey} className="flex items-center justify-between gap-4 px-5 py-3">
-              <dt className="text-sm font-medium text-slate-700">{t(labelKey)}</dt>
-              <dd className="text-sm text-slate-900">
-                {loading ? (
-                  <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
-                ) : (
-                  formatUsage(used ?? 0, limit ?? null, t)
-                )}
-              </dd>
-            </div>
-          ))}
+          {usageRows.map(({ labelKey, used, limit }) => {
+            const status = loading ? null : getLimitStatus(used ?? 0, limit ?? null);
+            return (
+              <div key={labelKey} className="flex items-center justify-between gap-4 px-5 py-3">
+                <dt className="text-sm font-medium text-slate-700">{t(labelKey)}</dt>
+                <dd className="flex items-center gap-2 text-sm text-slate-900">
+                  {loading ? (
+                    <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
+                  ) : (
+                    <>
+                      {status ? (
+                        <Badge
+                          className={
+                            status === "reached"
+                              ? "bg-red-50 text-red-700 ring-red-200"
+                              : "bg-amber-50 text-amber-700 ring-amber-200"
+                          }
+                        >
+                          {status === "reached"
+                            ? t("planAndLimits.badgeReached")
+                            : t("planAndLimits.badgeNearLimit")}
+                        </Badge>
+                      ) : null}
+                      {formatUsage(used ?? 0, limit ?? null, t)}
+                    </>
+                  )}
+                </dd>
+              </div>
+            );
+          })}
           <div className="flex items-center justify-between gap-4 px-5 py-3">
             <dt className="text-sm font-medium text-slate-700">{t("planAndLimits.rowStorage")}</dt>
             <dd className="text-sm text-slate-900">

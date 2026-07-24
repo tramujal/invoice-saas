@@ -56,6 +56,7 @@ from app.services.quotes import (
     send_quote_record,
     update_quote_record,
 )
+from app.services.plan_limits import PlanLimitExceededError
 
 router = APIRouter(prefix="/organizations/{organization_id}/quotes", tags=["quotes"])
 
@@ -246,6 +247,8 @@ def create_quote(
                 ),
             },
         )
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
 
 @router.patch("/{quote_id}", response_model=QuoteResponse)
@@ -390,7 +393,10 @@ def duplicate_quote(
     require_permission(current_user, organization_id, Permission.quote_edit, db)
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
-    return duplicate_quote_record(db, organization_id, current_user, quote)
+    try:
+        return duplicate_quote_record(db, organization_id, current_user, quote)
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
 
 @router.post("/{quote_id}/mark-accepted", response_model=QuoteSummaryResponse)
@@ -468,6 +474,11 @@ def convert_quote(
                 "message": "This quote has already been converted into an invoice.",
             },
         )
+    except PlanLimitExceededError as exc:
+        # convert_quote_to_invoice calls create_invoice_record under the
+        # hood -- this is genuinely an invoice-creation operation, gated
+        # by the invoice limit, not the quote limit.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
     return ConvertQuoteToInvoiceResponse(
         invoice_id=result.invoice.id,
         invoice_number=format_invoice_number(result.invoice.invoice_number),

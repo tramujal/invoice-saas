@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Select } from "@/components/ui/Input";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import {
   RowActionsMenu,
   STICKY_ACTIONS_TD_CLASS,
@@ -20,6 +21,7 @@ import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
 import { getOrganizationPermissions } from "@/lib/auth-storage";
 import {
   formatApiError,
+  getPlanLimitReachedDetail,
   isEmailNotVerifiedError,
   isRateLimitedError,
 } from "@/lib/format-api-error";
@@ -37,6 +39,7 @@ import {
 import type {
   ConvertQuoteToInvoiceResponse,
   PaginatedQuotes,
+  PlanLimitReachedDetail,
   QuoteSummary,
   SendQuoteEmailResponse,
 } from "@/lib/types";
@@ -84,6 +87,7 @@ function QuotesContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -291,7 +295,12 @@ function QuotesContent() {
       void load();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, t("quotes.toastConvertError")));
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(formatApiError(err, t("quotes.toastConvertError")));
+      }
     } finally {
       setBusyId(null);
     }
@@ -308,7 +317,12 @@ function QuotesContent() {
       void load();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(formatApiError(err, t("quotes.toastDuplicateError")));
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(formatApiError(err, t("quotes.toastDuplicateError")));
+      }
     } finally {
       setBusyId(null);
     }
@@ -679,6 +693,8 @@ function QuotesContent() {
           </div>
         ) : null}
       </div>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </div>
   );
 }

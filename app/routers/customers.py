@@ -13,6 +13,7 @@ from app.schemas import (
     CustomerUpdateRequest,
     SortDirection,
 )
+from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/customers", tags=["customers"]
@@ -49,6 +50,10 @@ def create_customer(
 ) -> Customer:
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
+    try:
+        check_limit(db, organization_id, LimitedResource.customers)
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
     customer = Customer(
         organization_id=organization_id,
         name=body.name,

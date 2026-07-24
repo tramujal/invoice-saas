@@ -4,14 +4,15 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Textarea } from "@/components/ui/Input";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { TranslateFn } from "@/lib/i18n/useTranslation";
 import { CURRENCY_CODES, getCurrencyLabel, type CurrencyCode } from "@/lib/organization-settings";
 import { PRODUCT_TYPES, getProductTypeLabel, type ProductType } from "@/lib/product-type";
-import type { Product } from "@/lib/types";
+import type { PlanLimitReachedDetail, Product } from "@/lib/types";
 
 const LIMITS = {
   name: 255,
@@ -71,6 +72,7 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   useEffect(() => {
     setName(product?.name ?? "");
@@ -150,14 +152,19 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
       await onSaved();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(
-        isEmailNotVerifiedError(err)
-          ? t("errors.emailNotVerified")
-          : formatApiError(
-              err,
-              isEditing ? t("products.toastSaveError") : t("products.toastCreateError")
-            )
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(
+                err,
+                isEditing ? t("products.toastSaveError") : t("products.toastCreateError")
+              )
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -334,6 +341,8 @@ export function ProductForm({ product, onSaved, onCancel }: ProductFormProps) {
           </Button>
         </div>
       </form>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </section>
   );
 }

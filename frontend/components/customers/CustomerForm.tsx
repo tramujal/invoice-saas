@@ -4,12 +4,13 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { TranslateFn } from "@/lib/i18n/useTranslation";
-import type { Customer } from "@/lib/types";
+import type { Customer, PlanLimitReachedDetail } from "@/lib/types";
 
 const LIMITS = {
   name: 255,
@@ -90,6 +91,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
   const [taxId, setTaxId] = useState(customer?.tax_id ?? "");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   useEffect(() => {
     setName(customer?.name ?? "");
@@ -151,14 +153,19 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
       await onSaved();
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(
-        isEmailNotVerifiedError(err)
-          ? t("errors.emailNotVerified")
-          : formatApiError(
-              err,
-              isEditing ? t("customers.toastSaveError") : t("customers.toastCreateError")
-            )
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(
+                err,
+                isEditing ? t("customers.toastSaveError") : t("customers.toastCreateError")
+              )
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -341,6 +348,8 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
           </Button>
         </div>
       </form>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </section>
   );
 }

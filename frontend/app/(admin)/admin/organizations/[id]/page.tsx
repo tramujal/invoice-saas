@@ -22,7 +22,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import { formatUsage } from "@/lib/plan-limits";
+import { formatUsage, getLimitStatus } from "@/lib/plan-limits";
 import type { Plan, PlansListResponse, PlatformOrganizationDetail, UsageResourceSnapshot } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "__generic_load_error__";
@@ -269,18 +269,36 @@ export default function PlatformOrganizationDetailPage() {
               ["adminPlans.usageRowQuotes", data?.usage.quotes],
               ["adminPlans.usageRowAiActions", data?.usage.ai_actions],
             ] as [string, UsageResourceSnapshot | undefined][]
-          ).map(([labelKey, resource]) => (
-            <div key={labelKey} className="flex items-center justify-between gap-4 px-5 py-3">
-              <dt className="text-sm font-medium text-slate-700">{t(labelKey)}</dt>
-              <dd className="text-sm text-slate-900">
-                {loading || !resource ? (
-                  <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
-                ) : (
-                  formatUsage(resource.used, resource.limit, t)
-                )}
-              </dd>
-            </div>
-          ))}
+          ).map(([labelKey, resource]) => {
+            const status = loading || !resource ? null : getLimitStatus(resource.used, resource.limit);
+            return (
+              <div key={labelKey} className="flex items-center justify-between gap-4 px-5 py-3">
+                <dt className="text-sm font-medium text-slate-700">{t(labelKey)}</dt>
+                <dd className="flex items-center gap-2 text-sm text-slate-900">
+                  {loading || !resource ? (
+                    <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
+                  ) : (
+                    <>
+                      {status ? (
+                        <Badge
+                          className={
+                            status === "reached"
+                              ? "bg-red-50 text-red-700 ring-red-200"
+                              : "bg-amber-50 text-amber-700 ring-amber-200"
+                          }
+                        >
+                          {status === "reached"
+                            ? t("planAndLimits.badgeReached")
+                            : t("planAndLimits.badgeNearLimit")}
+                        </Badge>
+                      ) : null}
+                      {formatUsage(resource.used, resource.limit, t)}
+                    </>
+                  )}
+                </dd>
+              </div>
+            );
+          })}
           <div className="flex items-center justify-between gap-4 px-5 py-3">
             <dt className="text-sm font-medium text-slate-700">{t("adminPlans.usageRowStorage")}</dt>
             <dd className="text-sm text-slate-900">

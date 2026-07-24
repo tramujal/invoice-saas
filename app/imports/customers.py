@@ -24,6 +24,7 @@ from app.imports.types import FieldSpec, PreviewRowStatus
 from app.imports.validation import validate_row_fields
 from app.localization import get_language, t
 from app.models import Customer, Organization
+from app.services.plan_limits import LimitedResource, check_limit
 
 REASON_MISSING_CONTACT_INFO = "missing_contact_info"
 REASON_INVALID_EMAIL = "invalid_email"
@@ -172,9 +173,18 @@ def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]],
     """Returns a function that adds+flushes exactly one Customer row.
     Deliberately does not commit — app.imports.base.build_confirm owns the
     single outer commit, and wraps each call to this function in its own
-    db.begin_nested() savepoint."""
+    db.begin_nested() savepoint.
+
+    Calls the exact same check_limit() every single-item creation path
+    goes through, once per row -- not a separately-computed "remaining
+    slots" counter. This works correctly across the whole import because
+    persist() flushes (never commits) each row: a not-yet-committed but
+    flushed row from earlier in this same import is already visible to
+    the count query check_limit() runs, so the cap is enforced row by
+    row within one transaction, not just once at the start."""
 
     def persist(db: Session, values: dict[str, str]) -> None:
+        check_limit(db, organization_id, LimitedResource.customers)
         customer = Customer(
             organization_id=organization_id,
             name=values.get("name", ""),

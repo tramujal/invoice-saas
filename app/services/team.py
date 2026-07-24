@@ -41,6 +41,7 @@ from app.membership_status import MembershipStatus
 from app.models import Organization, OrganizationInvitation, OrganizationMember, User
 from app.permissions import Permission, check_permission, roles_with_permission
 from app.role_hierarchy import can_assign_role, can_manage_member, parse_membership_role
+from app.services.plan_limits import LimitedResource, check_limit
 
 
 class MembershipNotFoundError(Exception):
@@ -438,12 +439,14 @@ def accept_invitation_record(
     if existing is not None and existing.status == MembershipStatus.active.value:
         # Already an active member (e.g. invited twice, or joined through
         # another path before accepting) -- nothing to change, just
-        # consume the invitation so it can't be used again.
+        # consume the invitation so it can't be used again. Not a plan-
+        # limit check point: the active member count doesn't increase.
         membership = existing
     elif existing is not None:
-        # Reactivating a previously-removed membership -- a fresh
-        # acceptance, so role_changed_by/removed_by are cleared rather
-        # than carrying over stale history from before removal.
+        # Reactivating a previously-removed membership -- increases the
+        # active member count exactly like a brand-new membership does,
+        # so it's gated by the same check below.
+        check_limit(db, invitation.organization_id, LimitedResource.users)
         existing.role = invitation.role
         existing.status = MembershipStatus.active.value
         existing.invited_by = invitation.created_by
@@ -453,6 +456,7 @@ def accept_invitation_record(
         existing.removed_by = None
         membership = existing
     else:
+        check_limit(db, invitation.organization_id, LimitedResource.users)
         membership = OrganizationMember(
             user_id=current_user.id,
             organization_id=invitation.organization_id,

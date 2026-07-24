@@ -17,6 +17,7 @@ from app.imports.validation import validate_row_fields
 from app.localization import get_language, t
 from app.models import Organization, Product
 from app.product_type import ProductType
+from app.services.plan_limits import LimitedResource, check_limit
 
 REASON_INVALID_PRICE = "invalid_price"
 REASON_INVALID_TAX_RATE = "invalid_tax_rate"
@@ -159,6 +160,11 @@ def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]],
     invalid and never reach persist."""
 
     def persist(db: Session, values: dict[str, str]) -> None:
+        # See app.imports.customers.make_persist_fn's own docstring for
+        # why calling check_limit() per row (rather than a separately
+        # pre-computed counter) correctly enforces the cap across the
+        # whole import.
+        check_limit(db, organization_id, LimitedResource.products)
         organization = db.get(Organization, organization_id)
         type_value = _TYPE_ALIASES.get(
             values.get("type", "").strip().lower(), ProductType.service.value

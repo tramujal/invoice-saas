@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Select } from "@/components/ui/Input";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import {
   RowActionsMenu,
   STICKY_ACTIONS_TD_CLASS,
@@ -17,7 +18,7 @@ import {
 import { SortControl, type SortDirection } from "@/components/ui/SortControl";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, apiFetchBlob, orgPath } from "@/lib/api";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatCurrency } from "@/lib/money";
 import {
@@ -27,7 +28,7 @@ import {
   isProductType,
   type ProductType,
 } from "@/lib/product-type";
-import type { PaginatedProducts, Product } from "@/lib/types";
+import type { PaginatedProducts, PlanLimitReachedDetail, Product } from "@/lib/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 const pageSize = 10;
@@ -59,6 +60,7 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -202,11 +204,16 @@ export default function ProductsPage() {
       toast.success(t("products.toastRestored"));
       await load();
     } catch (err) {
-      toast.error(
-        isEmailNotVerifiedError(err)
-          ? t("errors.emailNotVerified")
-          : formatApiError(err, t("products.toastRestoreError"))
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(err, t("products.toastRestoreError"))
+        );
+      }
     } finally {
       setArchivingId(null);
     }
@@ -486,6 +493,8 @@ export default function ProductsPage() {
           </div>
         ) : null}
       </div>
+
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </div>
   );
 }
