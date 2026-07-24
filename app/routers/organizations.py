@@ -10,10 +10,13 @@ from app.schemas import (
     OrganizationEntitlementsResponse,
     OrganizationProfileResponse,
     OrganizationUpdateRequest,
+    OrganizationUsageResponse,
     PlanFeatures,
     PlanLimits,
+    UsageResourceSnapshot,
 )
 from app.services.entitlements import get_organization_entitlements
+from app.services.organization_usage import ResourceUsage, get_usage_snapshot
 
 # The ORM columns for these two are comma-separated strings (see
 # app.reminder_settings), but the API's wire shape for them is a plain
@@ -85,6 +88,37 @@ def get_organization_entitlements_endpoint(
             api_access_enabled=entitlements.api_access_enabled,
             advanced_reports_enabled=entitlements.advanced_reports_enabled,
         ),
+    )
+
+
+def _usage_resource(resource: ResourceUsage) -> UsageResourceSnapshot:
+    return UsageResourceSnapshot(used=resource.used, limit=resource.limit, unlimited=resource.unlimited)
+
+
+@router.get("/usage", response_model=OrganizationUsageResponse)
+def get_organization_usage(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OrganizationUsageResponse:
+    """Read-only usage-against-limit snapshot -- same low-sensitivity,
+    "every member already implicitly needs this" gate as GET .../entitlements
+    above (require_org_member only, no specific Permission). Every value
+    comes from app.services.organization_usage.get_usage_snapshot -- this
+    router never counts a resource or reads a Plan column itself. Phase
+    14B measures usage only: nothing here rejects a request or warns
+    because of a limit."""
+    require_org_member(current_user, organization_id, db)
+    _organization_or_404(db, organization_id)
+    snapshot = get_usage_snapshot(db, organization_id)
+    return OrganizationUsageResponse(
+        users=_usage_resource(snapshot.users),
+        customers=_usage_resource(snapshot.customers),
+        products=_usage_resource(snapshot.products),
+        invoices=_usage_resource(snapshot.invoices),
+        quotes=_usage_resource(snapshot.quotes),
+        ai_actions=_usage_resource(snapshot.ai_actions),
+        storage=_usage_resource(snapshot.storage),
     )
 
 

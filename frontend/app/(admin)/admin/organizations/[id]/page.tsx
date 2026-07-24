@@ -22,7 +22,8 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { Plan, PlansListResponse, PlatformOrganizationDetail } from "@/lib/types";
+import { formatUsage } from "@/lib/plan-limits";
+import type { Plan, PlansListResponse, PlatformOrganizationDetail, UsageResourceSnapshot } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "__generic_load_error__";
 
@@ -251,6 +252,52 @@ export default function PlatformOrganizationDetailPage() {
             value={formatApproxDate(data?.last_activity_at ?? null, language)}
             loading={loading}
           />
+        </dl>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <h2 className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
+          {t("adminPlans.usageSectionTitle")}
+        </h2>
+        <dl className="divide-y divide-slate-100">
+          {(
+            [
+              ["adminPlans.usageRowUsers", data?.usage.users],
+              ["adminPlans.usageRowCustomers", data?.usage.customers],
+              ["adminPlans.usageRowProducts", data?.usage.products],
+              ["adminPlans.usageRowInvoices", data?.usage.invoices],
+              ["adminPlans.usageRowQuotes", data?.usage.quotes],
+              ["adminPlans.usageRowAiActions", data?.usage.ai_actions],
+            ] as [string, UsageResourceSnapshot | undefined][]
+          ).map(([labelKey, resource]) => (
+            <div key={labelKey} className="flex items-center justify-between gap-4 px-5 py-3">
+              <dt className="text-sm font-medium text-slate-700">{t(labelKey)}</dt>
+              <dd className="text-sm text-slate-900">
+                {loading || !resource ? (
+                  <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
+                ) : (
+                  formatUsage(resource.used, resource.limit, t)
+                )}
+              </dd>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-4 px-5 py-3">
+            <dt className="text-sm font-medium text-slate-700">{t("adminPlans.usageRowStorage")}</dt>
+            <dd className="text-sm text-slate-900">
+              {loading || !data ? (
+                <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
+              ) : data.usage.storage.unlimited ? (
+                t("planLimits.unlimited")
+              ) : data.usage.storage.limit === 0 ? (
+                t("planLimits.unavailable")
+              ) : (
+                t("planAndLimits.storageUsageValue", {
+                  used: data.usage.storage.used,
+                  mb: data.usage.storage.limit ?? 0,
+                })
+              )}
+            </dd>
+          </div>
         </dl>
       </section>
 

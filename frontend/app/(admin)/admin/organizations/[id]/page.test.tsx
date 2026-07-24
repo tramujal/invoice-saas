@@ -2,7 +2,7 @@ import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Plan, PlansListResponse, PlatformOrganizationDetail } from "@/lib/types";
+import type { OrganizationUsage, Plan, PlansListResponse, PlatformOrganizationDetail } from "@/lib/types";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
 
 import PlatformOrganizationDetailPage from "./page";
@@ -22,6 +22,16 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
+const emptyUsage: OrganizationUsage = {
+  users: { used: 1, limit: 2, unlimited: false },
+  customers: { used: 0, limit: 100, unlimited: false },
+  products: { used: 0, limit: 100, unlimited: false },
+  invoices: { used: 0, limit: 50, unlimited: false },
+  quotes: { used: 0, limit: 50, unlimited: false },
+  ai_actions: { used: 0, limit: 25, unlimited: false },
+  storage: { used: 0, limit: 500, unlimited: false },
+};
+
 const activeOrg: PlatformOrganizationDetail = {
   id: "org-1",
   name: "Rivera Design Studio",
@@ -39,6 +49,7 @@ const activeOrg: PlatformOrganizationDetail = {
   plan_id: "plan_free",
   plan_code: "free",
   plan_name: "Free",
+  usage: emptyUsage,
   created_at: "2026-01-01T00:00:00Z",
   last_activity_at: null,
   members: [],
@@ -242,5 +253,37 @@ describe("PlatformOrganizationDetailPage change plan", () => {
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("Free")).toBeInTheDocument();
+  });
+});
+
+describe("PlatformOrganizationDetailPage usage", () => {
+  it("renders used/limit for finite resources", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...activeOrg,
+      usage: { ...emptyUsage, users: { used: 18, limit: 50, unlimited: false } },
+    } satisfies PlatformOrganizationDetail);
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByText("18 / 50")).toBeInTheDocument());
+  });
+
+  it("renders Unlimited for unlimited resources", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...activeOrg,
+      usage: {
+        ...emptyUsage,
+        customers: { used: 340, limit: null, unlimited: true },
+      },
+    } satisfies PlatformOrganizationDetail);
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    await waitFor(() => expect(screen.getByText("Unlimited")).toBeInTheDocument());
+  });
+
+  it("shows loading placeholders before usage data arrives", () => {
+    apiFetchMock.mockImplementation(() => new Promise(() => {}));
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    expect(screen.queryByText("1 / 2")).not.toBeInTheDocument();
   });
 });

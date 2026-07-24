@@ -11,3 +11,14 @@ export function formatPlanLimit(value: number | null, t: TranslateFn): string {
   if (value === 0) return t("planLimits.unavailable");
   return value.toLocaleString();
 }
+
+/** Phase 14B's used-against-limit sibling of formatPlanLimit above --
+ * same NULL/0/positive convention on `limit`, but renders "{used} / {limit}"
+ * when there is a real ceiling to compare against, since usage without its
+ * limit ("18") is meaningless on its own. Never shows a percentage or a
+ * warning color; this is a plain measurement, not an enforcement signal. */
+export function formatUsage(used: number, limit: number | null, t: TranslateFn): string {
+  if (limit === null) return t("planLimits.unlimited");
+  if (limit === 0) return t("planLimits.unavailable");
+  return `${used.toLocaleString()} / ${limit.toLocaleString()}`;
+}

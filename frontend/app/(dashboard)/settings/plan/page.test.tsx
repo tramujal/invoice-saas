@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAuthSession } from "@/lib/auth-storage";
-import type { OrganizationEntitlements } from "@/lib/types";
+import type { OrganizationEntitlements, OrganizationUsage } from "@/lib/types";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
 
 import PlanAndLimitsPage from "./page";
@@ -39,6 +39,24 @@ const freeEntitlements: OrganizationEntitlements = {
   },
 };
 
+const freeUsage: OrganizationUsage = {
+  users: { used: 1, limit: 2, unlimited: false },
+  customers: { used: 18, limit: 100, unlimited: false },
+  products: { used: 4, limit: 100, unlimited: false },
+  invoices: { used: 6, limit: 50, unlimited: false },
+  quotes: { used: 3, limit: 50, unlimited: false },
+  ai_actions: { used: 9, limit: 25, unlimited: false },
+  storage: { used: 0, limit: 500, unlimited: false },
+};
+
+function mockUsageAndEntitlements(entitlements: OrganizationEntitlements, usage: OrganizationUsage) {
+  apiFetchMock.mockImplementation((path: string) => {
+    if (path.endsWith("/entitlements")) return Promise.resolve(entitlements);
+    if (path.endsWith("/usage")) return Promise.resolve(usage);
+    return Promise.reject(new Error(`unexpected call: ${path}`));
+  });
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   apiFetchMock.mockReset();
@@ -51,22 +69,37 @@ beforeEach(() => {
 });
 
 describe("PlanAndLimitsPage", () => {
-  it("fetches from the entitlements endpoint and renders the plan name and limits read-only", async () => {
-    apiFetchMock.mockResolvedValueOnce(freeEntitlements);
+  it("fetches from both the entitlements and usage endpoints and renders used/limit read-only", async () => {
+    mockUsageAndEntitlements(freeEntitlements, freeUsage);
     renderWithProviders(<PlanAndLimitsPage />);
 
     await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
-    expect(apiFetchMock.mock.calls[0][0]).toBe("/organizations/org-1/entitlements");
-    expect(screen.getByText("500 MB")).toBeInTheDocument();
+    expect(apiFetchMock).toHaveBeenCalledWith("/organizations/org-1/entitlements", expect.anything());
+    expect(apiFetchMock).toHaveBeenCalledWith("/organizations/org-1/usage", expect.anything());
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("18 / 100")).toBeInTheDocument();
+    expect(screen.getByText("0 / 500 MB")).toBeInTheDocument();
 
-    // Read-only: no edit controls, no upgrade CTA, no usage numbers.
+    // Read-only: no edit controls, no upgrade CTA.
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByText(/upgrade/i)).not.toBeInTheDocument();
   });
 
+  it("renders a loading state before data arrives", async () => {
+    let resolveEntitlements: (value: OrganizationEntitlements) => void = () => {};
+    apiFetchMock.mockImplementation((path: string) => {
+      if (path.endsWith("/entitlements")) return new Promise((resolve) => (resolveEntitlements = resolve));
+      return new Promise(() => {});
+    });
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    expect(screen.queryByText("Free")).not.toBeInTheDocument();
+    resolveEntitlements(freeEntitlements);
+  });
+
   it("renders unlimited limits and disabled features consistently", async () => {
-    apiFetchMock.mockResolvedValueOnce({
+    const unlimitedEntitlements: OrganizationEntitlements = {
       ...freeEntitlements,
       plan_name: "Enterprise",
       limits: {
@@ -79,29 +112,41 @@ describe("PlanAndLimitsPage", () => {
         storage_limit_mb: null,
       },
       features: { custom_branding_enabled: true, api_access_enabled: true, advanced_reports_enabled: true },
-    } satisfies OrganizationEntitlements);
+    };
+    const unlimitedUsage: OrganizationUsage = {
+      users: { used: 40, limit: null, unlimited: true },
+      customers: { used: 500, limit: null, unlimited: true },
+      products: { used: 20, limit: null, unlimited: true },
+      invoices: { used: 30, limit: null, unlimited: true },
+      quotes: { used: 10, limit: null, unlimited: true },
+      ai_actions: { used: 100, limit: null, unlimited: true },
+      storage: { used: 0, limit: null, unlimited: true },
+    };
+    mockUsageAndEntitlements(unlimitedEntitlements, unlimitedUsage);
     renderWithProviders(<PlanAndLimitsPage />);
 
     await waitFor(() => expect(screen.getByText("Enterprise")).toBeInTheDocument());
-    // 6 numeric limit rows + storage, all "Unlimited".
+    // 6 numeric usage rows + storage, all "Unlimited" -- usage numbers
+    // are never shown alongside "Unlimited" since there's no ceiling to
+    // measure against.
     expect(screen.getAllByText("Unlimited")).toHaveLength(7);
   });
 
   it("renders a zero limit as unavailable, not as zero", async () => {
-    apiFetchMock.mockResolvedValueOnce({
-      ...freeEntitlements,
-      limits: { ...freeEntitlements.limits, max_ai_actions_per_month: 0 },
-    } satisfies OrganizationEntitlements);
+    mockUsageAndEntitlements(
+      { ...freeEntitlements, limits: { ...freeEntitlements.limits, max_ai_actions_per_month: 0 } },
+      { ...freeUsage, ai_actions: { used: 0, limit: 0, unlimited: false } }
+    );
     renderWithProviders(<PlanAndLimitsPage />);
 
     await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
     expect(screen.getByText("Not available")).toBeInTheDocument();
-    expect(screen.queryByText("0")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 / 0")).not.toBeInTheDocument();
   });
 
   it("shows an error message when the load fails", async () => {
     const { ApiError } = await import("@/lib/api");
-    apiFetchMock.mockRejectedValueOnce(new ApiError("Server exploded", 500));
+    apiFetchMock.mockRejectedValue(new ApiError("Server exploded", 500));
     renderWithProviders(<PlanAndLimitsPage />);
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Server exploded"));

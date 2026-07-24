@@ -7,18 +7,20 @@ import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import { formatPlanLimit } from "@/lib/plan-limits";
-import type { OrganizationEntitlements } from "@/lib/types";
+import { formatUsage } from "@/lib/plan-limits";
+import type { OrganizationEntitlements, OrganizationUsage } from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "__generic_load_error__";
 
-/** Read-only. Deliberately has no upgrade button, no payment UI, and no
- * fake usage numbers -- Phase 14A defines entitlements only; usage
- * tracking and any commercial upgrade flow are later phases (see
- * app.services.entitlements's own module docstring on the backend). */
+/** Read-only. Deliberately has no upgrade button and no payment UI --
+ * Phase 14A defined entitlements, Phase 14B adds how much of each is
+ * currently used (see app.services.organization_usage), but limit
+ * enforcement itself is still a later phase: nothing here warns or
+ * blocks, it only measures. */
 export default function PlanAndLimitsPage() {
   const { t } = useTranslation();
   const [data, setData] = useState<OrganizationEntitlements | null>(null);
+  const [usage, setUsage] = useState<OrganizationUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -30,13 +32,16 @@ export default function PlanAndLimitsPage() {
     setLoading(true);
     setError(null);
     try {
-      const json = await apiFetch<OrganizationEntitlements>(orgPath("entitlements"), {
-        signal: controller.signal,
-      });
-      setData(json);
+      const [entitlements, usageSnapshot] = await Promise.all([
+        apiFetch<OrganizationEntitlements>(orgPath("entitlements"), { signal: controller.signal }),
+        apiFetch<OrganizationUsage>(orgPath("usage"), { signal: controller.signal }),
+      ]);
+      setData(entitlements);
+      setUsage(usageSnapshot);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setData(null);
+      setUsage(null);
       setError(e instanceof ApiError ? e.message : GENERIC_LOAD_ERROR);
     } finally {
       if (abortRef.current === controller) setLoading(false);
@@ -48,13 +53,17 @@ export default function PlanAndLimitsPage() {
     return () => abortRef.current?.abort();
   }, [load]);
 
-  const limitRows: { labelKey: string; value: number | null | undefined }[] = [
-    { labelKey: "planAndLimits.rowUsers", value: data?.limits.max_users },
-    { labelKey: "planAndLimits.rowCustomers", value: data?.limits.max_customers },
-    { labelKey: "planAndLimits.rowProducts", value: data?.limits.max_products },
-    { labelKey: "planAndLimits.rowInvoices", value: data?.limits.max_invoices_per_month },
-    { labelKey: "planAndLimits.rowQuotes", value: data?.limits.max_quotes_per_month },
-    { labelKey: "planAndLimits.rowAiActions", value: data?.limits.max_ai_actions_per_month },
+  const usageRows: { labelKey: string; used: number | undefined; limit: number | null | undefined }[] = [
+    { labelKey: "planAndLimits.rowUsers", used: usage?.users.used, limit: data?.limits.max_users },
+    { labelKey: "planAndLimits.rowCustomers", used: usage?.customers.used, limit: data?.limits.max_customers },
+    { labelKey: "planAndLimits.rowProducts", used: usage?.products.used, limit: data?.limits.max_products },
+    { labelKey: "planAndLimits.rowInvoices", used: usage?.invoices.used, limit: data?.limits.max_invoices_per_month },
+    { labelKey: "planAndLimits.rowQuotes", used: usage?.quotes.used, limit: data?.limits.max_quotes_per_month },
+    {
+      labelKey: "planAndLimits.rowAiActions",
+      used: usage?.ai_actions.used,
+      limit: data?.limits.max_ai_actions_per_month,
+    },
   ];
 
   return (
@@ -83,14 +92,14 @@ export default function PlanAndLimitsPage() {
         </div>
 
         <dl className="divide-y divide-slate-100">
-          {limitRows.map(({ labelKey, value }) => (
+          {usageRows.map(({ labelKey, used, limit }) => (
             <div key={labelKey} className="flex items-center justify-between gap-4 px-5 py-3">
               <dt className="text-sm font-medium text-slate-700">{t(labelKey)}</dt>
               <dd className="text-sm text-slate-900">
                 {loading ? (
                   <span className="inline-flex h-4 w-16 animate-pulse rounded bg-slate-100" aria-hidden />
                 ) : (
-                  formatPlanLimit(value ?? null, t)
+                  formatUsage(used ?? 0, limit ?? null, t)
                 )}
               </dd>
             </div>
@@ -105,7 +114,10 @@ export default function PlanAndLimitsPage() {
               ) : data?.limits.storage_limit_mb === 0 ? (
                 t("planLimits.unavailable")
               ) : (
-                t("planAndLimits.storageMbValue", { mb: data?.limits.storage_limit_mb ?? 0 })
+                t("planAndLimits.storageUsageValue", {
+                  used: usage?.storage.used ?? 0,
+                  mb: data?.limits.storage_limit_mb ?? 0,
+                })
               )}
             </dd>
           </div>

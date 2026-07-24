@@ -1495,6 +1495,34 @@ class OrganizationEntitlementsResponse(BaseModel):
     features: PlanFeatures
 
 
+class UsageResourceSnapshot(BaseModel):
+    """used/limit/unlimited for exactly one plan-limited resource -- see
+    app.services.organization_usage.ResourceUsage, which this mirrors
+    field-for-field. The frontend renders "{used} / {limit}" or
+    "Unlimited" directly; no percentage or warning threshold is computed
+    here (Phase 14B measures usage only, it does not enforce or warn)."""
+
+    used: int
+    limit: int | None
+    unlimited: bool
+
+
+class OrganizationUsageResponse(BaseModel):
+    """GET /organizations/{id}/usage -- the tenant-facing, read-only
+    snapshot of how much of each plan-limited resource this organization
+    is currently using, paired with that resource's entitled limit. Every
+    value comes from app.services.organization_usage.get_usage_snapshot;
+    this is a pure read with no audit row and no side effect."""
+
+    users: UsageResourceSnapshot
+    customers: UsageResourceSnapshot
+    products: UsageResourceSnapshot
+    invoices: UsageResourceSnapshot
+    quotes: UsageResourceSnapshot
+    ai_actions: UsageResourceSnapshot
+    storage: UsageResourceSnapshot
+
+
 class PlatformDashboardResponse(BaseModel):
     organizations_total: int
     organizations_new_7d: int
@@ -1560,6 +1588,7 @@ class PlatformOrganizationDetail(BaseModel):
     plan_id: str
     plan_code: str
     plan_name: str
+    usage: OrganizationUsageResponse
     created_at: datetime | None
     last_activity_at: datetime | None
     members: list[PlatformOrganizationMember]

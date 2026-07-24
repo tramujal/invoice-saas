@@ -774,6 +774,7 @@ export type PlatformOrganizationDetail = {
   plan_id: string;
   plan_code: string;
   plan_name: string;
+  usage: OrganizationUsage;
   created_at: string | null;
   last_activity_at: string | null;
   members: PlatformOrganizationMember[];
@@ -873,6 +874,25 @@ export type OrganizationEntitlements = {
   plan_name: string;
   limits: PlanLimits;
   features: PlanFeatures;
+};
+
+// GET /organizations/{id}/usage -- Phase 14B measures usage only; this
+// never rejects a request or implies a warning threshold, it is a plain
+// read-only snapshot. See app.services.organization_usage.ResourceUsage.
+export type UsageResourceSnapshot = {
+  used: number;
+  limit: number | null;
+  unlimited: boolean;
+};
+
+export type OrganizationUsage = {
+  users: UsageResourceSnapshot;
+  customers: UsageResourceSnapshot;
+  products: UsageResourceSnapshot;
+  invoices: UsageResourceSnapshot;
+  quotes: UsageResourceSnapshot;
+  ai_actions: UsageResourceSnapshot;
+  storage: UsageResourceSnapshot;
 };
 
 export type PaginatedPlatformOrganizations = {

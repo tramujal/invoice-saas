@@ -60,6 +60,7 @@ from app.reminder_status import ReminderStatus
 from app.routers.auth import issue_password_reset
 from app.schemas import (
     OrganizationPlanChangeRequest,
+    OrganizationUsageResponse,
     PaginatedPlatformAuditLogResponse,
     PaginatedPlatformOrganizationsResponse,
     PaginatedPlatformUsersResponse,
@@ -86,8 +87,10 @@ from app.schemas import (
     PlatformUserDetail,
     PlatformUserOrganization,
     PlatformUserSummary,
+    UsageResourceSnapshot,
 )
 from app.services.entitlements import get_default_plan
+from app.services.organization_usage import ResourceUsage, get_usage_snapshot
 from app.services.platform_audit import (
     record_organization_action,
     record_plan_action,
@@ -409,6 +412,28 @@ def _organization_or_404(db: Session, organization_id: str) -> Organization:
     return organization
 
 
+def _build_usage_response(db: Session, organization_id: str) -> OrganizationUsageResponse:
+    """Shared shape-building helper -- mirrors app.routers.organizations'
+    own private _usage_resource exactly, since both consumers wrap the
+    same app.services.organization_usage.get_usage_snapshot() result
+    into the same OrganizationUsageResponse schema; neither router ever
+    counts a resource itself."""
+    snapshot = get_usage_snapshot(db, organization_id)
+
+    def _resource(resource: ResourceUsage) -> UsageResourceSnapshot:
+        return UsageResourceSnapshot(used=resource.used, limit=resource.limit, unlimited=resource.unlimited)
+
+    return OrganizationUsageResponse(
+        users=_resource(snapshot.users),
+        customers=_resource(snapshot.customers),
+        products=_resource(snapshot.products),
+        invoices=_resource(snapshot.invoices),
+        quotes=_resource(snapshot.quotes),
+        ai_actions=_resource(snapshot.ai_actions),
+        storage=_resource(snapshot.storage),
+    )
+
+
 def _build_organization_detail(db: Session, organization: Organization) -> PlatformOrganizationDetail:
     """Shared by the plain GET detail endpoint and the suspend/reactivate
     mutations -- both need to return the exact same shape, and the
@@ -495,6 +520,7 @@ def _build_organization_detail(db: Session, organization: Organization) -> Platf
         plan_id=organization.plan.id,
         plan_code=organization.plan.code,
         plan_name=organization.plan.name,
+        usage=_build_usage_response(db, organization.id),
         created_at=created_at,
         last_activity_at=last_activity_at,
         members=members,
