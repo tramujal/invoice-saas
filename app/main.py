@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 import app.jobs.bootstrap  # noqa: F401 -- populates the background-job registry
 from app.models import init_db
 from app.routers import (
+    analytics,
     api_key_management,
     assistant,
     assistant_actions,
@@ -134,6 +135,7 @@ app.include_router(team.router)
 app.include_router(invitations.router)
 app.include_router(invitation_public.router)
 app.include_router(dashboard.router)
+app.include_router(analytics.router)
 app.include_router(insights.router)
 app.include_router(organizations.router)
 app.include_router(assistant.router)

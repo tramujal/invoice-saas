@@ -1,13 +1,15 @@
 """Builds the bounded, tenant-scoped business summary fed to the AI
 assistant — see app/routers/assistant.py.
 
-Reuses app.routers.dashboard's get_dashboard_summary/get_dashboard_analytics_data
-verbatim (never a second, potentially-drifting computation of the same
-numbers), and adds exactly two new bounded queries that don't exist
-anywhere else: an actual overdue-invoice list (the dashboard only exposes a
-count) and customers not invoiced recently. Every query here takes
-organization_id as an explicit, required argument and filters on it —
-the same tenant-isolation pattern every other router already uses.
+Reuses app.analytics.service.AnalyticsService's dashboard_summary()/
+dashboard_analytics() verbatim (never a second, potentially-drifting
+computation of the same numbers) — the same single source of truth
+app.routers.dashboard's own routes and app.insights.engine build on, and
+adds exactly two new bounded queries that don't exist anywhere else: an
+actual overdue-invoice list (the dashboard only exposes a count) and
+customers not invoiced recently. Every query here takes organization_id
+as an explicit, required argument and filters on it — the same
+tenant-isolation pattern every other router already uses.
 
 No SQL is ever generated from user input, and the model is never given
 database access of its own — this module is the only thing that touches
@@ -23,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai.limits import AI_MAX_CONTEXT_CHARS
+from app.analytics.service import AnalyticsService
 from app.currency import format_amount
 from app.customer_activity import get_last_invoice_at_by_customer
 from app.insights.queries import get_due_soon_invoice_details, get_overdue_invoice_details
@@ -39,7 +42,6 @@ from app.quote_analytics import (
     get_quotes_pending_response,
 )
 from app.reminder_status import ReminderStatus
-from app.routers.dashboard import get_dashboard_analytics_data, get_dashboard_summary
 from app.schemas import DashboardAnalyticsResponse, DashboardResponse
 from app.team_analytics import (
     get_pending_invitations,
@@ -309,12 +311,13 @@ def build_business_context(db: Session, organization_id: str) -> BusinessContext
     team_size, owner_emails, admin_emails, pending_invitations, recent_members = _team_context(
         db, organization_id
     )
+    analytics_service = AnalyticsService(db, organization_id)
 
     return BusinessContext(
         organization_name=organization.name if organization else "",
         language=get_language(organization),
-        dashboard=get_dashboard_summary(db, organization_id),
-        analytics=get_dashboard_analytics_data(db, organization_id),
+        dashboard=analytics_service.dashboard_summary(),
+        analytics=analytics_service.dashboard_analytics(),
         overdue_invoice_list=_overdue_invoice_list(db, organization_id),
         due_soon_invoice_list=_due_soon_invoice_list(db, organization_id),
         stale_customers=_stale_customers(db, organization_id, now),

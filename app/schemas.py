@@ -980,6 +980,73 @@ class DashboardAnalyticsResponse(BaseModel):
     team: TeamSummaryResponse
 
 
+class TimeWindowResponse(BaseModel):
+    """Echoes back the resolved [start, end) boundaries the KPI snapshot
+    below was actually computed over -- so a client never has to
+    reimplement app.analytics.time_windows' own date math just to know
+    what "current_month" resolved to."""
+
+    kind: str
+    start: datetime
+    end: datetime
+
+
+class InvoiceCountsResponse(BaseModel):
+    total: int
+    pending: int
+    paid: int
+    overdue: int
+
+
+class RevenueBreakdownResponse(BaseModel):
+    """One currency's revenue, split by effective payment status -- see
+    app.analytics.calculators.revenue.RevenueBreakdown. `paid` +
+    `outstanding` always sum back to `total`."""
+
+    currency_code: str
+    total: Decimal
+    paid: Decimal
+    outstanding: Decimal
+    overdue: Decimal
+
+
+class CustomerRetentionResponse(BaseModel):
+    total_invoiced_customers: int
+    repeat_customers: int
+    retention_rate_percent: float | None
+
+
+class AveragePaymentTimeResponse(BaseModel):
+    """`available=False` is an honest, documented gap, not an error --
+    see app.analytics.calculators.payments for why this can't be computed
+    yet (no paid_at timestamp exists on Invoice)."""
+
+    available: bool
+    average_days: float | None
+    reason: str | None
+
+
+class KpiSnapshotResponse(BaseModel):
+    """A window-scoped snapshot of the core KPI-engine metrics --
+    assembled by app.analytics.service.AnalyticsService from independently
+    callable calculators, never computed inline by the router. See
+    GET /organizations/{organization_id}/analytics/kpis."""
+
+    window: TimeWindowResponse
+    invoice_counts: InvoiceCountsResponse
+    revenue_by_currency: dict[str, Decimal]
+    revenue_breakdown: list[RevenueBreakdownResponse]
+    average_invoice_value: dict[str, Decimal]
+    customer_growth: int
+    # Deliberately all-time, not window-scoped -- see
+    # app.analytics.calculators.customers.get_customer_retention's own
+    # docstring on why a lifetime relationship metric doesn't slice
+    # meaningfully by an arbitrary window.
+    customer_retention: CustomerRetentionResponse
+    quote_acceptance_rate_percent: float | None
+    average_payment_time: AveragePaymentTimeResponse
+
+
 class InsightMetricResponse(BaseModel):
     currency_code: str | None
     value: Decimal | None

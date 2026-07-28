@@ -16,8 +16,9 @@ written anywhere as a side effect of reading usage (no audit row either
 Users/customers/products are standing counts (how many exist right now).
 Invoices/quotes/AI actions are monthly-creation counts (how many were
 created since the start of the current UTC calendar month -- the same
-"this month" convention app.routers.dashboard._month_bounds already
-established for revenue, not a second, divergent definition of it).
+"this month" convention app.analytics.time_windows.resolve_time_window
+(TimeWindowKind.current_month) now provides everywhere in this app, not a
+second, divergent definition of it).
 """
 
 from dataclasses import dataclass
@@ -55,10 +56,16 @@ class UsageSnapshot:
 
 def _current_month_start_utc(now: datetime | None = None) -> datetime:
     """UTC-aware start of the current calendar month -- matches
-    app.routers.dashboard._month_bounds's own convention exactly, so
-    "this month" means the same thing everywhere in this app rather than
-    introducing a second, org-timezone-aware definition that would
-    quietly disagree with the dashboard's revenue-this-month figure."""
+    app.analytics.time_windows.resolve_time_window(TimeWindowKind
+    .current_month)'s own convention exactly, so "this month" means the
+    same thing everywhere in this app rather than introducing a second,
+    org-timezone-aware definition that would quietly disagree with the
+    dashboard's revenue-this-month figure. Kept as its own tiny local
+    helper rather than importing app.analytics here: this module predates
+    the analytics package and this one line of arithmetic isn't worth a
+    new cross-package dependency for -- see this phase's own completion
+    report for the same "don't force a dependency where duplication is
+    this cheap" judgment call."""
     moment = now or datetime.now(timezone.utc)
     return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 

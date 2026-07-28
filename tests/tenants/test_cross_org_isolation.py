@@ -21,6 +21,7 @@ ENDPOINTS = [
     "/organizations/{org_id}/quotes",
     "/organizations/{org_id}/dashboard",
     "/organizations/{org_id}/dashboard/insights",
+    "/organizations/{org_id}/analytics/kpis",
     "/organizations/{org_id}/members",
     "/organizations/{org_id}/invitations",
 ]

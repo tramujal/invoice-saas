@@ -47,6 +47,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analytics.service import AnalyticsService
 from app.customer_activity import get_last_invoice_at_by_customer
 from app.insights.models import (
     Insight,
@@ -80,11 +81,6 @@ from app.quote_analytics import (
     get_quote_pipeline_summary,
     get_quotes_expiring_soon,
     get_quotes_pending_response,
-)
-from app.routers.dashboard import (
-    get_dashboard_analytics_data,
-    get_dashboard_summary,
-    get_pending_total_by_currency,
 )
 from app.team_analytics import get_pending_invitations, get_recent_accepted_members, get_team_summary
 
@@ -149,7 +145,8 @@ def build_insights(
     """Computes every deterministic insight candidate for this
     organization and returns them in diversity-aware priority order
     (highest first), uncapped. Callers cap via cap_insights()."""
-    summary = get_dashboard_summary(db, organization_id)
+    analytics_service = AnalyticsService(db, organization_id)
+    summary = analytics_service.dashboard_summary()
 
     if summary.total_invoices == 0:
         # Every invoice-derived signal below needs at least one invoice to
@@ -166,7 +163,7 @@ def build_insights(
             + _team_insights(db, organization_id, language)
         )
 
-    analytics = get_dashboard_analytics_data(db, organization_id)
+    analytics = analytics_service.dashboard_analytics()
     # Computed once here and passed down -- both inactivity and
     # data-quality need "last invoice date per customer" and the full
     # customer list; neither re-queries it independently.
@@ -487,7 +484,7 @@ def _due_soon_insights(
 def _pending_insights(
     db: Session, organization_id: str, summary, language: str
 ) -> list[Insight]:
-    pending_by_currency = get_pending_total_by_currency(db, organization_id)
+    pending_by_currency = AnalyticsService(db, organization_id).pending_revenue_by_currency()
     if not pending_by_currency:
         return []
 
