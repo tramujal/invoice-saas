@@ -338,3 +338,17 @@ API_KEY_AUTH_IP_RULES = (
     RateLimitRule(limit=300, window_seconds=3600),
 )
 API_KEY_REQUEST_RULES = (RateLimitRule(limit=120, window_seconds=60),)
+
+# Webhook endpoint management -- user-keyed (via user_identity), matching
+# every other organization-settings mutation's rate-limit shape in this
+# file. Creation/rotation are meaningfully rarer, deliberate actions
+# (an organization configures a handful of integrations, not hundreds),
+# so a modest hourly budget is enough; history/detail reads are far more
+# frequent (a dashboard polling delivery status) so get a per-minute
+# budget instead. Resend is its own bucket since it's the one action that
+# actually triggers new outbound network traffic to a third party, and
+# deserves its own tighter cap independent of how often someone is just
+# browsing history.
+WEBHOOK_ENDPOINT_WRITE_RULES = (RateLimitRule(limit=20, window_seconds=3600),)
+WEBHOOK_RESEND_RULES = (RateLimitRule(limit=30, window_seconds=3600),)
+WEBHOOK_READ_RULES = (RateLimitRule(limit=120, window_seconds=60),)

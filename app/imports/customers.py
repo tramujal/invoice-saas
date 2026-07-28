@@ -24,7 +24,10 @@ from app.imports.types import FieldSpec, PreviewRowStatus
 from app.imports.validation import validate_row_fields
 from app.localization import get_language, t
 from app.models import Customer, Organization
+from app.schemas import CustomerResponse
 from app.services.plan_limits import LimitedResource, check_limit
+from app.services.webhook_events import record_webhook_event
+from app.webhook_event_type import WebhookEventType
 
 REASON_MISSING_CONTACT_INFO = "missing_contact_info"
 REASON_INVALID_EMAIL = "invalid_email"
@@ -195,6 +198,14 @@ def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]],
         )
         db.add(customer)
         db.flush()
+        record_webhook_event(
+            db,
+            organization_id=organization_id,
+            event_type=WebhookEventType.customer_created,
+            object_type="customer",
+            object_id=customer.id,
+            payload=CustomerResponse.model_validate(customer).model_dump(mode="json"),
+        )
 
     return persist
 

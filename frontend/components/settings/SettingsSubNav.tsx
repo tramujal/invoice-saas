@@ -10,6 +10,7 @@ const TABS = [
   { href: "/settings/team", labelKey: "settingsNav.team" },
   { href: "/settings/plan", labelKey: "settingsNav.plan" },
   { href: "/settings/api-keys", labelKey: "settingsNav.apiKeys" },
+  { href: "/settings/webhooks", labelKey: "settingsNav.webhooks" },
 ] as const;
 
 /** Kept intentionally minimal (a handful of links, no framework) rather

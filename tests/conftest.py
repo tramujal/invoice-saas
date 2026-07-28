@@ -126,6 +126,22 @@ def fake_email_sender(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fake_webhook_dispatch(monkeypatch):
+    """Neutralizes real background webhook delivery for every test -- see
+    tests/fakes.FakeWebhookDispatcher's own docstring for why this must
+    be autouse (the dispatch hook fires on every commit, not just
+    webhook-specific tests) and why a real dispatch would be actively
+    wrong here, not just slow (a fresh SessionLocal() can't see a test's
+    SAVEPOINT-scoped data)."""
+    from tests.fakes import FakeWebhookDispatcher
+
+    dispatcher = FakeWebhookDispatcher()
+    monkeypatch.setattr("app.services.webhook_dispatch.schedule_delivery", dispatcher)
+    monkeypatch.setattr("app.services.webhook_deliveries.schedule_delivery", dispatcher)
+    return dispatcher
+
+
+@pytest.fixture(autouse=True)
 def fake_ai_provider(monkeypatch):
     """Patches both confirmed get_ai_provider call sites, same rationale
     as fake_email_sender above -- a developer's ambient shell may well

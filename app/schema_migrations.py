@@ -47,6 +47,10 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_organization_plan_id(engine)
     _add_organization_api_keys_table(engine)
     _add_organization_api_key_audit_log_table(engine)
+    _add_webhook_endpoints_table(engine)
+    _add_webhook_events_table(engine)
+    _add_webhook_deliveries_table(engine)
+    _add_webhook_audit_log_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1125,6 +1129,144 @@ def _add_organization_api_key_audit_log_table(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_org_api_key_audit_log_organization "
                 "ON organization_api_key_audit_log (organization_id)"
+            )
+        )
+
+
+def _add_webhook_endpoints_table(engine: Engine) -> None:
+    """Creates webhook_endpoints if it's missing -- same idempotent safety
+    net as _add_organization_api_keys_table."""
+    inspector = inspect(engine)
+    if "webhook_endpoints" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS webhook_endpoints ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "url VARCHAR(2048) NOT NULL, "
+                "description VARCHAR(500) NOT NULL DEFAULT '', "
+                "subscribed_events TEXT NOT NULL DEFAULT '[]', "
+                "secret VARCHAR(128) NOT NULL, "
+                "enabled BOOLEAN NOT NULL DEFAULT 1, "
+                "active BOOLEAN NOT NULL DEFAULT 1, "
+                "created_by CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "last_rotated_at TIMESTAMP NULL"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_endpoints_organization "
+                "ON webhook_endpoints (organization_id)"
+            )
+        )
+
+
+def _add_webhook_events_table(engine: Engine) -> None:
+    """Creates webhook_events if it's missing. Must run after
+    _add_webhook_endpoints_table only for ordering consistency with the
+    other webhook tables -- this table itself has no FK to endpoints."""
+    inspector = inspect(engine)
+    if "webhook_events" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS webhook_events ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "event_type VARCHAR(64) NOT NULL, "
+                "object_type VARCHAR(32) NOT NULL, "
+                "object_id VARCHAR(36) NOT NULL, "
+                "payload TEXT NOT NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_events_organization_created "
+                "ON webhook_events (organization_id, created_at)"
+            )
+        )
+
+
+def _add_webhook_deliveries_table(engine: Engine) -> None:
+    """Creates webhook_deliveries if it's missing. Must run after both
+    _add_webhook_endpoints_table and _add_webhook_events_table since it
+    references both."""
+    inspector = inspect(engine)
+    if "webhook_deliveries" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS webhook_deliveries ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "event_id CHAR(36) NOT NULL REFERENCES webhook_events(id) ON DELETE CASCADE, "
+                "endpoint_id CHAR(36) NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                "trigger VARCHAR(16) NOT NULL DEFAULT 'automatic', "
+                "attempt_number INTEGER NOT NULL DEFAULT 1, "
+                "request_url VARCHAR(2048) NOT NULL, "
+                "request_headers TEXT NULL, "
+                "response_status_code INTEGER NULL, "
+                "response_body_snippet TEXT NULL, "
+                "error_message VARCHAR(500) NULL, "
+                "duration_ms INTEGER NULL, "
+                "attempted_at TIMESTAMP NULL, "
+                "next_retry_at TIMESTAMP NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_organization_created "
+                "ON webhook_deliveries (organization_id, created_at)"
+            )
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_event ON webhook_deliveries (event_id)")
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_deliveries_endpoint "
+                "ON webhook_deliveries (endpoint_id)"
+            )
+        )
+
+
+def _add_webhook_audit_log_table(engine: Engine) -> None:
+    """Creates webhook_audit_log if it's missing. Must run after
+    _add_webhook_endpoints_table since endpoint_id references that table."""
+    inspector = inspect(engine)
+    if "webhook_audit_log" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS webhook_audit_log ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "endpoint_id CHAR(36) NULL REFERENCES webhook_endpoints(id) ON DELETE SET NULL, "
+                "actor_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "action VARCHAR(64) NOT NULL, "
+                "details TEXT NULL, "
+                "client_ip VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_webhook_audit_log_organization "
+                "ON webhook_audit_log (organization_id)"
             )
         )
 

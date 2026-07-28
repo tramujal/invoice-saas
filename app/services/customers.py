@@ -20,7 +20,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Customer
+from app.schemas import CustomerResponse
 from app.services.plan_limits import LimitedResource, check_limit
+from app.services.webhook_events import record_webhook_event
+from app.webhook_event_type import WebhookEventType
 
 
 class CustomerNotFoundError(Exception):
@@ -58,6 +61,15 @@ def create_customer_record(
         tax_id=tax_id,
     )
     db.add(customer)
+    db.flush()
+    record_webhook_event(
+        db,
+        organization_id=organization_id,
+        event_type=WebhookEventType.customer_created,
+        object_type="customer",
+        object_id=customer.id,
+        payload=CustomerResponse.model_validate(customer).model_dump(mode="json"),
+    )
     db.commit()
     db.refresh(customer)
     return customer
@@ -71,6 +83,14 @@ def update_customer_record(db: Session, customer: Customer, changes: dict) -> Cu
         if value is None:
             continue
         setattr(customer, key, value)
+    record_webhook_event(
+        db,
+        organization_id=customer.organization_id,
+        event_type=WebhookEventType.customer_updated,
+        object_type="customer",
+        object_id=customer.id,
+        payload=CustomerResponse.model_validate(customer).model_dump(mode="json"),
+    )
     db.commit()
     db.refresh(customer)
     return customer
@@ -80,6 +100,16 @@ def delete_customer_record(db: Session, customer: Customer) -> None:
     """Hard delete -- Customer has no archive/restore lifecycle (unlike
     Product), so this is the one genuine DELETE in the customer/product/
     quote/invoice family. Matches the exact behavior the browser router
-    already had before this extraction."""
+    already had before this extraction. The event payload is snapshotted
+    BEFORE db.delete() -- there is no row left to read from afterward."""
+    payload = CustomerResponse.model_validate(customer).model_dump(mode="json")
+    record_webhook_event(
+        db,
+        organization_id=customer.organization_id,
+        event_type=WebhookEventType.customer_deleted,
+        object_type="customer",
+        object_id=customer.id,
+        payload=payload,
+    )
     db.delete(customer)
     db.commit()

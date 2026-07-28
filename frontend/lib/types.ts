@@ -1041,3 +1041,86 @@ export type ApiKeyCreateRequest = {
   permissions: ApiKeyPermission[];
   expires_at: string | null;
 };
+
+// Phase 15B -- Outbound Webhooks. `subscribed_events` wire values match
+// app.webhook_event_type.WebhookEventType exactly ("customer.created",
+// ...), plus the special value "*" meaning "every event, including ones
+// added in the future."
+export const WEBHOOK_WILDCARD_EVENT = "*" as const;
+
+export type WebhookEventCatalogEntry = {
+  event_type: string;
+  domain: string;
+};
+
+export type WebhookEndpoint = {
+  id: string;
+  organization_id: string;
+  url: string;
+  description: string;
+  subscribed_events: string[];
+  enabled: boolean;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  last_rotated_at: string | null;
+};
+
+/** Only ever returned by create/rotate-secret -- the one and only time
+ * the complete signing secret exists in a response body. Never returned
+ * by GET/list. */
+export type WebhookEndpointCreated = WebhookEndpoint & { secret: string };
+
+export type WebhookEndpointCreateRequest = {
+  url: string;
+  description: string;
+  subscribed_events: string[];
+};
+
+export type WebhookEndpointUpdateRequest = {
+  url?: string;
+  description?: string;
+  subscribed_events?: string[];
+};
+
+export type WebhookDeliveryStatus = "pending" | "succeeded" | "failed";
+export type WebhookDeliveryTrigger = "automatic" | "manual_resend";
+
+export type WebhookDelivery = {
+  id: string;
+  organization_id: string;
+  event_id: string;
+  endpoint_id: string;
+  status: WebhookDeliveryStatus;
+  trigger: WebhookDeliveryTrigger;
+  attempt_number: number;
+  request_url: string;
+  response_status_code: number | null;
+  response_body_snippet: string | null;
+  error_message: string | null;
+  duration_ms: number | null;
+  attempted_at: string | null;
+  next_retry_at: string | null;
+  created_at: string;
+};
+
+export type WebhookEvent = {
+  id: string;
+  organization_id: string;
+  event_type: string;
+  object_type: string;
+  object_id: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type WebhookDeliveryDetail = WebhookDelivery & {
+  request_headers: Record<string, string> | null;
+  event: WebhookEvent;
+};
+
+export type PaginatedWebhookDeliveries = {
+  total: number;
+  items: WebhookDelivery[];
+};

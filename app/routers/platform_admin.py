@@ -91,6 +91,8 @@ from app.schemas import (
 )
 from app.services.entitlements import get_default_plan
 from app.services.organization_usage import ResourceUsage, get_usage_snapshot
+from app.services.webhook_events import record_webhook_event
+from app.webhook_event_type import WebhookEventType
 from app.services.platform_audit import (
     record_organization_action,
     record_plan_action,
@@ -650,6 +652,18 @@ def update_organization_plan(
         reason=body.reason,
         client_ip=get_client_ip(request),
         details={
+            "old_plan": {"id": old_plan.id, "code": old_plan.code} if old_plan is not None else None,
+            "new_plan": {"id": new_plan.id, "code": new_plan.code},
+        },
+    )
+    record_webhook_event(
+        db,
+        organization_id=organization.id,
+        event_type=WebhookEventType.organization_plan_changed,
+        object_type="organization",
+        object_id=organization.id,
+        payload={
+            "organization_id": organization.id,
             "old_plan": {"id": old_plan.id, "code": old_plan.code} if old_plan is not None else None,
             "new_plan": {"id": new_plan.id, "code": new_plan.code},
         },

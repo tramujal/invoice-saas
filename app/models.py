@@ -1204,6 +1204,232 @@ class OrganizationApiKeyAuditLog(Base):
     )
 
 
+class WebhookEndpoint(Base):
+    """One organization-configured outbound webhook target (see
+    app.services.webhook_endpoints) -- analogous in spirit to
+    OrganizationApiKey, but the trust direction is reversed: an API key is
+    a credential THIS app verifies on an INBOUND request, while
+    `hashed_secret` here signs OUTBOUND requests this app sends, so a
+    receiving endpoint can verify authenticity (see app.webhook_signing).
+
+    Two independent lifecycle flags, matching the two independent actions
+    the management UI exposes:
+      - `enabled` -- pause/resume. A disabled endpoint receives no new
+        automatic deliveries, but its history is untouched and it can be
+        re-enabled at any time (mirrors Product.active's "hide, never
+        destroy" philosophy, just named for its own domain).
+      - `active` -- archive/restore. An archived endpoint is hidden from
+        the default management list and is treated exactly like disabled
+        for delivery purposes, but represents "this integration is being
+        removed," not "temporarily paused." Never a hard delete: the
+        WebhookDelivery history rows this endpoint produced must remain
+        meaningful (WebhookDelivery.endpoint_id would otherwise dangle),
+        and rotation history (`last_rotated_at`) stays inspectable.
+
+    `subscribed_events` is a JSON-encoded list of app.webhook_event_type
+    .WebhookEventType values, OR the single-element list `["*"]` meaning
+    "every event type, including ones added in the future" -- a plain TEXT
+    column, matching OrganizationApiKey.permissions's exact portability
+    rationale (works identically on SQLite and Postgres).
+
+    Unlike OrganizationApiKey.hashed_secret, `secret` is stored in a form
+    this server can read back, NOT a one-way hash -- see
+    app.webhook_signing's module docstring for why: an API key is only
+    ever verified by comparison (inbound), so a hash is strictly correct
+    and more secure, but a webhook secret must be used to COMPUTE a fresh
+    HMAC signature on every future OUTBOUND delivery, indefinitely, which
+    is structurally impossible from a one-way hash. This mirrors how
+    Stripe/GitHub/Slack all handle webhook signing secrets. This app has
+    no field-level encryption-at-rest utility anywhere yet (email
+    provider credentials are environment variables, not DB columns), so
+    this value's only protection is the same database-access boundary
+    every other sensitive column already relies on -- documented here
+    honestly as a residual limitation rather than silently implied to be
+    hashed like an API key. The application layer never re-exposes it
+    through any GET/list response after creation/rotation, matching
+    OrganizationApiKey's "shown once" UX even though, unlike an API key,
+    the value IS technically recoverable server-side (it has to be, to
+    keep signing future deliveries).
+
+    Rotation (app.services.webhook_endpoints.rotate_endpoint_secret)
+    overwrites `secret` in place (unlike OrganizationApiKey rotation,
+    which creates a new row) because, per this phase's explicit design
+    decision, only ONE secret is ever active at a time -- there is no
+    overlap window where both an old and a new secret verify successfully,
+    so mutating in place is correct and simpler than OrganizationApiKey's
+    revoke-and-recreate shape.
+    """
+
+    __tablename__ = "webhook_endpoints"
+    __table_args__ = (Index("ix_webhook_endpoints_organization", "organization_id"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    subscribed_events: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    secret: Mapped[str] = mapped_column(String(128), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    created_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    last_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    organization: Mapped["Organization"] = relationship()
+
+
+class WebhookEvent(Base):
+    """One immutable, point-in-time domain event (see
+    app.services.webhook_events.record_webhook_event) -- created in the
+    exact same DB transaction as the business mutation that caused it, so
+    it either commits with that mutation or never exists at all (true
+    same-transaction atomicity, no separate outbox table needed since this
+    row already lives inside the caller's own transaction).
+
+    `payload` is a JSON-encoded, fully-resolved snapshot at the moment the
+    event fired -- deliberately never a lazy reference (e.g. "look up
+    invoice X yourself") that could later resolve to different data or a
+    since-deleted row. Every WebhookDelivery for this event reuses this
+    exact payload on every attempt, including a manual resend, so a
+    receiver always sees the state as it was at the moment the thing
+    actually happened, not as it is now.
+
+    Never updated or deleted by any code path -- `id` is the stable value
+    every consumer is expected to dedupe on (see this app's own at-least-
+    once delivery guarantee, documented in
+    app.services.webhook_deliveries).
+    """
+
+    __tablename__ = "webhook_events"
+    __table_args__ = (
+        Index("ix_webhook_events_organization_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+
+
+class WebhookDelivery(Base):
+    """One delivery attempt of one WebhookEvent to one WebhookEndpoint --
+    created as `pending` in the SAME transaction as its WebhookEvent (see
+    record_webhook_event), then updated exactly once, out-of-band, by
+    app.services.webhook_deliveries after the actual HTTP attempt
+    completes (success or failure). Never re-used for a second attempt:
+    a manual resend (app.services.webhook_deliveries.resend_delivery)
+    always creates a brand-new row referencing the same `event_id` --
+    this row's own history (its original attempted_at/response) is never
+    overwritten, matching OrganizationApiKey's "rotate creates a new row,
+    never rewrites the old one" precedent.
+
+    `request_url`/`request_headers` are snapshots taken at send time --
+    NOT re-derived from the live WebhookEndpoint row later, so a
+    subsequent URL edit or secret rotation on the endpoint can never alter
+    what an already-recorded delivery claims was actually sent.
+
+    `next_retry_at` is metadata only, per this phase's explicit scope
+    boundary -- it is computed and stored on a failed delivery (a fixed
+    backoff schedule) but nothing in this codebase ever reads it to
+    actually perform a retry. It exists so a future Phase 15C worker has
+    something to query against without a schema change.
+    """
+
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        Index("ix_webhook_deliveries_organization_created", "organization_id", "created_at"),
+        Index("ix_webhook_deliveries_event", "event_id"),
+        Index("ix_webhook_deliveries_endpoint", "endpoint_id"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    event_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("webhook_events.id", ondelete="CASCADE"), nullable=False
+    )
+    endpoint_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    trigger: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="automatic", server_default="automatic"
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    request_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    request_headers: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+    event: Mapped["WebhookEvent"] = relationship()
+    endpoint: Mapped["WebhookEndpoint"] = relationship()
+
+
+class WebhookAuditLog(Base):
+    """Append-only audit trail for webhook-endpoint lifecycle actions
+    (create/update/enable/disable/rotate-secret/archive/manual-resend) --
+    deliberately separate from PlatformAuditLog (platform-admin only) and
+    a sibling, not a reuse, of OrganizationApiKeyAuditLog: mirrors that
+    table's exact shape (nullable actor/target FKs, ON DELETE SET NULL,
+    optional JSON `details` string) for the same reasons -- this table's
+    actor is an organization member, its audience is the organization
+    itself, and every FK must survive the referenced row's own deletion
+    without losing the row's meaning. Kept as its own table rather than
+    generalizing OrganizationApiKeyAuditLog because the two audit trails
+    have no natural shared query pattern (nobody lists "all API-key AND
+    webhook events together") and a shared table would need a
+    discriminator column plus nullable FKs to two different resource
+    types for no real benefit.
+    """
+
+    __tablename__ = "webhook_audit_log"
+    __table_args__ = (Index("ix_webhook_audit_log_organization", "organization_id"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    endpoint_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("webhook_endpoints.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     run_startup_migrations(engine)

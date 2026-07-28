@@ -26,6 +26,7 @@ from app.routers import (
     quote_public,
     quotes,
     team,
+    webhooks,
 )
 from app.routers.api_v1 import customers as api_v1_customers
 from app.routers.api_v1 import invoices as api_v1_invoices
@@ -97,6 +98,13 @@ app = FastAPI(
             "description": "Organization API Key authenticated. Requires the "
             "`invoices.read`/`invoices.write` key permission.",
         },
+        {
+            "name": "webhooks",
+            "description": "Browser-session authenticated (Settings → Webhooks). "
+            "Configures outbound webhook endpoints that receive a signed HTTP "
+            "POST (see the `X-Webhook-Signature` header) whenever a subscribed "
+            "event occurs -- at-least-once delivery, never exactly-once.",
+        },
     ],
 )
 app.add_middleware(
@@ -132,6 +140,7 @@ app.include_router(assistant_actions.router)
 app.include_router(platform_admin.router)
 app.include_router(public_config.router)
 app.include_router(api_key_management.router)
+app.include_router(webhooks.router)
 app.include_router(api_v1_customers.router)
 app.include_router(api_v1_products.router)
 app.include_router(api_v1_quotes.router)

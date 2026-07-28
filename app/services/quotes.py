@@ -54,7 +54,15 @@ from app.reminder_status import ReminderStatus
 from app.services.invoices import compute_invoice_totals, create_invoice_record
 from app.services.plan_limits import LimitedResource, check_limit
 from app.services.products import ProductNotFoundError, get_product_in_org
-from app.schemas import CurrencyCode, InvoiceLineItemCreate, QuoteLineItemCreate, SendQuoteEmailResponse
+from app.services.webhook_events import record_webhook_event
+from app.webhook_event_type import WebhookEventType
+from app.schemas import (
+    CurrencyCode,
+    InvoiceLineItemCreate,
+    QuoteLineItemCreate,
+    QuoteResponse,
+    SendQuoteEmailResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +247,15 @@ def create_quote_record(
         line_items=line_models,
     )
     db.add(quote)
+    db.flush()
+    record_webhook_event(
+        db,
+        organization_id=organization_id,
+        event_type=WebhookEventType.quote_created,
+        object_type="quote",
+        object_id=quote.id,
+        payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+    )
     db.commit()
     db.refresh(quote)
     return quote
@@ -349,6 +366,19 @@ def update_quote_record(
         quote.tax_amount = totals.tax_amount
         quote.total = totals.total
 
+    # Flush so freshly-replaced line_items (constructed above with no id
+    # yet) have real, persisted ids before being serialized into the
+    # webhook payload below -- QuoteResponse requires each line item's id
+    # to be a real string, never None.
+    db.flush()
+    record_webhook_event(
+        db,
+        organization_id=organization_id,
+        event_type=WebhookEventType.quote_updated,
+        object_type="quote",
+        object_id=quote.id,
+        payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+    )
     db.commit()
     db.refresh(quote)
     return quote
@@ -378,6 +408,15 @@ def delete_draft_quote_record(db: Session, quote: Quote) -> None:
     customer-facing history."""
     if quote.status != QuoteStatus.draft.value:
         raise QuoteNotDraftError(quote.id)
+    payload = QuoteResponse.model_validate(quote).model_dump(mode="json")
+    record_webhook_event(
+        db,
+        organization_id=quote.organization_id,
+        event_type=WebhookEventType.quote_deleted,
+        object_type="quote",
+        object_id=quote.id,
+        payload=payload,
+    )
     db.delete(quote)
     db.commit()
 
@@ -422,6 +461,14 @@ def mark_quote_accepted_record(db: Session, quote: Quote) -> Quote:
     accepted" action -- only legal from effective_status == sent."""
     _require_sent(quote)
     quote.status = QuoteStatus.accepted.value
+    record_webhook_event(
+        db,
+        organization_id=quote.organization_id,
+        event_type=WebhookEventType.quote_accepted,
+        object_type="quote",
+        object_id=quote.id,
+        payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+    )
     db.commit()
     db.refresh(quote)
     return quote
@@ -430,6 +477,14 @@ def mark_quote_accepted_record(db: Session, quote: Quote) -> Quote:
 def mark_quote_rejected_record(db: Session, quote: Quote) -> Quote:
     _require_sent(quote)
     quote.status = QuoteStatus.rejected.value
+    record_webhook_event(
+        db,
+        organization_id=quote.organization_id,
+        event_type=WebhookEventType.quote_rejected,
+        object_type="quote",
+        object_id=quote.id,
+        payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+    )
     db.commit()
     db.refresh(quote)
     return quote
@@ -476,6 +531,23 @@ def convert_quote_to_invoice(
 
     quote.status = QuoteStatus.converted.value
     quote.converted_invoice_id = invoice.id
+    # A genuinely separate, second transaction from the "invoice.created"
+    # event already emitted inside create_invoice_record above (see this
+    # phase's transaction-boundary analysis: create_invoice_record commits
+    # on its own, before control ever returns here) -- "quote.converted"
+    # is its own real, independently-atomic domain transition, not a
+    # duplicate of invoice creation.
+    record_webhook_event(
+        db,
+        organization_id=organization_id,
+        event_type=WebhookEventType.quote_converted,
+        object_type="quote",
+        object_id=quote.id,
+        payload={
+            **QuoteResponse.model_validate(quote).model_dump(mode="json"),
+            "converted_invoice_id": invoice.id,
+        },
+    )
     db.commit()
     db.refresh(quote)
     db.refresh(invoice)
@@ -526,6 +598,14 @@ def send_quote_record(db: Session, quote: Quote) -> SendQuoteEmailResponse:
     # sending an already-sent quote is a harmless no-op status-wise.
     if quote.status == QuoteStatus.draft.value:
         quote.status = QuoteStatus.sent.value
+        record_webhook_event(
+            db,
+            organization_id=quote.organization_id,
+            event_type=WebhookEventType.quote_sent,
+            object_type="quote",
+            object_id=quote.id,
+            payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+        )
         db.commit()
         db.refresh(quote)
 

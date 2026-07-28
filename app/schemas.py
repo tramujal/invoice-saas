@@ -37,6 +37,9 @@ from app.reminder_settings import (
 from app.reminder_type import ReminderType
 from app.security import PASSWORD_POLICY_MESSAGE, password_meets_policy
 from app.user_status import UserStatus
+from app.webhook_delivery_status import WebhookDeliveryStatus
+from app.webhook_delivery_trigger import WebhookDeliveryTrigger
+from app.webhook_event_type import WebhookEventType, event_domain
 
 _VALID_TIMEZONES = available_timezones()
 
@@ -1760,3 +1763,145 @@ class ApiKeyCreatedResponse(ApiKeyResponse):
     endpoints. Never returned by GET/list; there is no "reveal" route."""
 
     api_key: str
+
+
+# --- Webhooks (Phase 15B) --------------------------------------------------
+
+_WEBHOOK_EVENT_VALUES = {e.value for e in WebhookEventType}
+_WEBHOOK_WILDCARD = "*"
+
+
+def _validate_subscribed_events(value: list[str]) -> list[str]:
+    for item in value:
+        if item != _WEBHOOK_WILDCARD and item not in _WEBHOOK_EVENT_VALUES:
+            raise ValueError(f"Unknown webhook event type: {item}")
+    return value
+
+
+class WebhookEventCatalogEntry(BaseModel):
+    """One row of the static, complete event catalog (GET
+    /organizations/{id}/webhooks/event-types) -- the frontend's
+    event-subscription selector groups by `domain` rather than
+    hardcoding its own copy of app.webhook_event_type.WebhookEventType,
+    so a new event type added there is picked up automatically."""
+
+    event_type: str
+    domain: str
+
+
+class WebhookEndpointCreateRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+    description: str = Field(default="", max_length=500)
+    # At least one selection is required -- an endpoint subscribed to
+    # nothing would be silent, dead configuration; "*" is a valid single
+    # entry meaning "every event type, including future ones" (see
+    # app.services.webhook_endpoints._encode_events).
+    subscribed_events: list[str] = Field(min_length=1)
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url_scheme(cls, value: str) -> str:
+        if not (value.startswith("https://") or value.startswith("http://")):
+            raise ValueError("url must start with https:// (or http:// in local development)")
+        return value
+
+    @field_validator("subscribed_events")
+    @classmethod
+    def _validate_events(cls, value: list[str]) -> list[str]:
+        return _validate_subscribed_events(value)
+
+
+class WebhookEndpointUpdateRequest(BaseModel):
+    """Partial update -- only fields explicitly set by the caller are
+    applied (see app.services.webhook_endpoints.update_endpoint, which
+    disambiguates "not given" from "given as empty" via the router's own
+    `model_fields_set` check, the same _UNSET-sentinel problem
+    app.services.quotes.update_quote_record solves)."""
+
+    url: str | None = Field(default=None, max_length=2048)
+    description: str | None = Field(default=None, max_length=500)
+    subscribed_events: list[str] | None = Field(default=None, min_length=1)
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url_scheme(cls, value: str | None) -> str | None:
+        if value is not None and not (value.startswith("https://") or value.startswith("http://")):
+            raise ValueError("url must start with https:// (or http:// in local development)")
+        return value
+
+    @field_validator("subscribed_events")
+    @classmethod
+    def _validate_events(cls, value: list[str] | None) -> list[str] | None:
+        return _validate_subscribed_events(value) if value is not None else None
+
+
+class WebhookEndpointResponse(BaseModel):
+    """Never includes `secret` -- see WebhookEndpoint's own docstring in
+    app/models.py. `subscribed_events` is decoded here from the row's
+    JSON-encoded column into a real typed list (which may be exactly
+    `["*"]`), matching ApiKeyResponse's own decode-at-the-boundary
+    convention."""
+
+    id: str
+    organization_id: str
+    url: str
+    description: str
+    subscribed_events: list[str]
+    enabled: bool
+    active: bool
+    created_by: str | None
+    created_at: datetime
+    updated_at: datetime
+    last_rotated_at: datetime | None
+
+
+class WebhookEndpointCreatedResponse(WebhookEndpointResponse):
+    """The one and only response shape that ever carries the complete
+    signing secret -- returned exactly once, from the create and
+    rotate-secret endpoints. Never returned by GET/list."""
+
+    secret: str
+
+
+class WebhookEventResponse(BaseModel):
+    id: str
+    organization_id: str
+    event_type: str
+    object_type: str
+    object_id: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+
+class WebhookDeliveryResponse(BaseModel):
+    id: str
+    organization_id: str
+    event_id: str
+    endpoint_id: str
+    status: WebhookDeliveryStatus
+    trigger: WebhookDeliveryTrigger
+    attempt_number: int
+    request_url: str
+    response_status_code: int | None
+    response_body_snippet: str | None
+    error_message: str | None
+    duration_ms: int | None
+    attempted_at: datetime | None
+    next_retry_at: datetime | None
+    created_at: datetime
+
+
+class PaginatedWebhookDeliveriesResponse(BaseModel):
+    total: int
+    items: list[WebhookDeliveryResponse]
+
+
+class WebhookDeliveryDetailResponse(WebhookDeliveryResponse):
+    """Adds the signed request headers (safe to show -- see
+    app.services.webhook_deliveries._headers_for_storage's own docstring:
+    it's a computed signature, never the secret itself) and the full
+    triggering event, so the delivery-detail view can show payload +
+    response side by side without a second request."""
+
+    request_headers: dict[str, str] | None
+    event: WebhookEventResponse

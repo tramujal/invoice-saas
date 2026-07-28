@@ -17,7 +17,10 @@ from app.imports.validation import validate_row_fields
 from app.localization import get_language, t
 from app.models import Organization, Product
 from app.product_type import ProductType
+from app.schemas import ProductResponse
 from app.services.plan_limits import LimitedResource, check_limit
+from app.services.webhook_events import record_webhook_event
+from app.webhook_event_type import WebhookEventType
 
 REASON_INVALID_PRICE = "invalid_price"
 REASON_INVALID_TAX_RATE = "invalid_tax_rate"
@@ -187,6 +190,14 @@ def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]],
         )
         db.add(product)
         db.flush()
+        record_webhook_event(
+            db,
+            organization_id=organization_id,
+            event_type=WebhookEventType.product_created,
+            object_type="product",
+            object_id=product.id,
+            payload=ProductResponse.model_validate(product).model_dump(mode="json"),
+        )
 
     return persist
 
