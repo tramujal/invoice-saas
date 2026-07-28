@@ -168,7 +168,7 @@ def _validate_line_item_products(
 def create_quote_record(
     db: Session,
     organization_id: str,
-    current_user: User,
+    current_user: User | None,
     customer: Customer | None,
     currency_code: CurrencyCode | None,
     line_items: list[QuoteLineItemCreate],
@@ -179,7 +179,12 @@ def create_quote_record(
     """The actual DB write: numbering-locked, currency/language pinned at
     creation time, exactly mirroring create_invoice_record. Totals are
     always recomputed here from `line_items` -- never accepted as a
-    parameter."""
+    parameter.
+
+    current_user is None when this is called on behalf of an API key
+    (see app.routers.api_v1.quotes) rather than a browser session -- a
+    key is not a person, so created_by_user_id is correctly left NULL
+    for API-created quotes, matching that column's existing nullability."""
     check_limit(db, organization_id, LimitedResource.quotes)
     resolved_products_by_id = _validate_line_item_products(db, organization_id, line_items)
 
@@ -219,7 +224,7 @@ def create_quote_record(
     quote = Quote(
         organization_id=organization_id,
         quote_number=quote_number,
-        created_by_user_id=current_user.id,
+        created_by_user_id=current_user.id if current_user else None,
         customer_id=customer.id if customer else None,
         subtotal=totals.subtotal,
         tax_rate=tax_rate,

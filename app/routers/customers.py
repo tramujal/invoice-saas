@@ -13,7 +13,14 @@ from app.schemas import (
     CustomerUpdateRequest,
     SortDirection,
 )
-from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
+from app.services.customers import (
+    CustomerNotFoundError,
+    create_customer_record,
+    delete_customer_record,
+    get_customer_in_org,
+    update_customer_record,
+)
+from app.services.plan_limits import PlanLimitExceededError
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/customers", tags=["customers"]
@@ -26,19 +33,14 @@ _SORT_COLUMNS: dict[CustomerSortField, ColumnElement] = {
 }
 
 
-def _customer_in_org(db: Session, organization_id: str, customer_id: str) -> Customer:
-    customer = db.scalar(
-        select(Customer).where(
-            Customer.id == customer_id,
-            Customer.organization_id == organization_id,
-        )
-    )
-    if customer is None:
+def _customer_or_404(db: Session, organization_id: str, customer_id: str) -> Customer:
+    try:
+        return get_customer_in_org(db, organization_id, customer_id)
+    except CustomerNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Customer not found",
         )
-    return customer
 
 
 @router.post("", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
@@ -51,21 +53,11 @@ def create_customer(
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
     try:
-        check_limit(db, organization_id, LimitedResource.customers)
+        return create_customer_record(
+            db, organization_id, body.name, body.email, body.phone, body.address, body.tax_id
+        )
     except PlanLimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
-    customer = Customer(
-        organization_id=organization_id,
-        name=body.name,
-        email=body.email,
-        phone=body.phone,
-        address=body.address,
-        tax_id=body.tax_id,
-    )
-    db.add(customer)
-    db.commit()
-    db.refresh(customer)
-    return customer
 
 
 @router.get("", response_model=list[CustomerResponse])
@@ -107,14 +99,8 @@ def update_customer(
 ) -> Customer:
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
-    customer = _customer_in_org(db, organization_id, customer_id)
-    for key, value in body.model_dump(exclude_unset=True).items():
-        if value is None:
-            continue
-        setattr(customer, key, value)
-    db.commit()
-    db.refresh(customer)
-    return customer
+    customer = _customer_or_404(db, organization_id, customer_id)
+    return update_customer_record(db, customer, body.model_dump(exclude_unset=True))
 
 
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -126,7 +112,6 @@ def delete_customer(
 ) -> Response:
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
-    customer = _customer_in_org(db, organization_id, customer_id)
-    db.delete(customer)
-    db.commit()
+    customer = _customer_or_404(db, organization_id, customer_id)
+    delete_customer_record(db, customer)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

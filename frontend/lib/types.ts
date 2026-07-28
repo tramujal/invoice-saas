@@ -983,3 +983,61 @@ export type PaginatedPlatformAuditLog = {
   total: number;
   items: PlatformAuditLogEntry[];
 };
+
+// Phase 15A -- Organization API Keys. The wire-facing permission strings
+// match app.api_key_permissions.ApiKeyPermission exactly (dotted,
+// plural-noun form -- "customers.read", not "customer.read" like the
+// browser-session Permission enum).
+export type ApiKeyPermission =
+  | "customers.read"
+  | "customers.write"
+  | "products.read"
+  | "products.write"
+  | "quotes.read"
+  | "quotes.write"
+  | "invoices.read"
+  | "invoices.write"
+  | "assistant.execute";
+
+export const API_KEY_PERMISSIONS: ApiKeyPermission[] = [
+  "customers.read",
+  "customers.write",
+  "products.read",
+  "products.write",
+  "quotes.read",
+  "quotes.write",
+  "invoices.read",
+  "invoices.write",
+  "assistant.execute",
+];
+
+export type ApiKeyStatus = "active" | "revoked" | "expired";
+
+export type ApiKey = {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string;
+  prefix: string;
+  permissions: ApiKeyPermission[];
+  status: ApiKeyStatus;
+  created_by: string | null;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  revoked_at: string | null;
+  revoked_by: string | null;
+};
+
+/** Only ever returned by create/rotate -- the one and only time the
+ * complete, usable secret exists in a response body. Never returned by
+ * GET/list. */
+export type ApiKeyCreated = ApiKey & { api_key: string };
+
+export type ApiKeyCreateRequest = {
+  name: string;
+  description: string;
+  permissions: ApiKeyPermission[];
+  expires_at: string | null;
+};

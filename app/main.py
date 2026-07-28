@@ -7,6 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.models import init_db
 from app.routers import (
+    api_key_management,
     assistant,
     assistant_actions,
     auth,
@@ -26,6 +27,10 @@ from app.routers import (
     quotes,
     team,
 )
+from app.routers.api_v1 import customers as api_v1_customers
+from app.routers.api_v1 import invoices as api_v1_invoices
+from app.routers.api_v1 import products as api_v1_products
+from app.routers.api_v1 import quotes as api_v1_quotes
 
 # Without this, the root logger has no handler at all: WARNING+ messages
 # only reach the console via Python's undocumented `logging.lastResort`
@@ -60,7 +65,40 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Invoices API", lifespan=lifespan)
+app = FastAPI(
+    title="Invoices API",
+    version="1.0.0",
+    lifespan=lifespan,
+    description=(
+        "The browser-facing application API is unversioned and requires a "
+        "logged-in session. The **public REST API** for third-party "
+        "integrations lives under `/api/v1` and is authenticated with an "
+        "**Organization API Key** instead (`Authorization: Bearer sk_...`, "
+        "see Settings → API Keys) -- see the `Public API — *` tags below."
+    ),
+    openapi_tags=[
+        {
+            "name": "Public API — Customers",
+            "description": "Organization API Key authenticated. Requires the "
+            "`customers.read`/`customers.write` key permission.",
+        },
+        {
+            "name": "Public API — Products",
+            "description": "Organization API Key authenticated. Requires the "
+            "`products.read`/`products.write` key permission.",
+        },
+        {
+            "name": "Public API — Quotes",
+            "description": "Organization API Key authenticated. Requires the "
+            "`quotes.read`/`quotes.write` key permission.",
+        },
+        {
+            "name": "Public API — Invoices",
+            "description": "Organization API Key authenticated. Requires the "
+            "`invoices.read`/`invoices.write` key permission.",
+        },
+    ],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -93,3 +131,8 @@ app.include_router(assistant.router)
 app.include_router(assistant_actions.router)
 app.include_router(platform_admin.router)
 app.include_router(public_config.router)
+app.include_router(api_key_management.router)
+app.include_router(api_v1_customers.router)
+app.include_router(api_v1_products.router)
+app.include_router(api_v1_quotes.router)
+app.include_router(api_v1_invoices.router)

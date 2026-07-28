@@ -9,11 +9,11 @@ const TABS = [
   { href: "/settings", labelKey: "settingsNav.organization" },
   { href: "/settings/team", labelKey: "settingsNav.team" },
   { href: "/settings/plan", labelKey: "settingsNav.plan" },
+  { href: "/settings/api-keys", labelKey: "settingsNav.apiKeys" },
 ] as const;
 
-/** The only tab UI this page has ever had -- kept intentionally minimal
- * (2 links, no framework) rather than building a general-purpose tabs
- * component for a settings page that has no other sub-sections planned. */
+/** Kept intentionally minimal (a handful of links, no framework) rather
+ * than building a general-purpose tabs component. */
 export function SettingsSubNav() {
   const { t } = useTranslation();
   const pathname = usePathname();

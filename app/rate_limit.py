@@ -245,6 +245,10 @@ def user_ip_identity(request: Request, user_id: str) -> str:
     return f"user:{user_id}:ip:{get_client_ip(request)}"
 
 
+def api_key_identity(api_key_id: str) -> str:
+    return f"apikey:{api_key_id}"
+
+
 def email_identity(email: str) -> str:
     """`email` must already be normalized (trimmed/lowercased — see
     schemas._normalize_email) so the same account can't dodge this bucket
@@ -303,3 +307,34 @@ INVITATION_PUBLIC_VIEW_RULES = (
     RateLimitRule(limit=200, window_seconds=3600),
 )
 INVITATION_PUBLIC_ACCEPT_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
+# Public API (/api/v1) -- two independent, differently-scoped limits,
+# checked at two different points in app.api_key_auth.get_api_key_context:
+#
+# API_KEY_AUTH_IP_RULES is IP-scoped and applied on EVERY request before
+# the credential is even parsed (same "checked regardless of outcome"
+# rationale as LOGIN_IP_RULES -- the rate limiter itself must never
+# become a second timing/enumeration side channel by only firing on
+# failure). Deliberately much more generous than LOGIN_IP_RULES,
+# though: a login rate limit exists to slow brute-forcing a small,
+# guessable keyspace (real emails x common passwords). An API key's
+# secret is a 256-bit random value behind a 72-bit random prefix lookup
+# -- brute-forcing that is already computationally infeasible regardless
+# of any rate limit this app could impose, so a tight IP bucket here
+# would mostly just add friction to legitimate high-frequency machine
+# traffic (the entire point of a public API) without a meaningful
+# security gain. This bucket instead exists to catch grossly anomalous
+# scripted abuse, not to be the primary defense.
+#
+# API_KEY_REQUEST_RULES is checked only AFTER a request authenticates
+# successfully, scoped by api_key_id (not IP) -- protects against one
+# compromised-but-still-valid key being used to hammer the API, and
+# correctly does not penalize multiple distinct legitimate keys that
+# happen to share an egress IP (e.g. behind corporate NAT). A single
+# generous per-minute bucket per key, not a per-scope/per-endpoint
+# matrix, for this first version.
+API_KEY_AUTH_IP_RULES = (
+    RateLimitRule(limit=30, window_seconds=60),
+    RateLimitRule(limit=300, window_seconds=3600),
+)
+API_KEY_REQUEST_RULES = (RateLimitRule(limit=120, window_seconds=60),)

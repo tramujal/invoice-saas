@@ -45,6 +45,8 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_plans_table(engine)
     _seed_default_plans(engine)
     _add_organization_plan_id(engine)
+    _add_organization_api_keys_table(engine)
+    _add_organization_api_key_audit_log_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1055,6 +1057,74 @@ def _add_organization_plan_id(engine: Engine) -> None:
             text(
                 f"ALTER TABLE organizations ADD COLUMN plan_id CHAR(36) "
                 f"NOT NULL DEFAULT 'plan_free'{references_clause}"
+            )
+        )
+
+
+def _add_organization_api_keys_table(engine: Engine) -> None:
+    """Creates organization_api_keys if it's missing -- same idempotent
+    safety net as _add_plans_table (Base.metadata.create_all() already
+    creates this table on a fresh database since OrganizationApiKey is a
+    declared model)."""
+    inspector = inspect(engine)
+    if "organization_api_keys" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS organization_api_keys ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "name VARCHAR(100) NOT NULL, "
+                "description VARCHAR(500) NOT NULL DEFAULT '', "
+                "prefix VARCHAR(32) NOT NULL UNIQUE, "
+                "hashed_secret VARCHAR(64) NOT NULL, "
+                "permissions TEXT NOT NULL DEFAULT '[]', "
+                "created_by CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "expires_at TIMESTAMP NULL, "
+                "last_used_at TIMESTAMP NULL, "
+                "last_used_ip VARCHAR(64) NULL, "
+                "revoked_at TIMESTAMP NULL, "
+                "revoked_by CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_organization_api_keys_organization "
+                "ON organization_api_keys (organization_id)"
+            )
+        )
+
+
+def _add_organization_api_key_audit_log_table(engine: Engine) -> None:
+    """Creates organization_api_key_audit_log if it's missing -- same
+    idempotent safety net as _add_organization_api_keys_table. Must run
+    after _add_organization_api_keys_table since api_key_id references
+    that table."""
+    inspector = inspect(engine)
+    if "organization_api_key_audit_log" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS organization_api_key_audit_log ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "api_key_id CHAR(36) NULL REFERENCES organization_api_keys(id) ON DELETE SET NULL, "
+                "actor_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "action VARCHAR(64) NOT NULL, "
+                "details TEXT NULL, "
+                "client_ip VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_org_api_key_audit_log_organization "
+                "ON organization_api_key_audit_log (organization_id)"
             )
         )
 

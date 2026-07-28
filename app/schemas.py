@@ -12,6 +12,8 @@ from app.ai.limits import (
     AI_MAX_HISTORY_TOTAL_CHARS,
     AI_MAX_USER_MESSAGE_LENGTH,
 )
+from app.api_key_permissions import ApiKeyPermission
+from app.api_key_status import ApiKeyStatus
 from app.customer_validation import is_valid_email_format
 from app.insights.limits import (
     INSIGHTS_MAX_MESSAGE_LENGTH,
@@ -1720,3 +1722,41 @@ class PlatformAuditLogEntry(BaseModel):
 class PaginatedPlatformAuditLogResponse(BaseModel):
     total: int
     items: list[PlatformAuditLogEntry]
+
+
+class ApiKeyCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+    permissions: list[ApiKeyPermission] = Field(min_length=1)
+    expires_at: datetime | None = None
+
+
+class ApiKeyResponse(BaseModel):
+    """Never includes the secret -- see OrganizationApiKey's own
+    docstring. `status` is computed (app.api_key_status), not a stored
+    column; `permissions` is decoded here from the row's JSON-encoded
+    column into a real typed list, so API consumers never see the
+    storage-level string representation."""
+
+    id: str
+    organization_id: str
+    name: str
+    description: str
+    prefix: str
+    permissions: list[ApiKeyPermission]
+    status: ApiKeyStatus
+    created_by: str | None
+    created_at: datetime
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    last_used_ip: str | None
+    revoked_at: datetime | None
+    revoked_by: str | None
+
+
+class ApiKeyCreatedResponse(ApiKeyResponse):
+    """The one and only response shape that ever carries the complete,
+    usable key -- returned exactly once, from the create and rotate
+    endpoints. Never returned by GET/list; there is no "reveal" route."""
+
+    api_key: str

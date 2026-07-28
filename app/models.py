@@ -1104,6 +1104,106 @@ class PlatformSettings(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class OrganizationApiKey(Base):
+    """One organization-scoped credential for the public REST API (see
+    app.api_key_auth / app/routers/api_v1) -- deliberately separate from
+    the browser session model (User + JWT): a key authenticates as "this
+    organization, with these scopes," never as a specific human user.
+
+    The complete secret exists only once, at creation/rotation time, in
+    the response body -- never persisted, never logged, never
+    recoverable afterward. Only `prefix` (a plaintext lookup key, not a
+    secret on its own) and `hashed_secret` (SHA-256, see app.api_keys)
+    are stored. See app.api_keys's module docstring for the full key
+    format and the rationale for a fast hash over bcrypt here.
+
+    `status` is deliberately NOT a column -- see app.api_key_status:
+    effective status is always derived from revoked_at/expires_at, the
+    same "one source of truth, never a redundant flag" principle
+    Product.active already follows for this codebase's other lifecycle
+    states.
+
+    `permissions` is a JSON-encoded list of app.api_key_permissions
+    .ApiKeyPermission values -- a plain TEXT column, not a native JSON
+    type, matching PlatformAuditLog.details's exact portability
+    rationale (works identically on SQLite and Postgres).
+
+    Rotation (see app.services.organization_api_keys.rotate_api_key)
+    revokes this row and creates a brand new one -- it never mutates an
+    existing row's prefix/hashed_secret in place, so a key's own history
+    (created_at, last_used_at up to the moment of rotation) is preserved
+    exactly as it happened, never rewritten.
+    """
+
+    __tablename__ = "organization_api_keys"
+    __table_args__ = (Index("ix_organization_api_keys_organization", "organization_id"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    prefix: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    hashed_secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    permissions: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    organization: Mapped["Organization"] = relationship()
+
+
+class OrganizationApiKeyAuditLog(Base):
+    """Append-only audit trail for API-key lifecycle and authentication
+    events (see app.services.organization_api_key_audit) -- deliberately
+    separate from PlatformAuditLog, which is scoped exclusively to
+    platform-admin (super-admin) actions and requires a User actor for
+    every row. Neither of those holds for this table: its actor is an
+    organization member OR nothing at all (an authentication failure,
+    e.g. a revoked/expired key being presented, has no authenticated
+    actor by definition), and its audience is the organization itself,
+    not platform staff.
+
+    api_key_id is nullable + ON DELETE SET NULL (matching every other
+    audit-adjacent FK in this codebase) so a row about a key that no
+    longer exists still means something -- but keys are never hard
+    deleted in practice (see OrganizationApiKey's own docstring: rotation
+    revokes, never deletes), so this is a safety net, not the normal
+    path. actor_user_id is nullable for the same reason (auth failures).
+    """
+
+    __tablename__ = "organization_api_key_audit_log"
+    __table_args__ = (Index("ix_org_api_key_audit_log_organization", "organization_id"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    api_key_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("organization_api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     run_startup_migrations(engine)

@@ -169,7 +169,7 @@ def get_customer_in_org(db: Session, organization_id: str, customer_id: str) -> 
 def create_invoice_record(
     db: Session,
     organization_id: str,
-    current_user: User,
+    current_user: User | None,
     customer: Customer | None,
     currency_code: CurrencyCode | None,
     line_items: list[InvoiceLineItemCreate],
@@ -186,7 +186,13 @@ def create_invoice_record(
     invoice -- see Invoice.due_date / app.effective_status. When given, it
     must not be before the organization's local today (see
     app.org_time.get_organization_today); this is the only validation
-    performed here, since a due date has no other constraints."""
+    performed here, since a due date has no other constraints.
+
+    current_user is None when this is called on behalf of an API key
+    (see app.routers.api_v1.invoices) rather than a browser session -- a
+    key is not a person, so created_by_user_id is correctly left NULL
+    for API-created invoices, matching that column's existing
+    nullability."""
     check_limit(db, organization_id, LimitedResource.invoices)
     # A line's product_id is purely an analytics tag (see
     # InvoiceLineItem.product_id's docstring) -- validated to resolve
@@ -242,7 +248,7 @@ def create_invoice_record(
     invoice = Invoice(
         organization_id=organization_id,
         invoice_number=invoice_number,
-        created_by_user_id=current_user.id,
+        created_by_user_id=current_user.id if current_user else None,
         customer_id=customer.id if customer else None,
         subtotal=totals.subtotal,
         tax_amount=totals.tax_amount,
