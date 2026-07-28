@@ -105,6 +105,36 @@ def record_settings_action(
     return entry
 
 
+def record_job_action(
+    db: Session,
+    *,
+    actor: User,
+    action: PlatformAuditAction,
+    reason: str,
+    client_ip: str | None,
+    details: dict | None = None,
+) -> PlatformAuditLog:
+    """Sibling of record_settings_action for the background_job_retried/
+    background_job_cancelled operational actions (see
+    app.routers.platform_admin's job-detail endpoints) -- a
+    BackgroundJob is neither an Organization nor a User, so both target
+    columns stay at their "not applicable" defaults; `details` carries
+    {"job_id": ..., "job_type": ..., "organization_id": ...} for context.
+    Never includes a job's own `payload` or `last_error_message` here --
+    this is an audit of the ADMIN ACTION taken, not a copy of the job
+    row itself."""
+    entry = PlatformAuditLog(
+        actor_user_id=actor.id,
+        actor_email=actor.email,
+        action=action.value,
+        reason=reason,
+        details=json.dumps(details) if details is not None else None,
+        client_ip=client_ip,
+    )
+    db.add(entry)
+    return entry
+
+
 def record_plan_action(
     db: Session,
     *,

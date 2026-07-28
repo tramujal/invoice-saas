@@ -1727,6 +1727,53 @@ class PaginatedPlatformAuditLogResponse(BaseModel):
     items: list[PlatformAuditLogEntry]
 
 
+class PlatformBackgroundJobEntry(BaseModel):
+    """One BackgroundJob row for the Platform Admin Jobs view -- never
+    includes `payload` (see PlatformBackgroundJobDetail below for the
+    one place that does, gated behind the detail endpoint rather than
+    the list, matching PlatformAuditLogEntry's own "list is a summary,
+    detail has more" precedent). Every job type's payload is already
+    documented as containing only IDs/validated data, never a secret
+    (see BackgroundJob.payload's own docstring in app/models.py), so
+    this isn't a security gate so much as keeping the list response
+    small."""
+
+    id: str
+    organization_id: str | None
+    job_type: str
+    status: str
+    queue: str
+    priority: int
+    attempts: int
+    max_attempts: int
+    available_at: datetime
+    claimed_at: datetime | None
+    claimed_by: str | None
+    lease_expires_at: datetime | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    failed_at: datetime | None
+    last_error_code: str | None
+    last_error_message: str | None
+    result_summary: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlatformBackgroundJobDetail(PlatformBackgroundJobEntry):
+    payload: dict[str, Any]
+    idempotency_key: str | None
+
+
+class PaginatedPlatformBackgroundJobsResponse(BaseModel):
+    total: int
+    items: list[PlatformBackgroundJobEntry]
+
+
+class PlatformJobActionRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class ApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=500)

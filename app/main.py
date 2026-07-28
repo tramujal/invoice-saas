@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
+import app.jobs.bootstrap  # noqa: F401 -- populates the background-job registry
 from app.models import init_db
 from app.routers import (
     api_key_management,

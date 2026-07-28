@@ -20,6 +20,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
+from app.job_status import JobStatus
 from app.membership_role import MembershipRole
 from app.membership_status import MembershipStatus
 from app.organization_status import OrganizationStatus
@@ -1428,6 +1429,104 @@ class WebhookAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class BackgroundJob(Base):
+    """One durable unit of asynchronous work -- the entire Phase 15C job
+    queue lives in this single table (see app.services.background_jobs
+    for enqueue/claim/lease/recovery, and app.jobs.registry for the
+    closed, server-side job-type vocabulary this row's `job_type` must
+    belong to). This table IS the durable dispatch mechanism: a row
+    persisted in the same transaction as a business mutation (see
+    app.services.webhook_events.record_webhook_event) is what replaces
+    Phase 15B's non-durable Session.after_commit + ThreadPoolExecutor
+    chain -- if the transaction that adds this row never commits, the
+    job never existed, exactly like WebhookEvent/WebhookDelivery.
+
+    `payload` is a JSON-encoded, schema-validated (per job_type, see
+    app.jobs.registry) string -- never a pickle, never a Python callable,
+    never an import path. It contains only IDs and small validated data
+    (e.g. `{"delivery_id": "..."}` for webhook.deliver); a handler always
+    re-fetches and re-validates the referenced rows itself rather than
+    trusting anything embedded here, exactly like AssistantAction
+    .input_payload's own "already-validated, already-resolved" contract.
+
+    `organization_id` is nullable -- most jobs today (webhook delivery)
+    are tenant-scoped, but the column exists to support a future
+    platform-wide job (e.g. a maintenance sweep) without a schema change.
+    It is never used for authorization by the worker itself (the worker
+    is an internal trusted process operating across all tenants by
+    design); it exists purely for Platform Admin filtering/observability.
+
+    Claim/lease fields (`claimed_at`, `claimed_by`, `lease_expires_at`)
+    are the ONLY source of truth for "who currently owns this job" -- see
+    app.services.background_jobs.claim_jobs for the atomic conditional
+    UPDATE that sets them, and recover_abandoned_jobs for how an expired
+    lease returns a row to an executable state after a worker crash.
+
+    `idempotency_key` is nullable + unique (NULL values never collide,
+    per standard SQL unique-constraint semantics on both SQLite and
+    Postgres) -- used to make a specific logical enqueue ("deliver this
+    exact WebhookDelivery") impossible to duplicate at the database
+    level, not just by an application-level check (see
+    app.services.background_jobs.enqueue_job).
+
+    `attempts`/`max_attempts` count EXECUTION attempts of this one job
+    row (crash/lease-expiry resilience: how many times a worker tried
+    and failed to even finish running this job before it's given up on
+    entirely) -- a deliberately small, generic ceiling with no knowledge
+    of any particular job type's own domain retry policy. This is NOT
+    the webhook delivery backoff schedule: that's a completely separate,
+    domain-level concept enforced by the webhook.retry handler itself
+    (see app.jobs.handlers.webhook, which checks WebhookDelivery
+    .attempt_number against its own ceiling and decides whether to chain
+    another webhook.retry job) -- conflating the two would mean a worker
+    crash-looping on a buggy handler and a third-party endpoint being
+    down for a day would consume from the same counter, which is wrong
+    for both.
+    """
+
+    __tablename__ = "background_jobs"
+    __table_args__ = (
+        Index("ix_background_jobs_claim_scan", "status", "queue", "available_at"),
+        Index("ix_background_jobs_organization", "organization_id"),
+        Index("ix_background_jobs_lease", "status", "lease_expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
+    )
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=JobStatus.pending.value, server_default=JobStatus.pending.value
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    queue: Mapped[str] = mapped_column(String(32), nullable=False, default="default", server_default="default")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    result_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization | None"] = relationship()
 
 
 def init_db() -> None:

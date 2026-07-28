@@ -21,6 +21,7 @@ const links = [
   { href: "/admin/plans", labelKey: "adminNav.plans" },
   { href: "/admin/users", labelKey: "adminNav.users" },
   { href: "/admin/system-health", labelKey: "adminNav.systemHealth" },
+  { href: "/admin/jobs", labelKey: "adminNav.jobs" },
   { href: "/admin/audit-log", labelKey: "adminNav.auditLog" },
   { href: "/admin/settings", labelKey: "adminNav.settings" },
 ] as const;

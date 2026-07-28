@@ -20,6 +20,7 @@ has its own created_at column, and there is deliberately no
 "last_login_at" (never tracked anywhere).
 """
 
+import json
 import os
 from datetime import date, datetime, timedelta, timezone
 
@@ -37,6 +38,7 @@ from app.membership_status import MembershipStatus
 from app.models import (
     PLATFORM_SETTINGS_SINGLETON_ID,
     AssistantAction,
+    BackgroundJob,
     Customer,
     Invoice,
     InvoiceReminder,
@@ -62,6 +64,7 @@ from app.schemas import (
     OrganizationPlanChangeRequest,
     OrganizationUsageResponse,
     PaginatedPlatformAuditLogResponse,
+    PaginatedPlatformBackgroundJobsResponse,
     PaginatedPlatformOrganizationsResponse,
     PaginatedPlatformUsersResponse,
     PlanActionRequest,
@@ -72,7 +75,10 @@ from app.schemas import (
     PlansListResponse,
     PlanUpdateRequest,
     PlatformAuditLogEntry,
+    PlatformBackgroundJobDetail,
+    PlatformBackgroundJobEntry,
     PlatformDashboardResponse,
+    PlatformJobActionRequest,
     PlatformOrganizationActionRequest,
     PlatformOrganizationDetail,
     PlatformOrganizationMember,
@@ -89,11 +95,15 @@ from app.schemas import (
     PlatformUserSummary,
     UsageResourceSnapshot,
 )
+from app.job_status import JobStatus
+from app.job_type import JobType
+from app.services.background_jobs import enqueue_job
 from app.services.entitlements import get_default_plan
 from app.services.organization_usage import ResourceUsage, get_usage_snapshot
 from app.services.webhook_events import record_webhook_event
 from app.webhook_event_type import WebhookEventType
 from app.services.platform_audit import (
+    record_job_action,
     record_organization_action,
     record_plan_action,
     record_settings_action,
@@ -1610,3 +1620,185 @@ def list_platform_audit_log(
     return PaginatedPlatformAuditLogResponse(
         total=total, items=[_audit_log_entry(row) for row in rows]
     )
+
+
+# --- Background Jobs (Phase 15C) --------------------------------------------
+#
+# Platform-wide, cross-tenant operational visibility into the durable job
+# queue -- deliberately separate from the per-organization Webhook
+# Delivery History UI (app.routers.webhooks), which tenant users keep
+# using for their own webhook history. This view exists for operators
+# debugging queue health/stuck jobs, never as a replacement for that
+# tenant-facing surface.
+
+_JOB_CANCELLABLE_STATUSES = {JobStatus.pending.value, JobStatus.retry_scheduled.value}
+_JOB_RETRYABLE_STATUSES = {JobStatus.permanently_failed.value, JobStatus.cancelled.value}
+
+
+def _job_or_404(db: Session, job_id: str) -> BackgroundJob:
+    job = db.get(BackgroundJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Background job not found")
+    return job
+
+
+def _job_entry(job: BackgroundJob) -> PlatformBackgroundJobEntry:
+    return PlatformBackgroundJobEntry(
+        id=job.id,
+        organization_id=job.organization_id,
+        job_type=job.job_type,
+        status=job.status,
+        queue=job.queue,
+        priority=job.priority,
+        attempts=job.attempts,
+        max_attempts=job.max_attempts,
+        available_at=job.available_at,
+        claimed_at=job.claimed_at,
+        claimed_by=job.claimed_by,
+        lease_expires_at=job.lease_expires_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        failed_at=job.failed_at,
+        last_error_code=job.last_error_code,
+        last_error_message=job.last_error_message,
+        result_summary=job.result_summary,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+@router.get("/jobs", response_model=PaginatedPlatformBackgroundJobsResponse)
+def list_platform_background_jobs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status_filter: str | None = Query(default=None, alias="status"),
+    job_type: str | None = Query(default=None),
+    organization_id: str | None = Query(default=None),
+) -> PaginatedPlatformBackgroundJobsResponse:
+    require_platform_permission(current_user, PlatformPermission.jobs_view)
+
+    base_query = select(BackgroundJob)
+    if status_filter:
+        base_query = base_query.where(BackgroundJob.status == status_filter)
+    if job_type:
+        base_query = base_query.where(BackgroundJob.job_type == job_type)
+    if organization_id:
+        base_query = base_query.where(BackgroundJob.organization_id == organization_id)
+
+    total = db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
+    rows = db.scalars(
+        base_query.order_by(BackgroundJob.created_at.desc()).limit(limit).offset(offset)
+    ).all()
+
+    return PaginatedPlatformBackgroundJobsResponse(total=total, items=[_job_entry(j) for j in rows])
+
+
+@router.get("/jobs/{job_id}", response_model=PlatformBackgroundJobDetail)
+def get_platform_background_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformBackgroundJobDetail:
+    require_platform_permission(current_user, PlatformPermission.jobs_view)
+    job = _job_or_404(db, job_id)
+    return PlatformBackgroundJobDetail(
+        **_job_entry(job).model_dump(),
+        payload=json.loads(job.payload),
+        idempotency_key=job.idempotency_key,
+    )
+
+
+@router.post("/jobs/{job_id}/retry", response_model=PlatformBackgroundJobEntry)
+def retry_platform_background_job(
+    job_id: str,
+    body: PlatformJobActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformBackgroundJobEntry:
+    """Operational retry -- distinct from an organization's own webhook
+    manual resend (see app.routers.webhooks.resend_webhook_delivery,
+    which creates a new WebhookDelivery + job as a tenant-level security
+    action). This creates a brand-new BackgroundJob with the SAME
+    job_type/payload/organization_id as the terminal row -- never
+    mutates or re-dispatches the original, so its own history stays
+    intact. Deliberately does NOT reuse the original job's idempotency_key
+    (that key already belongs to the terminal row; reusing it would make
+    enqueue_job silently no-op). Safe even if the referenced domain row
+    (e.g. a WebhookDelivery) was already resolved by then: every handler
+    in this app's registry is required to be idempotent/duplicate-
+    tolerant (see app.jobs.registry's own docstring) -- for webhook jobs
+    specifically, deliver_webhook itself no-ops on an already-attempted
+    delivery, and the webhook.retry handler no-ops on an
+    already-succeeded one."""
+    require_platform_permission(current_user, PlatformPermission.jobs_manage)
+    job = _job_or_404(db, job_id)
+    if job.status not in _JOB_RETRYABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "job_not_retryable",
+                "message": f"Only permanently_failed or cancelled jobs can be retried (current status: {job.status}).",
+            },
+        )
+
+    new_job = enqueue_job(
+        db,
+        job_type=JobType(job.job_type),
+        payload=json.loads(job.payload),
+        organization_id=job.organization_id,
+    )
+    record_job_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.background_job_retried,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={"original_job_id": job.id, "new_job_id": new_job.id if new_job else None, "job_type": job.job_type},
+    )
+    db.commit()
+    db.refresh(new_job if new_job is not None else job)
+    return _job_entry(new_job if new_job is not None else job)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=PlatformBackgroundJobEntry)
+def cancel_platform_background_job(
+    job_id: str,
+    body: PlatformJobActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformBackgroundJobEntry:
+    """Only a job that hasn't started running yet (pending or
+    retry_scheduled) can be cancelled -- a claimed/running job may
+    already be mid-flight on an outbound HTTP request that cannot be
+    safely interrupted (see app.jobs.worker's own docstring on why a
+    currently in-flight delivery is never hard-cancelled), so this
+    endpoint only ever changes a database status on a row that has
+    genuinely not started any work yet -- never a claim to have stopped
+    something already in progress."""
+    require_platform_permission(current_user, PlatformPermission.jobs_manage)
+    job = _job_or_404(db, job_id)
+    if job.status not in _JOB_CANCELLABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "job_not_cancellable",
+                "message": f"Only pending or retry_scheduled jobs can be cancelled (current status: {job.status}).",
+            },
+        )
+
+    job.status = JobStatus.cancelled.value
+    record_job_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.background_job_cancelled,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={"job_id": job.id, "job_type": job.job_type},
+    )
+    db.commit()
+    db.refresh(job)
+    return _job_entry(job)

@@ -8,6 +8,9 @@ applied, and if not, apply it with plain SQL that works on both SQLite and
 Postgres. Safe to call on every startup.
 """
 
+import json
+import uuid
+
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
@@ -51,6 +54,8 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_webhook_events_table(engine)
     _add_webhook_deliveries_table(engine)
     _add_webhook_audit_log_table(engine)
+    _add_background_jobs_table(engine)
+    _backfill_background_jobs_for_pending_deliveries(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1269,6 +1274,138 @@ def _add_webhook_audit_log_table(engine: Engine) -> None:
                 "ON webhook_audit_log (organization_id)"
             )
         )
+
+
+def _add_background_jobs_table(engine: Engine) -> None:
+    """Creates background_jobs if it's missing -- same idempotent safety
+    net as every other *_table migration in this file. Note this table is
+    also a declared SQLAlchemy model (BackgroundJob), so on a genuinely
+    fresh database Base.metadata.create_all() (called before
+    run_startup_migrations, see app.models.init_db) already creates it
+    before this function ever runs -- this guard exists only for an
+    existing Phase-15B-era database being upgraded in place, matching
+    _add_organization_api_keys_table's identical precedent/rationale."""
+    inspector = inspect(engine)
+    if "background_jobs" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS background_jobs ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "job_type VARCHAR(64) NOT NULL, "
+                "payload TEXT NOT NULL DEFAULT '{}', "
+                "status VARCHAR(20) NOT NULL DEFAULT 'pending', "
+                "priority INTEGER NOT NULL DEFAULT 0, "
+                "queue VARCHAR(32) NOT NULL DEFAULT 'default', "
+                "attempts INTEGER NOT NULL DEFAULT 0, "
+                "max_attempts INTEGER NOT NULL DEFAULT 5, "
+                "available_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "claimed_at TIMESTAMP NULL, "
+                "claimed_by VARCHAR(128) NULL, "
+                "lease_expires_at TIMESTAMP NULL, "
+                "started_at TIMESTAMP NULL, "
+                "completed_at TIMESTAMP NULL, "
+                "failed_at TIMESTAMP NULL, "
+                "last_error_code VARCHAR(64) NULL, "
+                "last_error_message VARCHAR(1000) NULL, "
+                "result_summary VARCHAR(500) NULL, "
+                "idempotency_key VARCHAR(255) NULL UNIQUE, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_background_jobs_claim_scan "
+                "ON background_jobs (status, queue, available_at)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_background_jobs_organization "
+                "ON background_jobs (organization_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_background_jobs_lease "
+                "ON background_jobs (status, lease_expires_at)"
+            )
+        )
+
+
+def _backfill_background_jobs_for_pending_deliveries(engine: Engine) -> None:
+    """Phase 15C rollout bootstrap: any WebhookDelivery row left over from
+    Phase 15B's non-durable dispatcher that never actually got attempted
+    (status='pending', attempted_at IS NULL -- i.e. it was created but
+    the ThreadPoolExecutor never got to it, most plausibly because the
+    process restarted between the commit and the thread running) gets
+    exactly one BackgroundJob created for it here, using the same
+    `webhook-delivery:{delivery_id}` idempotency key
+    app.services.background_jobs.enqueue_job uses for every future
+    first-attempt enqueue.
+
+    Runs on EVERY startup (this file's own stated contract -- "safe to
+    call on every startup"), not gated on table-creation order: on a
+    freshly created database Base.metadata.create_all() already creates
+    background_jobs before this ever runs, so gating on "did I just
+    create the table" would never fire there. Instead, idempotency comes
+    from checking each candidate's idempotency_key against what's already
+    in background_jobs before inserting -- genuinely safe to re-run any
+    number of times, not just safe-by-construction on the first run only.
+
+    Deliberately does NOT touch already-failed deliveries: Phase 15B
+    computed `next_retry_at` for those but no durable retry mechanism
+    existed yet to promise anything about them, so re-queuing them
+    automatically here would silently change already-observed behavior;
+    they remain visible and resendable manually exactly as before, and
+    the worker's own webhook.deliver handler starts covering them for
+    every NEW failure from this point forward.
+    """
+    inspector = inspect(engine)
+    if "webhook_deliveries" not in inspector.get_table_names():
+        return
+    if "background_jobs" not in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT id, organization_id FROM webhook_deliveries "
+                "WHERE status = 'pending' AND attempted_at IS NULL"
+            )
+        ).all()
+        if not rows:
+            return
+
+        existing_keys = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT idempotency_key FROM background_jobs WHERE idempotency_key IS NOT NULL")
+            ).all()
+        }
+        for delivery_id, organization_id in rows:
+            idempotency_key = f"webhook-delivery:{delivery_id}"
+            if idempotency_key in existing_keys:
+                continue
+            conn.execute(
+                text(
+                    "INSERT INTO background_jobs "
+                    "(id, organization_id, job_type, payload, status, queue, max_attempts, "
+                    "available_at, idempotency_key, created_at, updated_at) "
+                    "VALUES (:id, :organization_id, 'webhook.deliver', :payload, 'pending', 'default', 5, "
+                    "CURRENT_TIMESTAMP, :idempotency_key, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "organization_id": organization_id,
+                    "payload": json.dumps({"delivery_id": delivery_id}),
+                    "idempotency_key": idempotency_key,
+                },
+            )
 
 
 def _backfill_invoice_numbers(conn) -> None:

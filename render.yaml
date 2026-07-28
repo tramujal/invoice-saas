@@ -64,6 +64,71 @@ services:
       - key: AI_MODEL
         sync: false
 
+# Durable background-job worker (Phase 15C) -- executes webhook delivery
+# (and any future job type registered in app.jobs.registry) claimed from
+# the `background_jobs` table. Commented out for the same reason the
+# cronJobs block below is: it's a second, ALWAYS-ON process, and Render's
+# free tier supports exactly one free web service, not a second worker
+# process for free -- this genuinely requires upgrading to a paid plan
+# (Render "Background Worker" service type), unlike the web service
+# above. Until upgraded, webhooks are durably PERSISTED (every event and
+# delivery row still commits transactionally -- see
+# app.services.webhook_events) but never actually DELIVERED: nothing
+# claims pending jobs without a running worker. This is a deliberate,
+# honestly-documented deployment gap, not a bug -- see this phase's own
+# completion report for the explicit "at-least-once delivery requires a
+# running worker" guarantee statement.
+#
+# services:
+#   - type: worker
+#     name: invoicing-worker
+#     runtime: python
+#     plan: starter
+#     buildCommand: pip install -r requirements.txt
+#     startCommand: python -m app.jobs.worker
+#     envVars:
+#       - key: ENVIRONMENT
+#         value: production
+#       - key: DATABASE_URL
+#         sync: false
+#       # Must match the web service's own JWT_SECRET_KEY/CORS values only
+#       # insofar as this worker imports the same app.* modules at startup
+#       # (app.security reads JWT_SECRET_KEY at import time) -- it never
+#       # issues or verifies a token itself, but the import would fail
+#       # without one set. Reuse the exact same secret as the web service.
+#       - key: JWT_SECRET_KEY
+#         sync: false
+#       # See app/job_config.py for the full list and defaults -- every one
+#       # is optional; omit any you're happy leaving at its documented
+#       # default.
+#       - key: WORKER_QUEUE
+#         value: default
+#       - key: WORKER_POLL_INTERVAL_SECONDS
+#         value: "2"
+#       - key: WORKER_IDLE_BACKOFF_MAX_SECONDS
+#         value: "30"
+#       - key: WORKER_LEASE_DURATION_SECONDS
+#         value: "300"
+#       - key: WORKER_BATCH_SIZE
+#         value: "5"
+#
+# Migration/deployment ordering: the web service's own FastAPI lifespan
+# hook already runs app.models.init_db() (idempotent schema migrations,
+# see app/schema_migrations.py) on every startup, so no separate migration
+# step is needed before the worker starts -- deploy the web service first
+# (or simultaneously; both call the same idempotent init_db()), then the
+# worker. Running only the worker with a database that predates the
+# background_jobs table would fail at the worker's own first query, so in
+# practice always let at least one process's init_db() run before either
+# claims work. Rollback: reverting the worker's own image/commit is always
+# safe (jobs simply stop being claimed, none are lost -- see
+# recover_abandoned_jobs); reverting the web service back to a pre-15C
+# commit while pending 15C jobs still exist in the database is also safe
+# (older code never reads the background_jobs table, so those rows are
+# just inert until a 15C-or-later worker runs again), but any
+# STILL-PENDING webhook deliveries from before the rollback won't be
+# retried automatically until a 15C worker is running again.
+
 # Payment reminders (app/jobs/send_due_invoice_reminders.py) run as a
 # standalone CLI job, deliberately never inside the web service above and
 # never exposed as an HTTP endpoint. This repo's concrete trigger is a

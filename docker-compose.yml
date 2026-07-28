@@ -73,6 +73,35 @@ services:
       - "8000:8000"
     restart: on-failure
 
+  # Durable background-job worker (Phase 15C) -- a genuinely separate
+  # container from `backend`, matching this app's real deployment shape
+  # (see render.yaml's commented `worker` service block): the web process
+  # never claims or executes jobs itself. Shares the SAME database as
+  # `backend` (not a separate one), since the job queue lives in the same
+  # Postgres instance -- see app.services.background_jobs's own docstring
+  # on why a database-backed queue was chosen over a separate broker.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.jobs.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://invoicing:invoicing_local_dev@db:5432/invoicing
+      ENVIRONMENT: development
+      JWT_SECRET_KEY: local-docker-dev-secret-change-me
+      TRUSTED_PROXY_HOPS: "0"
+      WORKER_QUEUE: default
+      WORKER_POLL_INTERVAL_SECONDS: "2"
+      WORKER_IDLE_BACKOFF_MAX_SECONDS: "10"
+      WORKER_LEASE_DURATION_SECONDS: "300"
+      WORKER_BATCH_SIZE: "5"
+    restart: on-failure
+
   frontend:
     build:
       context: ./frontend

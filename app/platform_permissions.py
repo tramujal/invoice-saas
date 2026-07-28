@@ -34,6 +34,8 @@ class PlatformPermission(str, Enum):
     roles_manage = "platform.roles.manage"  # grant/revoke platform_role
     plans_view = "platform.plans.view"
     plans_manage = "platform.plans.manage"  # create/edit/activate/deactivate/make-default
+    jobs_view = "platform.jobs.view"
+    jobs_manage = "platform.jobs.manage"  # retry a permanently-failed job, cancel a pending one
 
 
 _SUPER_ADMIN_PERMISSIONS: frozenset[PlatformPermission] = frozenset(PlatformPermission)

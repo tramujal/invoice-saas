@@ -1085,7 +1085,7 @@ export type WebhookEndpointUpdateRequest = {
 };
 
 export type WebhookDeliveryStatus = "pending" | "succeeded" | "failed";
-export type WebhookDeliveryTrigger = "automatic" | "manual_resend";
+export type WebhookDeliveryTrigger = "automatic" | "manual_resend" | "automatic_retry";
 
 export type WebhookDelivery = {
   id: string;
@@ -1123,4 +1123,52 @@ export type WebhookDeliveryDetail = WebhookDelivery & {
 export type PaginatedWebhookDeliveries = {
   total: number;
   items: WebhookDelivery[];
+};
+
+// Phase 15C -- Platform Admin Background Jobs visibility. Wire values
+// match app.job_status.JobStatus / app.job_type.JobType exactly.
+export type BackgroundJobStatus =
+  | "pending"
+  | "claimed"
+  | "running"
+  | "retry_scheduled"
+  | "succeeded"
+  | "permanently_failed"
+  | "cancelled";
+
+export type PlatformBackgroundJobEntry = {
+  id: string;
+  organization_id: string | null;
+  job_type: string;
+  status: BackgroundJobStatus;
+  queue: string;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  available_at: string;
+  claimed_at: string | null;
+  claimed_by: string | null;
+  lease_expires_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  failed_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  result_summary: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlatformBackgroundJobDetail = PlatformBackgroundJobEntry & {
+  payload: Record<string, unknown>;
+  idempotency_key: string | null;
+};
+
+export type PaginatedPlatformBackgroundJobsResponse = {
+  total: number;
+  items: PlatformBackgroundJobEntry[];
+};
+
+export type PlatformJobActionRequest = {
+  reason: string;
 };

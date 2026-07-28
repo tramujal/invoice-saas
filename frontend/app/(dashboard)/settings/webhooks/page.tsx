@@ -69,6 +69,12 @@ function summarizeEvents(t: TranslateFn, subscribedEvents: string[]): string {
   return t("webhooks.eventCount", { count: String(subscribedEvents.length) });
 }
 
+function triggerLabel(t: TranslateFn, trigger: WebhookDelivery["trigger"]): string {
+  if (trigger === "manual_resend") return t("webhooks.triggerManual");
+  if (trigger === "automatic_retry") return t("webhooks.triggerAutomaticRetry");
+  return t("webhooks.triggerAutomatic");
+}
+
 export default function WebhooksPage() {
   const { t, language } = useTranslation();
   const toast = useToast();
@@ -332,6 +338,7 @@ function DeliveriesPanel({
                 <th className="px-3 py-2">{t("webhooks.colDeliveryTrigger")}</th>
                 <th className="px-3 py-2">{t("webhooks.colDeliveryResponse")}</th>
                 <th className="px-3 py-2">{t("webhooks.colDeliveryAttemptedAt")}</th>
+                <th className="px-3 py-2">{t("webhooks.colDeliveryNextRetry")}</th>
                 <th className="px-3 py-2 text-right">{t("common.moreActions")}</th>
               </tr>
             </thead>
@@ -343,13 +350,16 @@ function DeliveriesPanel({
                       {t(`webhooks.deliveryStatus${delivery.status.charAt(0).toUpperCase()}${delivery.status.slice(1)}`)}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {delivery.trigger === "manual_resend" ? t("webhooks.triggerManual") : t("webhooks.triggerAutomatic")}
-                  </td>
+                  <td className="px-3 py-2 text-slate-600">{triggerLabel(t, delivery.trigger)}</td>
                   <td className="px-3 py-2 text-slate-600">
                     {delivery.response_status_code ?? delivery.error_message ?? "—"}
                   </td>
                   <td className="px-3 py-2 text-slate-600">{formatDateTime(delivery.attempted_at, language)}</td>
+                  <td className="px-3 py-2 text-slate-600">
+                    {delivery.status === "failed" && delivery.next_retry_at
+                      ? formatDateTime(delivery.next_retry_at, language)
+                      : "—"}
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <button
                       type="button"

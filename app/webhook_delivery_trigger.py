@@ -9,3 +9,4 @@ from enum import Enum
 class WebhookDeliveryTrigger(str, Enum):
     automatic = "automatic"
     manual_resend = "manual_resend"
+    automatic_retry = "automatic_retry"

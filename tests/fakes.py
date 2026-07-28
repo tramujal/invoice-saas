@@ -43,30 +43,13 @@ def make_ai_error() -> AIProviderError:
     return AIProviderError("fake provider failure")
 
 
-class FakeWebhookDispatcher:
-    """Replaces app.services.webhook_dispatch.schedule_delivery so tests
-    never spawn a real background thread or make a real outbound HTTP
-    call -- the automatic-dispatch path (a SQLAlchemy Session
-    after_commit hook, see that module's docstring) fires on EVERY
-    commit in EVERY test, not just webhook-specific ones, so this fake
-    must be autouse (see tests/conftest.py's fake_webhook_dispatch
-    fixture) exactly like fake_email_sender/fake_ai_provider.
-
-    Also important for correctness, not just speed: the real dispatch
-    path opens a brand-new SessionLocal() on a separate connection, which
-    cannot see a test's SAVEPOINT-scoped, never-truly-committed
-    db_session data at all (see conftest.py's db_session fixture
-    docstring) -- so even a "harmless" real dispatch would only ever
-    fail to find its row in this test suite. Tests that want to assert a
-    delivery WOULD have been dispatched call
-    app.services.webhook_deliveries.deliver_webhook(db_session, id)
-    directly and synchronously instead, against a mocked `requests.post`."""
-
-    def __init__(self) -> None:
-        self.scheduled_delivery_ids: list[str] = []
-
-    def __call__(self, delivery_id: str) -> None:
-        self.scheduled_delivery_ids.append(delivery_id)
+# Phase 15B's FakeWebhookDispatcher (which neutralized an in-process
+# Session.after_commit + ThreadPoolExecutor dispatch chain) no longer
+# has anything to replace: Phase 15C's durable job queue
+# (app.services.background_jobs.enqueue_job) only ever does `db.add()` --
+# no thread, no network call, no autouse fake required. A test that wants
+# a job actually executed calls app.jobs.worker's claim/run helpers, or
+# app.services.webhook_deliveries.deliver_webhook directly, explicitly.
 
 
 class FakeEmailSender(EmailSender):

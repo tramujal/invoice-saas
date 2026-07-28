@@ -15,19 +15,21 @@ neither does the event, with no separate outbox table or two-phase
 protocol required, because the event row was never a separate transaction
 to begin with.
 
-Actual HTTP delivery happens later, asynchronously, via
-app.services.webhook_deliveries -- see app.routers.webhooks for exactly
-where that's scheduled (a FastAPI BackgroundTask registered by the router
-AFTER this function's caller has already returned/committed), never
-inline in this function.
+Actual HTTP delivery happens later, durably, via the Phase 15C job queue
+(see app.services.background_jobs.enqueue_job and app.jobs.worker) --
+this function enqueues one webhook.deliver BackgroundJob per pending
+delivery it creates, in the SAME transaction, so a worker can claim and
+execute it only once this transaction is durable. Never inline in this
+function, and never via any in-process dispatch mechanism.
 """
 
 import json
 
 from sqlalchemy.orm import Session
 
+from app.job_type import JobType
 from app.models import WebhookDelivery, WebhookEvent
-from app.services.webhook_dispatch import mark_for_dispatch
+from app.services.background_jobs import enqueue_job
 from app.services.webhook_endpoints import list_active_subscribed_endpoints
 from app.webhook_delivery_status import WebhookDeliveryStatus
 from app.webhook_delivery_trigger import WebhookDeliveryTrigger
@@ -78,14 +80,18 @@ def record_webhook_event(
         deliveries.append(delivery)
 
     if deliveries:
-        # Flush now so every delivery.id below is real (never None) --
-        # independent of whenever the caller's own commit eventually
-        # happens -- and mark each one for dispatch (see
-        # app.services.webhook_dispatch) so the after_commit hook can
-        # submit them for actual HTTP delivery the instant this
-        # transaction becomes durable, never before.
+        # Flush now so every delivery.id below is real (never None), then
+        # durably enqueue one webhook.deliver job per delivery in this
+        # same transaction -- if the caller's own commit never happens,
+        # neither the delivery rows nor these job rows ever exist.
         db.flush()
         for delivery in deliveries:
-            mark_for_dispatch(db, delivery.id)
+            enqueue_job(
+                db,
+                job_type=JobType.webhook_deliver,
+                payload={"delivery_id": delivery.id},
+                organization_id=organization_id,
+                idempotency_key=f"webhook-delivery:{delivery.id}",
+            )
 
     return event, deliveries

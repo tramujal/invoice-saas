@@ -21,10 +21,18 @@ row itself is already committed and remains visible/resendable -- nothing
 is ever silently lost from the UI's perspective, only the one attempt
 that happened to be in-flight.
 
-Explicit scope boundary (Phase 15B): this module computes `next_retry_at`
-on a failed delivery (a fixed backoff schedule) but NEVER reads it back to
-actually perform a retry -- there is no scheduler, poller, or retry loop
-anywhere in this codebase. A future Phase 15C worker owns that.
+Retry scheduling (Phase 15C): this module computes `next_retry_at` on a
+failed delivery (a fixed backoff schedule, `_compute_next_retry_at`) and
+classifies whether a failure is retryable at all (`is_retryable_failure`)
+-- but this module itself never loops, polls, or schedules anything.
+That's app.jobs.handlers.webhook's job: it calls `deliver_webhook` (this
+module, completely unchanged from Phase 15B), inspects the resulting
+row's status via these two functions, and -- only if retryable and the
+webhook's own attempt ceiling (MAX_WEBHOOK_DELIVERY_ATTEMPTS) isn't
+reached -- calls `create_next_delivery_attempt` (this module) to build
+the next append-only WebhookDelivery row, then enqueues a durable
+`webhook.retry` BackgroundJob for it. See app.services.background_jobs
+for the durable queue itself.
 
 Uses `requests` (never httpx, which is test-infra only in this project),
 matching app.email.resend_provider's exact conventions: an int/tuple
@@ -35,15 +43,17 @@ requests.exceptions.RequestException (never reached the server at all).
 
 import json
 import logging
+import random
 import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 from sqlalchemy.orm import Session
 
+from app.job_type import JobType
 from app.models import User, WebhookDelivery, WebhookEndpoint, WebhookEvent
+from app.services.background_jobs import enqueue_job
 from app.services.webhook_audit import record_webhook_action
-from app.services.webhook_dispatch import schedule_delivery
 from app.webhook_audit_action import WebhookAuditAction
 from app.webhook_delivery_status import WebhookDeliveryStatus
 from app.webhook_delivery_trigger import WebhookDeliveryTrigger
@@ -62,15 +72,39 @@ _TIMEOUT = (5.0, 10.0)
 # receiver returning gigabytes of body must never exhaust worker memory.
 _MAX_RESPONSE_BODY_BYTES = 4096
 
-# Fixed backoff schedule for `next_retry_at` -- metadata only (see module
-# docstring: nothing in this codebase acts on it yet).
+# Fixed backoff schedule for `next_retry_at`, indexed by the FAILED
+# attempt's attempt_number (1-based) -- e.g. attempt_number=1 failing
+# schedules attempt 2 for now+1min. Matches the spec's 7-step schedule
+# exactly; +/-20% jitter is applied on top of each step so many
+# deliveries failing to the same flaky host don't all retry in lockstep.
 _RETRY_BACKOFF_SCHEDULE = [
     timedelta(minutes=1),
     timedelta(minutes=5),
-    timedelta(minutes=30),
-    timedelta(hours=2),
-    timedelta(hours=12),
+    timedelta(minutes=15),
+    timedelta(hours=1),
+    timedelta(hours=6),
+    timedelta(hours=24),
 ]
+
+# The webhook delivery chain's OWN retry ceiling -- deliberately separate
+# from BackgroundJob.max_attempts (see that column's docstring in
+# app/models.py): this counts real HTTP delivery attempts across the
+# whole append-only WebhookDelivery chain for one logical event+endpoint
+# pair, never how many times a single job row was re-executed after a
+# crash.
+MAX_WEBHOOK_DELIVERY_ATTEMPTS = 7
+
+# HTTP status codes worth retrying -- 408/425/429 are explicitly
+# retry-friendly per spec (request timeout, too-early, rate-limited), and
+# 5xx means the receiver itself is failing, which is often transient.
+# Every other 4xx is treated as "the request itself is wrong" and is
+# never retried, since retrying an unchanged request against the same
+# misconfiguration only wastes attempts.
+_RETRYABLE_STATUS_CODES = frozenset({408, 425, 429})
+
+# error_message values `deliver_webhook` sets that represent a
+# configuration problem, never a transient one -- retrying can't help.
+_NON_RETRYABLE_ERROR_MESSAGES = frozenset({"unsafe_target_url", "endpoint_or_event_missing"})
 
 
 class DeliveryNotFoundError(Exception):
@@ -80,13 +114,70 @@ class DeliveryNotFoundError(Exception):
 class DeliveryNotFoundInOrgError(Exception):
     """No WebhookDelivery matches the given id within this organization --
     used by the management router's tenant-scoped lookup, distinct from
-    DeliveryNotFoundError which app.services.webhook_dispatch's
-    background path uses (no organization to scope by there)."""
+    DeliveryNotFoundError which app.jobs.handlers.webhook's worker-side
+    execution path uses (no organization to scope by there)."""
 
 
 def _compute_next_retry_at(attempt_number: int) -> datetime:
     index = min(attempt_number - 1, len(_RETRY_BACKOFF_SCHEDULE) - 1)
-    return datetime.now(timezone.utc) + _RETRY_BACKOFF_SCHEDULE[index]
+    base = _RETRY_BACKOFF_SCHEDULE[index]
+    # +/-20% jitter, computed from a fraction of the base delay so it
+    # scales with the step itself rather than needing a separate jitter
+    # table.
+    jitter_seconds = base.total_seconds() * 0.2
+    jittered = base.total_seconds() + random.uniform(-jitter_seconds, jitter_seconds)
+    return datetime.now(timezone.utc) + timedelta(seconds=max(1.0, jittered))
+
+
+def is_retryable_failure(delivery: WebhookDelivery) -> bool:
+    """True if this FAILED delivery's cause is transient enough to be
+    worth another attempt -- checked by app.jobs.handlers.webhook right
+    after deliver_webhook returns a failed row, before it ever decides to
+    chain a webhook.retry job. Never called for a succeeded delivery."""
+    if delivery.response_status_code is not None:
+        if delivery.response_status_code in _RETRYABLE_STATUS_CODES:
+            return True
+        if 500 <= delivery.response_status_code < 600:
+            return True
+        return False  # any other reached-the-server status is final
+    if delivery.error_message in _NON_RETRYABLE_ERROR_MESSAGES:
+        return False
+    # No response_status_code and not a known non-retryable reason means
+    # requests.exceptions.RequestException was raised (timeout,
+    # connection refused, DNS failure, TLS failure) -- all transient.
+    return True
+
+
+def create_next_delivery_attempt(db: Session, failed: WebhookDelivery) -> WebhookDelivery | None:
+    """Builds the next append-only WebhookDelivery row for an automatic
+    retry -- called only by app.jobs.handlers.webhook's webhook.retry
+    handler, right before it calls deliver_webhook on the new row. Adds
+    (never commits) the new row and returns it, mirroring
+    resend_delivery's own "never mutate the row that failed" contract,
+    except trigger=automatic_retry instead of manual_resend.
+
+    Returns None -- creating nothing -- if the endpoint has since been
+    disabled or archived: an organization pausing/removing an
+    integration must stop new automatic attempts against it immediately,
+    even for a retry that was already scheduled before that happened.
+    The caller treats None as "this delivery chain is now terminal."
+    """
+    endpoint = db.get(WebhookEndpoint, failed.endpoint_id)
+    if endpoint is None or not endpoint.active or not endpoint.enabled:
+        return None
+
+    next_delivery = WebhookDelivery(
+        organization_id=failed.organization_id,
+        event_id=failed.event_id,
+        endpoint_id=failed.endpoint_id,
+        status=WebhookDeliveryStatus.pending.value,
+        trigger=WebhookDeliveryTrigger.automatic_retry.value,
+        attempt_number=failed.attempt_number + 1,
+        request_url=endpoint.url,
+    )
+    db.add(next_delivery)
+    db.flush()
+    return next_delivery
 
 
 def get_delivery_in_org(db: Session, organization_id: str, delivery_id: str) -> WebhookDelivery:
@@ -244,10 +335,12 @@ def resend_delivery(
 ) -> WebhookDelivery:
     """Manual resend -- creates a brand-new `pending` WebhookDelivery row
     for the SAME event_id/endpoint_id (never mutates `original`), then
-    schedules it for immediate delivery exactly like an automatic one.
-    `attempt_number` continues the sequence for this event+endpoint pair
-    so the delivery-history view can show "attempt 2 of ..." style
-    context."""
+    durably enqueues a webhook.deliver job for it in the SAME transaction
+    (see app.services.background_jobs.enqueue_job) -- the worker claims
+    and executes it, exactly like a first attempt or an automatic retry;
+    this function itself never performs network I/O. `attempt_number`
+    continues the sequence for this event+endpoint pair so the
+    delivery-history view can show "attempt 2 of ..." style context."""
     new_delivery = WebhookDelivery(
         organization_id=original.organization_id,
         event_id=original.event_id,
@@ -258,6 +351,14 @@ def resend_delivery(
         request_url=original.request_url,
     )
     db.add(new_delivery)
+    db.flush()
+    enqueue_job(
+        db,
+        job_type=JobType.webhook_deliver,
+        payload={"delivery_id": new_delivery.id},
+        organization_id=new_delivery.organization_id,
+        idempotency_key=f"webhook-delivery:{new_delivery.id}",
+    )
     record_webhook_action(
         db,
         organization_id=original.organization_id,
@@ -269,5 +370,4 @@ def resend_delivery(
     )
     db.commit()
     db.refresh(new_delivery)
-    schedule_delivery(new_delivery.id)
     return new_delivery
