@@ -12,6 +12,7 @@ import {
   getEmailVerified,
   getOrganizationId,
   getOrganizationName,
+  getOrganizationPermissions,
   getPlatformRole,
   getUserEmail,
   isAuthenticated,
@@ -22,17 +23,25 @@ import {
 } from "@/lib/auth-storage";
 import { formatApiError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
+import { hasPermission, type Permission } from "@/lib/permissions";
 import type { MeResponse, MessageResponse, OrganizationSummary } from "@/lib/types";
 
-const links = [
+type NavLink = { href: string; labelKey: string; permission?: Permission };
+
+const links: NavLink[] = [
   { href: "/dashboard", labelKey: "nav.dashboard" },
+  // Permission-gated (unlike every other link here) since it's the one
+  // nav entry Phase 16B added behind Permission.dashboard_view -- the
+  // backend already enforces this on GET /analytics/kpis; hiding the link
+  // client-side just avoids sending a member to a page that would 403.
+  { href: "/analytics", labelKey: "nav.analytics", permission: "dashboard.view" },
   { href: "/invoices", labelKey: "nav.invoices" },
   { href: "/quotes", labelKey: "nav.quotes" },
   { href: "/customers", labelKey: "nav.customers" },
   { href: "/products", labelKey: "nav.products" },
   { href: "/assistant", labelKey: "nav.assistant" },
   { href: "/settings", labelKey: "nav.settings" },
-] as const;
+];
 
 function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -45,6 +54,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const [organizationName, setOrganizationName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  // Same hydration-safe pattern as organizationName below: empty on first
+  // render (server and client agree), then re-read on every navigation.
+  const [orgPermissions, setOrgPermissions] = useState<string[]>([]);
   // Hydration-safe default (see getOrganizationName below for the same
   // pattern): assume verified until the first /auth/me response actually
   // says otherwise, so the banner never flashes on a verified account.
@@ -98,6 +110,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         const active = me.organizations.find((o) => o.id === getOrganizationId());
         if (active) {
           updateOrganizationPermissions(active.permissions);
+          // Same immediate-state-update reasoning as setPlatformRole below:
+          // the pathname-keyed effect that also reads this only re-runs on
+          // navigation, so without this the nav link gating would stay one
+          // /auth/me response behind on the page the user is already on.
+          setOrgPermissions(active.permissions);
         } else if (me.organizations.length > 0) {
           // The cached active org is gone from this user's own list --
           // most likely they just removed themselves from it (see
@@ -148,6 +165,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     setEmailVerifiedState(getEmailVerified());
     setUserEmail(getUserEmail());
     setPlatformRole(getPlatformRole());
+    setOrgPermissions(getOrganizationPermissions());
   }, [pathname]);
 
   useEffect(() => {
@@ -303,7 +321,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
         ) : null}
         <nav className="flex flex-col gap-1 px-2 py-3 md:py-6">
-          {links.map((item) => {
+          {links
+            .filter((item) => !item.permission || hasPermission({ permissions: orgPermissions }, item.permission))
+            .map((item) => {
             const active = isNavActive(pathname, item.href);
             return (
               <Link

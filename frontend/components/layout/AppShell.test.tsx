@@ -128,6 +128,28 @@ describe("AppShell platform admin entry link", () => {
   });
 });
 
+describe("AppShell analytics nav link", () => {
+  it("is hidden when the active organization lacks dashboard.view", async () => {
+    renderWithProviders(<AppShell>content</AppShell>);
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+
+    expect(screen.queryByText("Analytics")).not.toBeInTheDocument();
+  });
+
+  it("is shown once /auth/me reports dashboard.view for the active organization", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...meResponse,
+      organizations: [
+        { ...meResponse.organizations[0], permissions: ["invoice.send", "dashboard.view"] },
+      ],
+    });
+
+    renderWithProviders(<AppShell>content</AppShell>);
+
+    await waitFor(() => expect(screen.getAllByText("Analytics").length).toBeGreaterThan(0));
+  });
+});
+
 describe("AppShell active-organization fallback", () => {
   it("switches to another organization when the cached active org is missing from /auth/me (self-removal)", async () => {
     const assignSpy = vi.fn();

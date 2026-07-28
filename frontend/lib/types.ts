@@ -293,6 +293,100 @@ export type QuoteMonthlyConversionPoint = {
   converted_count: number;
 };
 
+// --- Phase 16A/16B: Business Analytics KPI snapshot ------------------------
+//
+// Mirrors app.analytics.time_windows.TimeWindowKind and app.schemas'
+// TimeWindowResponse/InvoiceCountsResponse/RevenueBreakdownResponse/
+// CustomerRetentionResponse/AveragePaymentTimeResponse/KpiSnapshotResponse
+// exactly (see app/routers/analytics.py). Every value here is already
+// computed server-side by AnalyticsService -- this page only ever renders
+// and formats these fields, never recomputes or re-derives a metric from
+// raw invoice/customer/quote data client-side.
+
+/** The 8 window kinds this endpoint accepts -- "custom" is deliberately
+ * excluded, since GET /analytics/kpis rejects it with 400
+ * custom_window_not_supported (no custom start/end query params exist on
+ * this route yet). */
+export type AnalyticsTimeWindowKind =
+  | "today"
+  | "yesterday"
+  | "last_7_days"
+  | "last_30_days"
+  | "current_month"
+  | "previous_month"
+  | "current_quarter"
+  | "current_year";
+
+export const ANALYTICS_TIME_WINDOWS: AnalyticsTimeWindowKind[] = [
+  "today",
+  "yesterday",
+  "last_7_days",
+  "last_30_days",
+  "current_month",
+  "previous_month",
+  "current_quarter",
+  "current_year",
+];
+
+export type AnalyticsTimeWindow = {
+  kind: AnalyticsTimeWindowKind;
+  start: string;
+  end: string;
+};
+
+export type AnalyticsInvoiceCounts = {
+  total: number;
+  pending: number;
+  paid: number;
+  overdue: number;
+};
+
+/** One currency's revenue split by effective payment status -- paid +
+ * outstanding always sum back to total. Never combine rows across
+ * currency_code values. */
+export type AnalyticsRevenueBreakdown = {
+  currency_code: string;
+  total: string;
+  paid: string;
+  outstanding: string;
+  overdue: string;
+};
+
+export type AnalyticsCustomerRetention = {
+  total_invoiced_customers: number;
+  repeat_customers: number;
+  /** null when there is no lifetime invoiced-customer history yet --
+   * render as "not enough data", never coerce to 0%. */
+  retention_rate_percent: number | null;
+};
+
+/** available=false is an honest, documented gap (no invoice has a paid_at
+ * timestamp yet), not an error -- render `reason`, never "0 days". */
+export type AnalyticsAveragePaymentTime = {
+  available: boolean;
+  average_days: number | null;
+  reason: string | null;
+};
+
+/** Response from GET /organizations/{org}/analytics/kpis */
+export type KpiSnapshot = {
+  window: AnalyticsTimeWindow;
+  invoice_counts: AnalyticsInvoiceCounts;
+  /** Never sum these values across currency keys. */
+  revenue_by_currency: Record<string, string>;
+  revenue_breakdown: AnalyticsRevenueBreakdown[];
+  /** Never sum/average these values across currency keys. */
+  average_invoice_value: Record<string, string>;
+  customer_growth: number;
+  /** Deliberately all-time, not window-scoped -- a lifetime relationship
+   * metric, unlike every other field here. */
+  customer_retention: AnalyticsCustomerRetention;
+  /** null when the organization has no quotes yet -- render as "not
+   * enough data", never coerce to 0%. */
+  quote_acceptance_rate_percent: number | null;
+  average_payment_time: AnalyticsAveragePaymentTime;
+};
+
 /** Response from GET /organizations/{org}/dashboard/analytics */
 export type DashboardAnalytics = {
   monthly_summary: MonthlySummaryPoint[];
