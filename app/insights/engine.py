@@ -47,6 +47,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analytics.comparison import compare_periods
 from app.analytics.service import AnalyticsService
 from app.customer_activity import get_last_invoice_at_by_customer
 from app.insights.models import (
@@ -1012,7 +1013,12 @@ def _volume_insight(analytics, language: str) -> Insight | None:
             priority_score=_severity_priority(InsightSeverity.positive, 0.2),
         )
 
-    change_pct = ((this_month - last_month) / last_month) * 100
+    # Phase 16C: sourced from the shared trend engine (compare_periods)
+    # rather than reapplying growth_percent's formula inline a second
+    # time here -- this used to be its own `((this - last) / last) * 100`
+    # (last_month > 0 is guaranteed by the check above, so
+    # percentage_difference is never None here).
+    change_pct = float(compare_periods(Decimal(this_month), Decimal(last_month)).percentage_difference)
     if abs(change_pct) < VOLUME_CHANGE_NOTABLE_THRESHOLD:
         return None  # not a meaningful enough change to call out
 

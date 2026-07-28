@@ -7,3 +7,18 @@ export function formatMonthLabel(monthKey: string): string {
   const date = new Date(year, month - 1, 1);
   return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
 }
+
+/** Formats a generic evolution-series period label (see
+ * app.analytics.calculators.trends.SeriesPoint) for any of the 3
+ * granularities: "2026-07" -> "Jul 2026" (delegates to formatMonthLabel),
+ * "2026-Q3" -> "Q3 2026", "2026" -> "2026" unchanged. Used by
+ * MonthlyEvolutionChart instead of a fixed month-only formatter, since
+ * that chart is granularity-aware. */
+export function formatPeriodLabel(period: string, granularity: "monthly" | "quarterly" | "yearly"): string {
+  if (granularity === "monthly") return formatMonthLabel(period);
+  if (granularity === "quarterly") {
+    const [year, quarter] = period.split("-Q");
+    return quarter ? `Q${quarter} ${year}` : period;
+  }
+  return period;
+}

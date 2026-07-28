@@ -167,3 +167,101 @@ def trailing_month_starts(n: int, *, now: datetime | None = None) -> list[dateti
     this_month_start = _month_start(moment.date())
     starts = [_add_months(this_month_start, -offset) for offset in range(n)]
     return [_utc_midnight(d) for d in reversed(starts)]
+
+
+def trailing_quarter_starts(n: int, *, now: datetime | None = None) -> list[datetime]:
+    """Same shape and semantics as trailing_month_starts, one quarter at a
+    time (each step is 3 months) -- Phase 16C's quarterly evolution
+    series. A quarter is exactly 3 calendar months, so this reuses
+    _add_months(..., -offset * 3) rather than introducing a second
+    month-carry implementation."""
+    moment = now or datetime.now(timezone.utc)
+    this_quarter_start = _quarter_start(moment.date())
+    starts = [_add_months(this_quarter_start, -offset * 3) for offset in range(n)]
+    return [_utc_midnight(d) for d in reversed(starts)]
+
+
+def trailing_year_starts(n: int, *, now: datetime | None = None) -> list[datetime]:
+    """Same shape and semantics as trailing_month_starts, one calendar
+    year at a time -- Phase 16C's yearly evolution series."""
+    moment = now or datetime.now(timezone.utc)
+    this_year = moment.year
+    return [_utc_midnight(date(this_year - offset, 1, 1)) for offset in range(n - 1, -1, -1)]
+
+
+# The 5 comparison kinds this phase's period-comparison feature supports
+# (see resolve_period_comparison_windows) -- a deliberately narrower list
+# than TimeWindowKind's full 9 values: "today"/"yesterday" are too short
+# a span for a meaningful period-over-period business comparison, and
+# "previous_month"/"custom" are themselves window selections, not a
+# comparison request ("current_month" already implies "vs previous_month").
+COMPARISON_KINDS = (
+    TimeWindowKind.last_7_days,
+    TimeWindowKind.last_30_days,
+    TimeWindowKind.current_month,
+    TimeWindowKind.current_quarter,
+    TimeWindowKind.current_year,
+)
+
+
+def resolve_period_comparison_windows(
+    kind: TimeWindowKind, *, organization: "Organization | None" = None, now: datetime | None = None
+) -> tuple[TimeWindow, TimeWindow]:
+    """Returns (current, previous) -- two equal-length, back-to-back,
+    non-overlapping windows for one of COMPARISON_KINDS. This is the one
+    place "what counts as the *previous* period" is decided for period
+    comparisons, the same centralizing role resolve_time_window already
+    plays for single windows -- every trend calculator in
+    app.analytics.calculators.trends calls this rather than re-deriving a
+    previous-period boundary itself.
+
+    Note on the returned `previous` window's own `.kind` field: for
+    current_quarter/current_year there is no TimeWindowKind.previous_
+    quarter/year (unlike previous_month, which already existed pre-16C)
+    -- rather than widen the enum just for an internal label never
+    serialized by any response schema (this function's callers only ever
+    read `.start`/`.end`), `previous.kind` is simply set to the same
+    `kind` passed in, meaning "a window of this kind's length," not "this
+    exact named window." """
+    if kind not in COMPARISON_KINDS:
+        raise ValueError(
+            f"{kind} is not a supported period-comparison kind; must be one of "
+            f"{[k.value for k in COMPARISON_KINDS]}"
+        )
+
+    moment = now or datetime.now(timezone.utc)
+
+    if kind == TimeWindowKind.last_7_days:
+        current = resolve_time_window(kind, now=moment)
+        previous = TimeWindow(
+            kind=kind, start=current.start - timedelta(days=7), end=current.start
+        )
+        return current, previous
+
+    if kind == TimeWindowKind.last_30_days:
+        current = resolve_time_window(kind, now=moment)
+        previous = TimeWindow(
+            kind=kind, start=current.start - timedelta(days=30), end=current.start
+        )
+        return current, previous
+
+    if kind == TimeWindowKind.current_month:
+        current = resolve_time_window(kind, now=moment)
+        previous = resolve_time_window(TimeWindowKind.previous_month, now=moment)
+        return current, previous
+
+    if kind == TimeWindowKind.current_quarter:
+        current = resolve_time_window(kind, now=moment)
+        previous_start = _add_months(current.start.date(), -3)
+        previous = TimeWindow(
+            kind=kind, start=_utc_midnight(previous_start), end=current.start
+        )
+        return current, previous
+
+    if kind == TimeWindowKind.current_year:
+        current = resolve_time_window(kind, now=moment)
+        previous_start = date(current.start.year - 1, 1, 1)
+        previous = TimeWindow(kind=kind, start=_utc_midnight(previous_start), end=current.start)
+        return current, previous
+
+    raise ValueError(f"Unhandled comparison kind: {kind}")  # pragma: no cover -- guarded above

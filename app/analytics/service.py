@@ -35,11 +35,15 @@ from app.analytics.calculators import payments as payments_calc
 from app.analytics.calculators import products as products_calc
 from app.analytics.calculators import quotes as quotes_calc
 from app.analytics.calculators import revenue as revenue_calc
+from app.analytics.calculators import trends as trends_calc
 from app.analytics.calculators.customers import RetentionRate, TopCustomer
 from app.analytics.calculators.invoices import InvoiceCounts
 from app.analytics.calculators.payments import AveragePaymentTime
 from app.analytics.calculators.products import ProductRevenue
 from app.analytics.calculators.revenue import RevenueBreakdown
+from app.analytics.calculators.trends import SeriesGranularity, SeriesPoint
+from app.analytics.comparison import PeriodComparison
+from app.analytics.forecast import Forecast, ForecastMethod, forecast_next_period
 from app.analytics.time_windows import TimeWindow, TimeWindowKind, resolve_time_window, trailing_month_starts
 from app.models import Customer, Invoice
 from app.payment_status import PaymentStatus
@@ -116,6 +120,98 @@ class AnalyticsService:
 
     def average_payment_time(self) -> AveragePaymentTime:
         return payments_calc.get_average_payment_time(self.db, self.organization_id)
+
+    # --- Phase 16C: trend engine -----------------------------------------
+    # Period-over-period comparisons and multi-period evolution series,
+    # each a one-line delegation to app.analytics.calculators.trends --
+    # same discipline as the KPI methods above.
+
+    def revenue_trend(
+        self, *, current: TimeWindow, previous: TimeWindow
+    ) -> dict[str, PeriodComparison]:
+        return trends_calc.get_revenue_trend(
+            self.db, self.organization_id, current=current, previous=previous
+        )
+
+    def invoice_count_trend(
+        self, *, current: TimeWindow, previous: TimeWindow
+    ) -> PeriodComparison:
+        return trends_calc.get_invoice_count_trend(
+            self.db, self.organization_id, current=current, previous=previous
+        )
+
+    def customer_growth_trend(
+        self, *, current: TimeWindow, previous: TimeWindow
+    ) -> PeriodComparison:
+        return trends_calc.get_customer_growth_trend(
+            self.db, self.organization_id, current=current, previous=previous
+        )
+
+    def quote_count_trend(
+        self, *, current: TimeWindow, previous: TimeWindow
+    ) -> PeriodComparison:
+        return trends_calc.get_quote_count_trend(
+            self.db, self.organization_id, current=current, previous=previous
+        )
+
+    def revenue_series(
+        self, period_starts: list[datetime], granularity: SeriesGranularity
+    ) -> list[SeriesPoint]:
+        return trends_calc.get_revenue_series(
+            self.db, self.organization_id, period_starts, granularity
+        )
+
+    def invoice_count_series(
+        self, period_starts: list[datetime], granularity: SeriesGranularity
+    ) -> list[SeriesPoint]:
+        return trends_calc.get_invoice_count_series(
+            self.db, self.organization_id, period_starts, granularity
+        )
+
+    def customer_count_series(
+        self, period_starts: list[datetime], granularity: SeriesGranularity
+    ) -> list[SeriesPoint]:
+        return trends_calc.get_customer_count_series(
+            self.db, self.organization_id, period_starts, granularity
+        )
+
+    def quote_conversion_series(
+        self, period_starts: list[datetime], granularity: SeriesGranularity
+    ) -> list[SeriesPoint]:
+        return trends_calc.get_quote_conversion_series(
+            self.db, self.organization_id, period_starts, granularity
+        )
+
+    def revenue_forecast(
+        self,
+        period_starts: list[datetime],
+        granularity: SeriesGranularity,
+        *,
+        method: ForecastMethod = ForecastMethod.simple_moving_average,
+    ) -> dict[str, Forecast]:
+        """One Forecast per currency, each built from that currency's own
+        revenue_series history -- never a cross-currency figure. Series
+        points already arrive in ascending period order (see
+        get_revenue_series), so filtering by currency preserves
+        chronological order without a second sort."""
+        series = self.revenue_series(period_starts, granularity)
+        currencies = sorted({point.currency_code for point in series if point.currency_code})
+        return {
+            code: forecast_next_period(
+                [point.value for point in series if point.currency_code == code], method=method
+            )
+            for code in currencies
+        }
+
+    def invoice_count_forecast(
+        self,
+        period_starts: list[datetime],
+        granularity: SeriesGranularity,
+        *,
+        method: ForecastMethod = ForecastMethod.simple_moving_average,
+    ) -> Forecast:
+        series = self.invoice_count_series(period_starts, granularity)
+        return forecast_next_period([point.value for point in series], method=method)
 
     # --- Dashboard payload assembly -------------------------------------
     # Relocated verbatim (same computation, same output shape) from

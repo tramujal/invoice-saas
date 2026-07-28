@@ -387,6 +387,98 @@ export type KpiSnapshot = {
   average_payment_time: AnalyticsAveragePaymentTime;
 };
 
+// --- Phase 16C: trend analysis & forecasting -------------------------------
+//
+// Mirrors app.analytics.comparison.PeriodComparison / app.analytics.
+// calculators.trends.SeriesPoint / app.analytics.forecast.Forecast and
+// app/schemas.py's TrendSnapshotResponse (GET .../analytics/trends).
+// Every value here is already computed server-side by AnalyticsService's
+// trend engine -- this page only ever renders and formats these fields,
+// never recomputes a comparison, series point, or forecast client-side.
+
+export type TrendDirection = "up" | "down" | "flat" | "unknown";
+
+/** The 5 comparison kinds GET .../analytics/trends accepts (see
+ * app.analytics.time_windows.COMPARISON_KINDS) -- "today"/"yesterday"
+ * are too short a span for a meaningful comparison, and "previous_month"/
+ * "custom" are window selections, not a comparison request. */
+export type ComparisonPeriodKind =
+  | "current_month"
+  | "current_quarter"
+  | "current_year"
+  | "last_7_days"
+  | "last_30_days";
+
+export const COMPARISON_PERIOD_KINDS: ComparisonPeriodKind[] = [
+  "current_month",
+  "current_quarter",
+  "current_year",
+  "last_7_days",
+  "last_30_days",
+];
+
+export type SeriesGranularity = "monthly" | "quarterly" | "yearly";
+
+/** Never exposes only a percentage (see this phase's own spec) -- every
+ * field here is independently meaningful: "$1,200 -> $1,450 (+$250,
+ * +20.8%, up)", not just "+20.8%". */
+export type PeriodComparison = {
+  current: string;
+  previous: string;
+  absolute_difference: string;
+  percentage_difference: string | null;
+  direction: TrendDirection;
+};
+
+/** One point in a generic evolution series -- `period`'s format depends
+ * on the request's granularity ("2026-07" monthly, "2026-Q3" quarterly,
+ * "2026" yearly). `currency_code` is null for currency-agnostic series
+ * (invoice/customer/quote counts). Deliberately generic, not a chart-
+ * specific shape -- the same series feeds a line chart, a bar chart, or
+ * a plain table. */
+export type SeriesPoint = {
+  period: string;
+  value: string;
+  currency_code: string | null;
+};
+
+export type ForecastMethod = "simple_moving_average" | "weighted_moving_average" | "linear_trend";
+
+/** available=false is an honest gap (fewer than 2 historical periods),
+ * never a fabricated forecast_value -- same pattern as
+ * AnalyticsAveragePaymentTime. `inputs`/`method`/`window_size` are the
+ * forecast's own transparency: this page builds its translated
+ * explanation from these structured values, never from a raw backend
+ * string (there isn't one -- see app.analytics.forecast's own docstring
+ * on why `reason` is the only prose field, and only for the unavailable
+ * case). */
+export type Forecast = {
+  available: boolean;
+  method: ForecastMethod | null;
+  forecast_value: string | null;
+  inputs: string[];
+  window_size: number | null;
+  reason: string | null;
+};
+
+/** Response from GET /organizations/{org}/analytics/trends */
+export type TrendSnapshot = {
+  comparison_kind: ComparisonPeriodKind;
+  granularity: SeriesGranularity;
+  /** Never sum these across currency keys. */
+  revenue_trend: Record<string, PeriodComparison>;
+  invoice_count_trend: PeriodComparison;
+  customer_growth_trend: PeriodComparison;
+  quote_count_trend: PeriodComparison;
+  revenue_series: SeriesPoint[];
+  invoice_count_series: SeriesPoint[];
+  customer_count_series: SeriesPoint[];
+  quote_conversion_series: SeriesPoint[];
+  /** Never sum/compare these across currency keys. */
+  revenue_forecast: Record<string, Forecast>;
+  invoice_count_forecast: Forecast;
+};
+
 /** Response from GET /organizations/{org}/dashboard/analytics */
 export type DashboardAnalytics = {
   monthly_summary: MonthlySummaryPoint[];

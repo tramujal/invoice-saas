@@ -1047,6 +1047,72 @@ class KpiSnapshotResponse(BaseModel):
     average_payment_time: AveragePaymentTimeResponse
 
 
+# --- Phase 16C: trend analysis & forecasting --------------------------
+
+
+class PeriodComparisonResponse(BaseModel):
+    """Mirrors app.analytics.comparison.PeriodComparison. `direction` is
+    one of "up"/"down"/"flat"/"unknown" (see
+    app.analytics.trend_direction.TrendDirection) -- exposed as a plain
+    str here, the same convention TimeWindowResponse.kind already uses
+    for its own enum-backed domain field."""
+
+    current: Decimal
+    previous: Decimal
+    absolute_difference: Decimal
+    percentage_difference: Decimal | None
+    direction: str
+
+
+class SeriesPointResponse(BaseModel):
+    """Mirrors app.analytics.calculators.trends.SeriesPoint -- one
+    generic evolution-series point. `period`'s format depends on the
+    request's `granularity` ("2026-07" monthly, "2026-Q3" quarterly,
+    "2026" yearly). `currency_code` is null for currency-agnostic series
+    (invoice/customer/quote counts)."""
+
+    period: str
+    value: Decimal
+    currency_code: str | None
+
+
+class ForecastResponse(BaseModel):
+    """Mirrors app.analytics.forecast.Forecast. `available=False` is an
+    honest gap (not enough history), never a fabricated forecast_value --
+    see that module's own docstring. `inputs`/`method`/`window_size` are
+    exposed instead of a prose explanation so the frontend can build its
+    own translated explanation from these structured values."""
+
+    available: bool
+    method: str | None
+    forecast_value: Decimal | None
+    inputs: list[Decimal]
+    window_size: int | None
+    reason: str | None
+
+
+class TrendSnapshotResponse(BaseModel):
+    """Response from GET /organizations/{organization_id}/analytics/trends
+    -- assembled entirely by AnalyticsService's trend/series/forecast
+    methods, each delegating to app.analytics.calculators.trends /
+    app.analytics.forecast. `comparison_kind` and `granularity` echo back
+    the resolved request parameters, the same "tell the client what it
+    actually got" convention KpiSnapshotResponse.window already follows."""
+
+    comparison_kind: str
+    granularity: str
+    revenue_trend: dict[str, PeriodComparisonResponse]
+    invoice_count_trend: PeriodComparisonResponse
+    customer_growth_trend: PeriodComparisonResponse
+    quote_count_trend: PeriodComparisonResponse
+    revenue_series: list[SeriesPointResponse]
+    invoice_count_series: list[SeriesPointResponse]
+    customer_count_series: list[SeriesPointResponse]
+    quote_conversion_series: list[SeriesPointResponse]
+    revenue_forecast: dict[str, ForecastResponse]
+    invoice_count_forecast: ForecastResponse
+
+
 class InsightMetricResponse(BaseModel):
     currency_code: str | None
     value: Decimal | None
