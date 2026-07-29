@@ -13,6 +13,8 @@ from app.routers import (
     assistant,
     assistant_actions,
     auth,
+    billing,
+    billing_webhooks,
     customer_imports,
     customers,
     dashboard,
@@ -20,6 +22,7 @@ from app.routers import (
     invitation_public,
     invitations,
     invoices,
+    notifications,
     organizations,
     platform_admin,
     product_imports,
@@ -136,6 +139,9 @@ app.include_router(invitations.router)
 app.include_router(invitation_public.router)
 app.include_router(dashboard.router)
 app.include_router(analytics.router)
+app.include_router(billing.router)
+app.include_router(billing_webhooks.router)
+app.include_router(notifications.router)
 app.include_router(insights.router)
 app.include_router(organizations.router)
 app.include_router(assistant.router)

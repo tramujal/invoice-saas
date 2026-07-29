@@ -459,6 +459,12 @@ export type Forecast = {
   inputs: string[];
   window_size: number | null;
   reason: string | null;
+  /** True when the org's plan doesn't include forecasting (see
+   * app.billing.enforcement -- Phase 17B soft-gate), distinct from
+   * available=false's "not enough history yet". Defaults to false so
+   * older cached snapshots without this field still render the
+   * not-enough-data copy rather than an upgrade prompt. */
+  plan_restricted?: boolean;
 };
 
 /** Response from GET /organizations/{org}/analytics/trends */
@@ -980,22 +986,38 @@ export type PlanLimits = {
   max_quotes_per_month: number | null;
   max_ai_actions_per_month: number | null;
   storage_limit_mb: number | null;
+  // Phase 17A
+  max_api_keys: number | null;
+  max_webhooks: number | null;
 };
 
 export type PlanFeatures = {
   custom_branding_enabled: boolean;
   api_access_enabled: boolean;
   advanced_reports_enabled: boolean;
+  // Phase 17A
+  analytics_enabled: boolean;
+  forecasting_enabled: boolean;
+  ai_enabled: boolean;
+  background_jobs_enabled: boolean;
 };
 
 export type Plan = {
   id: string;
+  // `code` is the plan's immutable internal identifier (never renamed
+  // once created -- see app.models.Plan's own docstring); `name` is the
+  // editable display name Platform Admin can change freely.
   code: string;
   name: string;
   description: string | null;
   is_active: boolean;
   is_default: boolean;
   sort_order: number;
+  // Phase 17A
+  public: boolean;
+  monthly_price: string | null;
+  yearly_price: string | null;
+  currency: string;
   limits: PlanLimits;
   features: PlanFeatures;
   version: number;
@@ -1012,6 +1034,10 @@ export type PlanCreateRequest = {
   name: string;
   description?: string | null;
   sort_order?: number;
+  public?: boolean;
+  monthly_price?: string | null;
+  yearly_price?: string | null;
+  currency?: string;
   max_users?: number | null;
   max_customers?: number | null;
   max_products?: number | null;
@@ -1019,9 +1045,15 @@ export type PlanCreateRequest = {
   max_quotes_per_month?: number | null;
   max_ai_actions_per_month?: number | null;
   storage_limit_mb?: number | null;
+  max_api_keys?: number | null;
+  max_webhooks?: number | null;
   custom_branding_enabled?: boolean;
   api_access_enabled?: boolean;
   advanced_reports_enabled?: boolean;
+  analytics_enabled?: boolean;
+  forecasting_enabled?: boolean;
+  ai_enabled?: boolean;
+  background_jobs_enabled?: boolean;
   reason: string;
 };
 
@@ -1031,6 +1063,10 @@ export type PlanUpdateRequest = {
   name?: string;
   description?: string | null;
   sort_order?: number;
+  public?: boolean;
+  monthly_price?: string | null;
+  yearly_price?: string | null;
+  currency?: string;
   max_users?: number | null;
   max_customers?: number | null;
   max_products?: number | null;
@@ -1038,9 +1074,15 @@ export type PlanUpdateRequest = {
   max_quotes_per_month?: number | null;
   max_ai_actions_per_month?: number | null;
   storage_limit_mb?: number | null;
+  max_api_keys?: number | null;
+  max_webhooks?: number | null;
   custom_branding_enabled?: boolean;
   api_access_enabled?: boolean;
   advanced_reports_enabled?: boolean;
+  analytics_enabled?: boolean;
+  forecasting_enabled?: boolean;
+  ai_enabled?: boolean;
+  background_jobs_enabled?: boolean;
 };
 
 export type PlanActionRequest = {
@@ -1061,6 +1103,154 @@ export type OrganizationEntitlements = {
   plan_name: string;
   limits: PlanLimits;
   features: PlanFeatures;
+};
+
+// --- Phase 17A: Billing domain -------------------------------------------
+
+export type SubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "paused"
+  | "canceled"
+  | "expired"
+  | "inactive";
+
+export type BillingPeriod = "monthly" | "yearly";
+
+// The resolved capability layer (see app.billing.capabilities) -- feature
+// flags plus remaining quotas, so the frontend never has to re-derive
+// "can I create another X" from raw limits/usage itself.
+export type Capabilities = {
+  can_use_ai: boolean;
+  can_use_analytics: boolean;
+  can_use_forecasting: boolean;
+  can_use_background_jobs: boolean;
+  can_create_invoice: boolean;
+  can_create_quote: boolean;
+  can_create_api_key: boolean;
+  can_create_webhook: boolean;
+  remaining_invoice_quota: number | null;
+  remaining_quote_quota: number | null;
+  remaining_users: number | null;
+  remaining_api_keys: number | null;
+  remaining_webhooks: number | null;
+};
+
+// GET /organizations/{id}/subscription -- the tenant-facing, read-only
+// view of an organization's own subscription. Deliberately excludes
+// provider_name/provider_reference: this app has no payment provider
+// integrated in this phase, and never will expose provider internals
+// through the tenant API even once one exists.
+export type Subscription = {
+  id: string;
+  organization_id: string;
+  plan: Plan;
+  status: SubscriptionStatus;
+  billing_period: BillingPeriod;
+  trial_start: string | null;
+  trial_end: string | null;
+  current_period_start: string;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+  canceled_at: string | null;
+  ended_at: string | null;
+  capabilities: Capabilities;
+  created_at: string;
+  updated_at: string;
+};
+
+// --- Phase 19: self-service checkout + billing portal --------------------
+
+// GET /organizations/{id}/billing/plans -- every active, public plan a
+// tenant can choose from (see Plan.public's own docstring on why a
+// legacy/grandfathered plan is excluded here but not from Plan itself).
+export type PublicPlansResponse = Plan[];
+
+export type StartCheckoutRequest = {
+  plan_id: string;
+  billing_period: BillingPeriod;
+  success_url: string;
+  cancel_url: string;
+};
+
+export type StartCheckoutResponse = {
+  checkout_url: string;
+};
+
+export type StartPortalSessionRequest = {
+  return_url: string;
+};
+
+export type StartPortalSessionResponse = {
+  portal_url: string;
+};
+
+// One row of subscription HISTORY (see app.models.SubscriptionEvent) --
+// distinct from the platform Audit Log: this is "what happened to this
+// subscription over time," not "who did what."
+export type SubscriptionEvent = {
+  id: string;
+  subscription_id: string;
+  organization_id: string;
+  actor_user_id: string | null;
+  event_type: string;
+  previous_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+// GET /admin/subscriptions -- one row per organization's subscription,
+// deliberately narrower than the detail response (no event history),
+// matching PlatformOrganizationSummary's own list-vs-detail precedent.
+export type PlatformSubscriptionSummary = {
+  id: string;
+  organization_id: string;
+  organization_name: string;
+  plan_code: string;
+  plan_name: string;
+  status: SubscriptionStatus;
+  billing_period: BillingPeriod;
+  trial_end: string | null;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+  created_at: string;
+};
+
+export type PaginatedPlatformSubscriptions = {
+  total: number;
+  items: PlatformSubscriptionSummary[];
+};
+
+// GET /admin/subscriptions/{id} -- the full subscription plus its own
+// event history, for platform-admin inspection.
+export type PlatformSubscriptionDetail = {
+  id: string;
+  organization_id: string;
+  organization_name: string;
+  plan: Plan;
+  status: SubscriptionStatus;
+  billing_period: BillingPeriod;
+  trial_start: string | null;
+  trial_end: string | null;
+  current_period_start: string;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+  canceled_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+  events: SubscriptionEvent[];
+};
+
+export type AdminChangeSubscriptionPlanRequest = {
+  plan_id: string;
+  reason: string;
+};
+
+export type AdminSubscriptionActionRequest = {
+  reason: string;
 };
 
 // GET /organizations/{id}/usage -- Phase 14B measures usage only; this
@@ -1093,13 +1283,30 @@ export type PlanLimitReachedResource =
   | "products"
   | "invoices"
   | "quotes"
-  | "ai_actions";
+  | "ai_actions"
+  // Phase 17B
+  | "api_keys"
+  | "webhooks";
 
 export type PlanLimitReachedDetail = {
   code: "plan_limit_reached";
   resource: PlanLimitReachedResource;
   used: number;
   limit: number;
+  plan: { id: string; code: string; name: string };
+  message: string;
+};
+
+// Phase 17B -- the structured 403 body every all-or-nothing plan-feature
+// gate returns (see app.billing.enforcement.CapabilityDeniedError
+// .to_error_detail()). Distinct from PlanLimitReachedDetail above: this
+// is "your plan doesn't include this feature at all", never a
+// used-vs-limit quota.
+export type CapabilityDeniedFeature = "ai" | "analytics";
+
+export type CapabilityDeniedDetail = {
+  code: "feature_not_available";
+  feature: CapabilityDeniedFeature;
   plan: { id: string; code: string; name: string };
   message: string;
 };
@@ -1357,4 +1564,30 @@ export type PaginatedPlatformBackgroundJobsResponse = {
 
 export type PlatformJobActionRequest = {
   reason: string;
+};
+
+// Phase 20: event-driven notifications (in-app inbox + email preference)
+export type Notification = {
+  id: string;
+  event_type: string;
+  title: string;
+  body: string;
+  object_type: string;
+  object_id: string;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type PaginatedNotificationsResponse = {
+  total: number;
+  unread_count: number;
+  items: Notification[];
+};
+
+export type NotificationPreference = {
+  email_enabled: boolean;
+};
+
+export type UpdateNotificationPreferenceRequest = {
+  email_enabled: boolean;
 };

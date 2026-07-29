@@ -463,4 +463,61 @@ describe("AnalyticsPage trend engine (Phase 16C)", () => {
     expect(screen.getByText("Forecast")).toBeInTheDocument();
     expect(screen.getByText("Period comparison")).toBeInTheDocument();
   });
+
+  it("shows a plan-restricted forecast message distinct from not-enough-data", async () => {
+    mockApiResponses(
+      makeSnapshot(),
+      makeTrendSnapshot({
+        revenue_forecast: {
+          USD: {
+            available: false,
+            method: null,
+            forecast_value: null,
+            inputs: [],
+            window_size: null,
+            reason: "Forecasting is not included in your current plan.",
+            plan_restricted: true,
+          },
+        },
+      })
+    );
+    renderWithProviders(<AnalyticsPage />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Forecasting is not included in your current plan. Upgrade to unlock it.")
+      ).toBeInTheDocument()
+    );
+    expect(screen.queryByText("Not enough history yet to forecast")).not.toBeInTheDocument();
+  });
+});
+
+describe("AnalyticsPage capability enforcement (Phase 17B)", () => {
+  it("shows an upgrade-oriented empty state on 403 feature_not_available, instead of the dashboard or a generic error", async () => {
+    apiFetchMock.mockRejectedValue(
+      new ApiError("Request failed (403)", 403, {
+        detail: {
+          code: "feature_not_available",
+          feature: "analytics",
+          plan: { id: "plan-1", code: "free", name: "Free" },
+          message: "Analytics is not included in your Free plan.",
+        },
+      })
+    );
+    renderWithProviders(<AnalyticsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("Analytics not included in your plan")).toBeInTheDocument()
+    );
+    expect(
+      screen.getByText(
+        "Analytics and reporting are not included in your Free plan. Upgrade your plan to unlock this feature."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Total invoices")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("You don't have permission to view analytics for this organization.")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Time period")).not.toBeInTheDocument();
+  });
 });

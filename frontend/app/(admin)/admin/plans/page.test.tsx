@@ -30,6 +30,10 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
     is_active: true,
     is_default: true,
     sort_order: 0,
+    public: true,
+    monthly_price: "0.00",
+    yearly_price: "0.00",
+    currency: "USD",
     limits: {
       max_users: 2,
       max_customers: 100,
@@ -38,11 +42,17 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
       max_quotes_per_month: 50,
       max_ai_actions_per_month: 25,
       storage_limit_mb: 500,
+      max_api_keys: 1,
+      max_webhooks: 0,
     },
     features: {
       custom_branding_enabled: false,
       api_access_enabled: false,
       advanced_reports_enabled: false,
+      analytics_enabled: false,
+      forecasting_enabled: false,
+      ai_enabled: false,
+      background_jobs_enabled: false,
     },
     version: 1,
     created_at: "2026-01-01T00:00:00Z",
@@ -58,6 +68,8 @@ const proPlan = makePlan({
   name: "Pro",
   is_default: false,
   sort_order: 2,
+  monthly_price: "49.00",
+  yearly_price: "490.00",
   limits: {
     max_users: 50,
     max_customers: 10000,
@@ -66,8 +78,18 @@ const proPlan = makePlan({
     max_quotes_per_month: 10000,
     max_ai_actions_per_month: 5000,
     storage_limit_mb: null,
+    max_api_keys: 10,
+    max_webhooks: 10,
   },
-  features: { custom_branding_enabled: true, api_access_enabled: true, advanced_reports_enabled: true },
+  features: {
+    custom_branding_enabled: true,
+    api_access_enabled: true,
+    advanced_reports_enabled: true,
+    analytics_enabled: true,
+    forecasting_enabled: true,
+    ai_enabled: true,
+    background_jobs_enabled: true,
+  },
 });
 
 beforeEach(() => {

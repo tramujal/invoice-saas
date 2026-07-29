@@ -19,3 +19,7 @@ class PlatformAuditAction(str, Enum):
     organization_plan_changed = "organization.plan_changed"
     background_job_retried = "platform.background_job_retried"
     background_job_cancelled = "platform.background_job_cancelled"
+    subscription_plan_changed = "subscription.plan_changed"
+    subscription_canceled = "subscription.canceled"
+    subscription_reactivated = "subscription.reactivated"
+    subscription_resumed = "subscription.resumed"

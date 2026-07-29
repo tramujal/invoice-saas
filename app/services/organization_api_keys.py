@@ -25,6 +25,7 @@ from app.api_key_permissions import ApiKeyPermission
 from app.api_keys import generate_api_key
 from app.models import OrganizationApiKey, User
 from app.services.organization_api_key_audit import record_api_key_action
+from app.services.plan_limits import LimitedResource, check_limit
 
 
 def _aware(value: datetime) -> datetime:
@@ -59,6 +60,7 @@ def create_api_key(
     secret ever exists outside this function's local scope; the caller
     (the management router) must return it in the response body and
     never persist or log it."""
+    check_limit(db, organization_id, LimitedResource.api_keys)
     full_key, prefix, hashed_secret = generate_api_key()
     api_key = OrganizationApiKey(
         organization_id=organization_id,

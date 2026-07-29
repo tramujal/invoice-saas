@@ -18,6 +18,8 @@ const RESOURCE_LABEL_KEY: Record<PlanLimitReachedResource, string> = {
   invoices: "planAndLimits.rowInvoices",
   quotes: "planAndLimits.rowQuotes",
   ai_actions: "planAndLimits.rowAiActions",
+  api_keys: "planLimitReached.resourceApiKeys",
+  webhooks: "planLimitReached.resourceWebhooks",
 };
 
 type PlanLimitReachedDialogProps = {

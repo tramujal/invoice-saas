@@ -15,3 +15,4 @@ from enum import Enum
 class JobType(str, Enum):
     webhook_deliver = "webhook.deliver"
     webhook_retry = "webhook.retry"
+    notification_email = "notification.email"

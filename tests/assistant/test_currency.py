@@ -8,7 +8,7 @@ currency; a regression here would mean the two silently drift)."""
 import json
 
 from app.ai.base import ToolInvocation
-from tests.factories import make_customer, make_org_with_owner, make_product
+from tests.factories import make_customer, make_org_with_owner_on_plan, make_product
 
 
 def _ndjson_events(response_text: str) -> list[dict]:
@@ -26,7 +26,7 @@ def _chat(client, org_id, headers, message="do it"):
 
 
 def test_ai_create_invoice_draft_infers_currency_from_product(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner1@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner1@example.com")
     customer = make_customer(db_session, owner.organization)
     product = make_product(db_session, owner.organization, name="Hosting", currency_code="EUR")
     fake_ai_provider.events = [
@@ -56,7 +56,7 @@ def test_ai_create_invoice_draft_infers_currency_from_product(client, db_session
 
 
 def test_ai_create_invoice_draft_requires_currency_for_manual_line(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner2@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner2@example.com")
     customer = make_customer(db_session, owner.organization)
     fake_ai_provider.events = [
         ToolInvocation(
@@ -73,7 +73,7 @@ def test_ai_create_invoice_draft_requires_currency_for_manual_line(client, db_se
 
 
 def test_ai_create_quote_draft_infers_currency_from_product(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner3@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner3@example.com")
     customer = make_customer(db_session, owner.organization)
     product = make_product(db_session, owner.organization, name="Support", currency_code="UYU")
     fake_ai_provider.events = [
@@ -100,7 +100,7 @@ def test_ai_create_quote_draft_infers_currency_from_product(client, db_session, 
 
 
 def test_ai_create_quote_draft_requires_currency_for_manual_line(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner4@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner4@example.com")
     customer = make_customer(db_session, owner.organization)
     fake_ai_provider.events = [
         ToolInvocation(

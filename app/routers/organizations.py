@@ -82,11 +82,17 @@ def get_organization_entitlements_endpoint(
             max_quotes_per_month=entitlements.max_quotes_per_month,
             max_ai_actions_per_month=entitlements.max_ai_actions_per_month,
             storage_limit_mb=entitlements.storage_limit_mb,
+            max_api_keys=entitlements.max_api_keys,
+            max_webhooks=entitlements.max_webhooks,
         ),
         features=PlanFeatures(
             custom_branding_enabled=entitlements.custom_branding_enabled,
             api_access_enabled=entitlements.api_access_enabled,
             advanced_reports_enabled=entitlements.advanced_reports_enabled,
+            analytics_enabled=entitlements.analytics_enabled,
+            forecasting_enabled=entitlements.forecasting_enabled,
+            ai_enabled=entitlements.ai_enabled,
+            background_jobs_enabled=entitlements.background_jobs_enabled,
         ),
     )
 

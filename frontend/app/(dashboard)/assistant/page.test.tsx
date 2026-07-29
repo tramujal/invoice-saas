@@ -1,6 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth-storage";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
 
@@ -159,5 +160,29 @@ describe("Assistant page", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByRole("button", { name: "Confirm change" })).toBeInTheDocument();
+  });
+
+  it("shows an AI-not-available toast on 403 feature_not_available and rolls back the optimistic message", async () => {
+    apiFetchStreamMock.mockRejectedValue(
+      new ApiError("Request failed (403)", 403, {
+        detail: {
+          code: "feature_not_available",
+          feature: "ai",
+          plan: { id: "plan-1", code: "free", name: "Free" },
+          message: "Ai is not included in your Free plan.",
+        },
+      })
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AssistantPage />);
+
+    const textarea = screen.getByPlaceholderText("Ask about your business…");
+    await user.type(textarea, "How am I doing?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("The AI Assistant is not included in your current plan.")).toBeInTheDocument()
+    );
+    expect(screen.queryByText("How am I doing?")).not.toBeInTheDocument();
   });
 });

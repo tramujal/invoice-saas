@@ -441,6 +441,43 @@ def test_organization_plan_change_succeeds_and_audits_old_and_new_plan(
     assert details["new_plan"]["code"] == "starter"
 
 
+def test_organization_plan_change_also_writes_a_subscription_event(
+    client, db_session, super_admin_headers, super_admin
+):
+    """Phase 17A: this endpoint now delegates to BillingService.change_plan
+    internally (see app.routers.platform_admin.update_organization_plan) --
+    the existing PlatformAuditLog write above is preserved unchanged, and a
+    SubscriptionEvent is additionally recorded as the billing-domain's own
+    history of the same change."""
+    from app.models import Subscription, SubscriptionEvent
+    from app.subscription_event_type import SubscriptionEventType
+    from tests.factories import make_org_with_owner
+
+    owner = make_org_with_owner(db_session, email="plan-change-event@example.com", org_name="Plan Event Co")
+    starter = db_session.query(Plan).filter_by(code="starter").one()
+
+    response = client.patch(
+        f"/admin/organizations/{owner.organization.id}/plan",
+        json={"plan_id": starter.id, "reason": "customer upgraded to starter"},
+        headers=super_admin_headers,
+    )
+    assert response.status_code == 200
+
+    subscription = (
+        db_session.query(Subscription).filter_by(organization_id=owner.organization.id).one()
+    )
+    assert subscription.plan_id == starter.id
+
+    events = (
+        db_session.query(SubscriptionEvent)
+        .filter_by(subscription_id=subscription.id)
+        .order_by(SubscriptionEvent.created_at.asc())
+        .all()
+    )
+    assert events[-1].event_type == SubscriptionEventType.plan_upgraded.value
+    assert events[-1].actor_user_id == super_admin.id
+
+
 def test_organization_plan_change_same_plan_returns_409_no_audit(client, db_session, super_admin_headers):
     from tests.factories import make_org_with_owner
 

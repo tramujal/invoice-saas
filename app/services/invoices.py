@@ -51,7 +51,7 @@ from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
 from app.services.plan_limits import LimitedResource, check_limit
 from app.services.products import ProductNotFoundError, get_product_in_org
-from app.services.webhook_events import record_webhook_event
+from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 from app.schemas import (
     CurrencyCode,
@@ -268,7 +268,7 @@ def create_invoice_record(
     # (browser router, public API, AI tool, CSV import) AND indirectly by
     # app.services.quotes.convert_quote_to_invoice, so a quote conversion
     # is automatically covered here too, with zero special-casing.
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization_id,
         event_type=WebhookEventType.invoice_created,
@@ -315,7 +315,7 @@ def update_invoice_payment_status_record(
     db: Session, invoice: Invoice, new_status: PaymentStatus
 ) -> Invoice:
     invoice.payment_status = new_status.value
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=invoice.organization_id,
         event_type=WebhookEventType.invoice_updated,
@@ -384,7 +384,7 @@ def send_invoice_email_record(db: Session, invoice: Invoice) -> SendInvoiceEmail
     # successfully (mirrors this module's own established
     # network-I/O-first, then-record-outcome pattern, e.g.
     # claim_and_send_reminder).
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=invoice.organization_id,
         event_type=WebhookEventType.invoice_sent,

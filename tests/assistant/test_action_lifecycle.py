@@ -14,7 +14,7 @@ from app.invoice_numbering import format_invoice_number
 from app.membership_role import MembershipRole
 from app.models import AssistantAction
 from app.payment_status import PaymentStatus
-from tests.factories import make_invoice, make_member_in_org, make_org_with_owner
+from tests.factories import make_invoice, make_member_in_org, make_org_with_owner_on_plan
 
 
 def _ndjson_events(response_text: str) -> list[dict]:
@@ -35,7 +35,7 @@ def _propose_update_status(client, org_id, headers, invoice_reference, new_statu
 
 
 def test_propose_creates_action_row_without_executing(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     fake_ai_provider.events = [
         ToolInvocation(
@@ -57,7 +57,7 @@ def test_propose_creates_action_row_without_executing(client, db_session, fake_a
 
 
 def test_confirm_executes_the_action(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner2@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner2@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     fake_ai_provider.events = [
         ToolInvocation(
@@ -80,7 +80,7 @@ def test_confirm_executes_the_action(client, db_session, fake_ai_provider):
 
 
 def test_confirm_is_not_repeatable(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner3@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner3@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     fake_ai_provider.events = [
         ToolInvocation(
@@ -105,7 +105,7 @@ def test_confirm_is_not_repeatable(client, db_session, fake_ai_provider):
 def test_confirm_rejects_expired_proposal(client, db_session, fake_ai_provider):
     from datetime import datetime, timedelta, timezone
 
-    owner = make_org_with_owner(db_session, email="owner4@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner4@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     fake_ai_provider.events = [
         ToolInvocation(
@@ -131,7 +131,7 @@ def test_confirm_rejects_expired_proposal(client, db_session, fake_ai_provider):
 
 
 def test_confirm_rejects_cancelled_proposal(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner5@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner5@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     fake_ai_provider.events = [
         ToolInvocation(
@@ -154,7 +154,7 @@ def test_confirm_rejects_cancelled_proposal(client, db_session, fake_ai_provider
 
 
 def test_viewer_tool_call_is_denied_as_stream_event_not_persisted(client, db_session, fake_ai_provider):
-    owner = make_org_with_owner(db_session, email="owner6@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner6@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     viewer = make_member_in_org(
         db_session, owner.organization, email="viewer@example.com", role=MembershipRole.viewer
@@ -185,7 +185,7 @@ def test_confirm_rechecks_permission_after_demotion(client, db_session, fake_ai_
     permission must be evaluated at execution (confirm) time, not frozen
     at propose time. A user who was an admin when they proposed an action
     must be blocked at confirm if they've since been demoted to viewer."""
-    owner = make_org_with_owner(db_session, email="owner7@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner7@example.com")
     invoice = make_invoice(db_session, owner.organization, owner.user)
     admin = make_member_in_org(
         db_session, owner.organization, email="admin@example.com", role=MembershipRole.admin

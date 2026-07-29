@@ -14,8 +14,8 @@ test_role_hierarchy.py for the pure app.role_hierarchy unit tests."""
 import pytest
 
 from app.membership_role import MembershipRole
-from app.models import PLAN_ID_ENTERPRISE
-from tests.factories import make_member_in_org, make_org_with_owner
+from app.models import PLAN_ID_ENTERPRISE, Plan
+from tests.factories import make_member_in_org, make_org_with_owner, make_subscription
 
 
 @pytest.fixture
@@ -31,6 +31,7 @@ def four_roles(db_session):
     # it says it tests.
     org.plan_id = PLAN_ID_ENTERPRISE
     db_session.commit()
+    make_subscription(db_session, org, plan=db_session.get(Plan, PLAN_ID_ENTERPRISE))
     admin = make_member_in_org(db_session, org, email="admin@example.com", role=MembershipRole.admin)
     member = make_member_in_org(db_session, org, email="member@example.com", role=MembershipRole.member)
     viewer = make_member_in_org(db_session, org, email="viewer@example.com", role=MembershipRole.viewer)

@@ -4,12 +4,13 @@ import { FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { API_KEY_PERMISSIONS, getApiKeyPermissionLabel, type ApiKeyPermission } from "@/lib/api-key-permissions";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { ApiKeyCreated } from "@/lib/types";
+import type { ApiKeyCreated, PlanLimitReachedDetail } from "@/lib/types";
 
 const NAME_MAX_LENGTH = 100;
 const DESCRIPTION_MAX_LENGTH = 500;
@@ -29,6 +30,7 @@ export function CreateApiKeyForm({ onCreated }: CreateApiKeyFormProps) {
   const [nameError, setNameError] = useState<string | null>(null);
   const [permissionsError, setPermissionsError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   function togglePermission(permission: ApiKeyPermission) {
     setPermissions((prev) => {
@@ -85,9 +87,16 @@ export function CreateApiKeyForm({ onCreated }: CreateApiKeyFormProps) {
       onCreated(created);
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(
-        isEmailNotVerifiedError(err) ? t("errors.emailNotVerified") : formatApiError(err, t("apiKeys.toastCreateError"))
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(err, t("apiKeys.toastCreateError"))
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -189,6 +198,7 @@ export function CreateApiKeyForm({ onCreated }: CreateApiKeyFormProps) {
           </Button>
         </div>
       </form>
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </section>
   );
 }

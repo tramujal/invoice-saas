@@ -30,6 +30,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.factory import is_ai_configured
 from app.assistant_action_status import AssistantActionStatus
+from app.billing.service import BillingService, InvalidSubscriptionStateError
+from app.subscription_status import SubscriptionStatus
 from app.database import get_db
 from app.deps import get_current_user, require_platform_permission
 from app.invoice_numbering import format_invoice_number
@@ -50,6 +52,8 @@ from app.models import (
     Product,
     Quote,
     QuoteReminder,
+    Subscription,
+    SubscriptionEvent,
     User,
 )
 from app.organization_status import OrganizationStatus
@@ -61,11 +65,14 @@ from app.rate_limit import get_client_ip
 from app.reminder_status import ReminderStatus
 from app.routers.auth import issue_password_reset
 from app.schemas import (
+    AdminChangeSubscriptionPlanRequest,
+    AdminSubscriptionActionRequest,
     OrganizationPlanChangeRequest,
     OrganizationUsageResponse,
     PaginatedPlatformAuditLogResponse,
     PaginatedPlatformBackgroundJobsResponse,
     PaginatedPlatformOrganizationsResponse,
+    PaginatedPlatformSubscriptions,
     PaginatedPlatformUsersResponse,
     PlanActionRequest,
     PlanCreateRequest,
@@ -87,20 +94,23 @@ from app.schemas import (
     PlatformRoleActionRequest,
     PlatformSettingsResponse,
     PlatformSettingsUpdateRequest,
+    PlatformSubscriptionDetail,
+    PlatformSubscriptionSummary,
     PlatformSystemHealthResponse,
     PlatformUserActionRequest,
     PlatformUserActionResponse,
     PlatformUserDetail,
     PlatformUserOrganization,
     PlatformUserSummary,
+    SubscriptionEventResponse,
     UsageResourceSnapshot,
 )
 from app.job_status import JobStatus
 from app.job_type import JobType
 from app.services.background_jobs import enqueue_job
-from app.services.entitlements import get_default_plan
+from app.services.entitlements import get_active_subscription, get_default_plan
 from app.services.organization_usage import ResourceUsage, get_usage_snapshot
-from app.services.webhook_events import record_webhook_event
+from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 from app.services.platform_audit import (
     record_job_action,
@@ -646,12 +656,22 @@ def update_organization_plan(
             detail={"code": "plan_inactive", "message": "This plan is inactive and cannot be assigned."},
         )
 
-    old_plan = db.get(Plan, organization.plan_id)
+    # The Subscription (not organization.plan_id, which is now only a
+    # harmless denormalized copy) is the source of truth for the
+    # organization's current plan -- see app.services.entitlements
+    # .get_active_subscription.
+    subscription = get_active_subscription(db, organization.id)
+    old_plan = db.get(Plan, subscription.plan_id)
     if old_plan is not None and old_plan.id == new_plan.id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "no_changes", "message": "This organization is already on that plan."},
         )
+
+    # A platform-admin reassignment accepts any active plan regardless of
+    # sort_order direction -- see BillingService.change_plan's own
+    # docstring for why this differs from upgrade_plan/downgrade_plan.
+    BillingService(db).change_plan(subscription, new_plan, actor=current_user)
 
     organization.plan_id = new_plan.id
     record_organization_action(
@@ -666,7 +686,7 @@ def update_organization_plan(
             "new_plan": {"id": new_plan.id, "code": new_plan.code},
         },
     )
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization.id,
         event_type=WebhookEventType.organization_plan_changed,
@@ -681,6 +701,276 @@ def update_organization_plan(
     db.commit()
     db.refresh(organization)
     return _build_organization_detail(db, organization)
+
+
+# --- Subscriptions (Phase 17A) ----------------------------------------
+#
+# Distinct from the /organizations/{id}/plan endpoint above: that one
+# stays for backward compatibility with the existing admin org-detail
+# UI, while these address a subscription directly and additionally
+# expose its full SubscriptionEvent history. Every mutation here is a
+# thin wrapper over app.billing.service.BillingService -- the actual
+# business rules live there, never duplicated in this router.
+
+
+def _subscription_or_404(db: Session, subscription_id: str) -> Subscription:
+    subscription = db.get(Subscription, subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+    return subscription
+
+
+def _build_subscription_event_response(event: SubscriptionEvent) -> SubscriptionEventResponse:
+    return SubscriptionEventResponse(
+        id=event.id,
+        subscription_id=event.subscription_id,
+        organization_id=event.organization_id,
+        actor_user_id=event.actor_user_id,
+        event_type=event.event_type,
+        previous_values=json.loads(event.previous_values) if event.previous_values else None,
+        new_values=json.loads(event.new_values) if event.new_values else None,
+        metadata=json.loads(event.metadata_json) if event.metadata_json else None,
+        created_at=event.created_at,
+    )
+
+
+def _build_subscription_detail(db: Session, subscription: Subscription) -> PlatformSubscriptionDetail:
+    organization = db.get(Organization, subscription.organization_id)
+    plan = db.get(Plan, subscription.plan_id)
+    events = db.scalars(
+        select(SubscriptionEvent)
+        .where(SubscriptionEvent.subscription_id == subscription.id)
+        .order_by(SubscriptionEvent.created_at.asc())
+    ).all()
+    return PlatformSubscriptionDetail(
+        id=subscription.id,
+        organization_id=subscription.organization_id,
+        organization_name=organization.business_name or organization.name,
+        plan=_build_plan_response(plan),
+        status=subscription.status,
+        billing_period=subscription.billing_period,
+        trial_start=subscription.trial_start,
+        trial_end=subscription.trial_end,
+        current_period_start=subscription.current_period_start,
+        current_period_end=subscription.current_period_end,
+        cancel_at_period_end=subscription.cancel_at_period_end,
+        canceled_at=subscription.canceled_at,
+        ended_at=subscription.ended_at,
+        created_at=subscription.created_at,
+        updated_at=subscription.updated_at,
+        events=[_build_subscription_event_response(e) for e in events],
+    )
+
+
+@router.get("/subscriptions", response_model=PaginatedPlatformSubscriptions)
+def list_platform_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status_filter: SubscriptionStatus | None = Query(default=None, alias="status"),
+    plan_id: str | None = Query(default=None),
+) -> PaginatedPlatformSubscriptions:
+    """Mirrors list_platform_organizations' exact shape -- paginated,
+    filterable, cross-tenant by construction (no organization_id param)."""
+    require_platform_permission(current_user, PlatformPermission.organizations_view)
+
+    base_query = select(Subscription)
+    if status_filter is not None:
+        base_query = base_query.where(Subscription.status == status_filter.value)
+    if plan_id:
+        base_query = base_query.where(Subscription.plan_id == plan_id)
+
+    total = db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
+    subscriptions = db.scalars(
+        base_query.order_by(Subscription.created_at.desc()).limit(limit).offset(offset)
+    ).all()
+
+    org_ids = [s.organization_id for s in subscriptions]
+    plan_ids = [s.plan_id for s in subscriptions]
+    orgs_by_id = (
+        {o.id: o for o in db.scalars(select(Organization).where(Organization.id.in_(org_ids)))}
+        if org_ids
+        else {}
+    )
+    plans_by_id = (
+        {p.id: p for p in db.scalars(select(Plan).where(Plan.id.in_(plan_ids)))} if plan_ids else {}
+    )
+
+    items = [
+        PlatformSubscriptionSummary(
+            id=s.id,
+            organization_id=s.organization_id,
+            organization_name=orgs_by_id[s.organization_id].business_name
+            or orgs_by_id[s.organization_id].name,
+            plan_code=plans_by_id[s.plan_id].code,
+            plan_name=plans_by_id[s.plan_id].name,
+            status=s.status,
+            billing_period=s.billing_period,
+            trial_end=s.trial_end,
+            current_period_end=s.current_period_end,
+            cancel_at_period_end=s.cancel_at_period_end,
+            created_at=s.created_at,
+        )
+        for s in subscriptions
+    ]
+    return PaginatedPlatformSubscriptions(total=total, items=items)
+
+
+@router.get("/subscriptions/{subscription_id}", response_model=PlatformSubscriptionDetail)
+def get_platform_subscription(
+    subscription_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformSubscriptionDetail:
+    require_platform_permission(current_user, PlatformPermission.organizations_view)
+    subscription = _subscription_or_404(db, subscription_id)
+    return _build_subscription_detail(db, subscription)
+
+
+@router.post("/subscriptions/{subscription_id}/change-plan", response_model=PlatformSubscriptionDetail)
+def change_platform_subscription_plan(
+    subscription_id: str,
+    body: AdminChangeSubscriptionPlanRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformSubscriptionDetail:
+    """Thin wrapper over BillingService.change_plan -- the same
+    direction-agnostic admin reassignment update_organization_plan uses
+    above, just addressed by subscription id instead of organization id."""
+    require_platform_permission(current_user, PlatformPermission.organizations_manage)
+    subscription = _subscription_or_404(db, subscription_id)
+    organization = _organization_or_404(db, subscription.organization_id)
+
+    new_plan = db.get(Plan, body.plan_id)
+    if new_plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    if not new_plan.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "plan_inactive", "message": "This plan is inactive and cannot be assigned."},
+        )
+    old_plan = db.get(Plan, subscription.plan_id)
+    if old_plan is not None and old_plan.id == new_plan.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "no_changes", "message": "This subscription is already on that plan."},
+        )
+
+    BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+    organization.plan_id = new_plan.id
+    record_organization_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.subscription_plan_changed,
+        organization=organization,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+        details={
+            "old_plan": {"id": old_plan.id, "code": old_plan.code} if old_plan is not None else None,
+            "new_plan": {"id": new_plan.id, "code": new_plan.code},
+        },
+    )
+    db.commit()
+    db.refresh(subscription)
+    return _build_subscription_detail(db, subscription)
+
+
+@router.post("/subscriptions/{subscription_id}/cancel", response_model=PlatformSubscriptionDetail)
+def cancel_platform_subscription(
+    subscription_id: str,
+    body: AdminSubscriptionActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformSubscriptionDetail:
+    """Cancels immediately (BillingService.cancel_immediately) -- there is
+    no scheduled job in this phase to later act on a cancel_at_period_end
+    flag, so the platform-admin action is deliberately the immediate
+    variant, not the end-of-period one."""
+    require_platform_permission(current_user, PlatformPermission.organizations_manage)
+    subscription = _subscription_or_404(db, subscription_id)
+    organization = _organization_or_404(db, subscription.organization_id)
+
+    BillingService(db).cancel_immediately(subscription, actor=current_user)
+    record_organization_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.subscription_canceled,
+        organization=organization,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+    )
+    db.commit()
+    db.refresh(subscription)
+    return _build_subscription_detail(db, subscription)
+
+
+@router.post("/subscriptions/{subscription_id}/reactivate", response_model=PlatformSubscriptionDetail)
+def reactivate_platform_subscription(
+    subscription_id: str,
+    body: AdminSubscriptionActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformSubscriptionDetail:
+    require_platform_permission(current_user, PlatformPermission.organizations_manage)
+    subscription = _subscription_or_404(db, subscription_id)
+    organization = _organization_or_404(db, subscription.organization_id)
+
+    try:
+        BillingService(db).reactivate(subscription, actor=current_user)
+    except InvalidSubscriptionStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "not_cancelable", "message": str(exc)},
+        ) from exc
+
+    record_organization_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.subscription_reactivated,
+        organization=organization,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+    )
+    db.commit()
+    db.refresh(subscription)
+    return _build_subscription_detail(db, subscription)
+
+
+@router.post("/subscriptions/{subscription_id}/resume", response_model=PlatformSubscriptionDetail)
+def resume_platform_subscription(
+    subscription_id: str,
+    body: AdminSubscriptionActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformSubscriptionDetail:
+    require_platform_permission(current_user, PlatformPermission.organizations_manage)
+    subscription = _subscription_or_404(db, subscription_id)
+    organization = _organization_or_404(db, subscription.organization_id)
+
+    try:
+        BillingService(db).resume(subscription, actor=current_user)
+    except InvalidSubscriptionStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "not_paused", "message": str(exc)},
+        ) from exc
+
+    record_organization_action(
+        db,
+        actor=current_user,
+        action=PlatformAuditAction.subscription_resumed,
+        organization=organization,
+        reason=body.reason,
+        client_ip=get_client_ip(request),
+    )
+    db.commit()
+    db.refresh(subscription)
+    return _build_subscription_detail(db, subscription)
 
 
 @router.get("/users", response_model=PaginatedPlatformUsersResponse)
@@ -1184,6 +1474,10 @@ def _build_plan_response(plan: Plan) -> PlanResponse:
         is_active=plan.is_active,
         is_default=plan.is_default,
         sort_order=plan.sort_order,
+        public=plan.public,
+        monthly_price=plan.monthly_price,
+        yearly_price=plan.yearly_price,
+        currency=plan.currency,
         limits=PlanLimits(
             max_users=plan.max_users,
             max_customers=plan.max_customers,
@@ -1192,11 +1486,17 @@ def _build_plan_response(plan: Plan) -> PlanResponse:
             max_quotes_per_month=plan.max_quotes_per_month,
             max_ai_actions_per_month=plan.max_ai_actions_per_month,
             storage_limit_mb=plan.storage_limit_mb,
+            max_api_keys=plan.max_api_keys,
+            max_webhooks=plan.max_webhooks,
         ),
         features=PlanFeatures(
             custom_branding_enabled=plan.custom_branding_enabled,
             api_access_enabled=plan.api_access_enabled,
             advanced_reports_enabled=plan.advanced_reports_enabled,
+            analytics_enabled=plan.analytics_enabled,
+            forecasting_enabled=plan.forecasting_enabled,
+            ai_enabled=plan.ai_enabled,
+            background_jobs_enabled=plan.background_jobs_enabled,
         ),
         version=plan.version,
         created_at=plan.created_at,
@@ -1245,6 +1545,10 @@ def create_platform_plan(
         name=body.name,
         description=body.description,
         sort_order=body.sort_order,
+        public=body.public,
+        monthly_price=body.monthly_price,
+        yearly_price=body.yearly_price,
+        currency=body.currency,
         max_users=body.max_users,
         max_customers=body.max_customers,
         max_products=body.max_products,
@@ -1252,9 +1556,15 @@ def create_platform_plan(
         max_quotes_per_month=body.max_quotes_per_month,
         max_ai_actions_per_month=body.max_ai_actions_per_month,
         storage_limit_mb=body.storage_limit_mb,
+        max_api_keys=body.max_api_keys,
+        max_webhooks=body.max_webhooks,
         custom_branding_enabled=body.custom_branding_enabled,
         api_access_enabled=body.api_access_enabled,
         advanced_reports_enabled=body.advanced_reports_enabled,
+        analytics_enabled=body.analytics_enabled,
+        forecasting_enabled=body.forecasting_enabled,
+        ai_enabled=body.ai_enabled,
+        background_jobs_enabled=body.background_jobs_enabled,
     )
     db.add(plan)
     db.flush()

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAuthSession } from "@/lib/auth-storage";
-import type { OrganizationEntitlements, OrganizationUsage } from "@/lib/types";
+import type { OrganizationEntitlements, OrganizationUsage, Subscription } from "@/lib/types";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
 
 import PlanAndLimitsPage from "./page";
@@ -31,11 +31,17 @@ const freeEntitlements: OrganizationEntitlements = {
     max_quotes_per_month: 50,
     max_ai_actions_per_month: 25,
     storage_limit_mb: 500,
+    max_api_keys: 1,
+    max_webhooks: 0,
   },
   features: {
     custom_branding_enabled: false,
     api_access_enabled: false,
     advanced_reports_enabled: false,
+    analytics_enabled: false,
+    forecasting_enabled: false,
+    ai_enabled: false,
+    background_jobs_enabled: false,
   },
 };
 
@@ -49,10 +55,64 @@ const freeUsage: OrganizationUsage = {
   storage: { used: 0, limit: 500, unlimited: false },
 };
 
-function mockUsageAndEntitlements(entitlements: OrganizationEntitlements, usage: OrganizationUsage) {
+const activeSubscription: Subscription = {
+  id: "sub-1",
+  organization_id: "org-1",
+  plan: {
+    id: "plan_free",
+    code: "free",
+    name: "Free",
+    description: null,
+    is_active: true,
+    is_default: true,
+    sort_order: 0,
+    public: true,
+    monthly_price: "0.00",
+    yearly_price: "0.00",
+    currency: "USD",
+    limits: freeEntitlements.limits,
+    features: freeEntitlements.features,
+    version: 1,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  status: "active",
+  billing_period: "monthly",
+  trial_start: null,
+  trial_end: null,
+  current_period_start: "2026-01-01T00:00:00Z",
+  current_period_end: "2026-02-01T00:00:00Z",
+  cancel_at_period_end: false,
+  canceled_at: null,
+  ended_at: null,
+  capabilities: {
+    can_use_ai: false,
+    can_use_analytics: false,
+    can_use_forecasting: false,
+    can_use_background_jobs: false,
+    can_create_invoice: true,
+    can_create_quote: true,
+    can_create_api_key: true,
+    can_create_webhook: false,
+    remaining_invoice_quota: 44,
+    remaining_quote_quota: 47,
+    remaining_users: 1,
+    remaining_api_keys: 1,
+    remaining_webhooks: 0,
+  },
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
+function mockUsageAndEntitlements(
+  entitlements: OrganizationEntitlements,
+  usage: OrganizationUsage,
+  subscription: Subscription = activeSubscription
+) {
   apiFetchMock.mockImplementation((path: string) => {
     if (path.endsWith("/entitlements")) return Promise.resolve(entitlements);
     if (path.endsWith("/usage")) return Promise.resolve(usage);
+    if (path.endsWith("/subscription")) return Promise.resolve(subscription);
     return Promise.reject(new Error(`unexpected call: ${path}`));
   });
 }
@@ -110,8 +170,18 @@ describe("PlanAndLimitsPage", () => {
         max_quotes_per_month: null,
         max_ai_actions_per_month: null,
         storage_limit_mb: null,
+        max_api_keys: null,
+        max_webhooks: null,
       },
-      features: { custom_branding_enabled: true, api_access_enabled: true, advanced_reports_enabled: true },
+      features: {
+        custom_branding_enabled: true,
+        api_access_enabled: true,
+        advanced_reports_enabled: true,
+        analytics_enabled: true,
+        forecasting_enabled: true,
+        ai_enabled: true,
+        background_jobs_enabled: true,
+      },
     };
     const unlimitedUsage: OrganizationUsage = {
       users: { used: 40, limit: null, unlimited: true },
@@ -178,5 +248,53 @@ describe("PlanAndLimitsPage", () => {
     await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
     expect(screen.queryByText("Reached")).not.toBeInTheDocument();
     expect(screen.queryByText("Almost full")).not.toBeInTheDocument();
+  });
+
+  it("renders the subscription status, billing period, and current period end", async () => {
+    mockUsageAndEntitlements(freeEntitlements, freeUsage, activeSubscription);
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    await waitFor(() => expect(screen.getByText("Active")).toBeInTheDocument());
+    expect(screen.getByText("Monthly")).toBeInTheDocument();
+    expect(apiFetchMock).toHaveBeenCalledWith("/organizations/org-1/subscription", expect.anything());
+    // Not trialing -- no trial-remaining row at all.
+    expect(screen.queryByText(/days left/)).not.toBeInTheDocument();
+    // Not flagged to cancel -- no "will not renew" badge.
+    expect(screen.queryByText("Will not renew")).not.toBeInTheDocument();
+  });
+
+  it("renders trial days remaining while trialing", async () => {
+    const trialEnd = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    mockUsageAndEntitlements(freeEntitlements, freeUsage, {
+      ...activeSubscription,
+      status: "trialing",
+      trial_start: new Date().toISOString(),
+      trial_end: trialEnd,
+    });
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    await waitFor(() => expect(screen.getByText("Trialing")).toBeInTheDocument());
+    expect(screen.getByText("5 days left")).toBeInTheDocument();
+  });
+
+  it("renders a Will not renew badge when cancel_at_period_end is set", async () => {
+    mockUsageAndEntitlements(freeEntitlements, freeUsage, {
+      ...activeSubscription,
+      cancel_at_period_end: true,
+    });
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    await waitFor(() => expect(screen.getByText("Will not renew")).toBeInTheDocument());
+  });
+
+  it("renders the four Phase 17A feature badges alongside the existing three", async () => {
+    mockUsageAndEntitlements(freeEntitlements, freeUsage);
+    renderWithProviders(<PlanAndLimitsPage />);
+
+    await waitFor(() => expect(screen.getByText("Free")).toBeInTheDocument());
+    expect(screen.getByText("Analytics")).toBeInTheDocument();
+    expect(screen.getByText("Forecasting")).toBeInTheDocument();
+    expect(screen.getByText("AI Assistant")).toBeInTheDocument();
+    expect(screen.getByText("Background jobs")).toBeInTheDocument();
   });
 });

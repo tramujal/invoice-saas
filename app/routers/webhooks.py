@@ -52,6 +52,7 @@ from app.services.webhook_endpoints import (
     update_endpoint,
     WILDCARD_EVENT,
 )
+from app.services.plan_limits import PlanLimitExceededError
 from app.webhook_event_type import WebhookEventType, event_domain
 from app.webhook_ssrf import UnsafeWebhookUrlError
 
@@ -187,6 +188,8 @@ def create_webhook_endpoint(
         )
     except UnsafeWebhookUrlError as exc:
         raise _unsafe_url_error(exc)
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
     return _to_created_response(endpoint, secret)
 
 

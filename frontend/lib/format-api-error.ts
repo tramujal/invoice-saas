@@ -1,5 +1,5 @@
 import { ApiError } from "@/lib/api";
-import type { PlanLimitReachedDetail } from "@/lib/types";
+import type { CapabilityDeniedDetail, PlanLimitReachedDetail } from "@/lib/types";
 
 /** Shared shape check behind isEmailNotVerifiedError/isRateLimitedError:
  * both recognize a structured `detail: {code, message}` object (rather
@@ -56,6 +56,17 @@ export function getApiErrorCode(err: unknown): string | null {
 export function getPlanLimitReachedDetail(err: unknown): PlanLimitReachedDetail | null {
   if (!hasDetailCode(err, 409, "plan_limit_reached")) return null;
   const body = (err as ApiError).body as { detail: PlanLimitReachedDetail };
+  return body.detail;
+}
+
+/** Recognizes the structured 403 feature_not_available (see
+ * app.billing.enforcement.CapabilityDeniedError) and returns its full
+ * detail payload -- Phase 17B's all-or-nothing plan-feature gates (AI,
+ * Analytics), distinct from plan_limit_reached's used-vs-limit quota
+ * shape above. Returns null for any other error shape. */
+export function getCapabilityDeniedDetail(err: unknown): CapabilityDeniedDetail | null {
+  if (!hasDetailCode(err, 403, "feature_not_available")) return null;
+  const body = (err as ApiError).body as { detail: CapabilityDeniedDetail };
   return body.detail;
 }
 

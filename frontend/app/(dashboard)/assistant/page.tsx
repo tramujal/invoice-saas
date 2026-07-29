@@ -12,7 +12,7 @@ import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetchStream, orgPath } from "@/lib/api";
 import { assistantErrorMessageForCode } from "@/lib/assistant-errors";
-import { isEmailNotVerifiedError, isRateLimitedError } from "@/lib/format-api-error";
+import { getCapabilityDeniedDetail, isEmailNotVerifiedError, isRateLimitedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { AssistantChatMessage, AssistantStreamEvent, PlanLimitReachedDetail } from "@/lib/types";
 
@@ -224,7 +224,9 @@ function AssistantContent() {
         // user message needs to be rolled back, never any assistant-side
         // message (none can exist yet at this point).
         setMessages((prev) => prev.slice(0, -1));
-        if (isEmailNotVerifiedError(err)) {
+        if (getCapabilityDeniedDetail(err)) {
+          toast.error(t("assistant.errorAiNotAvailable"));
+        } else if (isEmailNotVerifiedError(err)) {
           toast.error(t("errors.emailNotVerified"));
         } else if (isRateLimitedError(err)) {
           toast.error(t("errors.rateLimitedAssistant"));

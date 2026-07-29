@@ -13,14 +13,17 @@ import { RevenueBreakdownSection } from "@/components/analytics/RevenueBreakdown
 import { TimeWindowSelector } from "@/components/analytics/TimeWindowSelector";
 import { CurrencySelector } from "@/components/dashboard/CurrencySelector";
 import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBreakdown";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
+import { getCapabilityDeniedDetail } from "@/lib/format-api-error";
 import { formatMoney } from "@/lib/money";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import {
   ANALYTICS_TIME_WINDOWS,
   COMPARISON_PERIOD_KINDS,
   type AnalyticsTimeWindowKind,
+  type CapabilityDeniedDetail,
   type ComparisonPeriodKind,
   type Forecast,
   type KpiSnapshot,
@@ -71,6 +74,13 @@ function AnalyticsPageContent() {
   const [data, setData] = useState<KpiSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Set when the backend returns 403 feature_not_available (see
+  // app.billing.enforcement.require_analytics) -- distinct from a plain
+  // 403 (role-based PERMISSION_DENIED_ERROR), since the fix here is
+  // upgrading the plan, not asking an admin for a permission. Takes over
+  // the whole page instead of just the KPI/trend sections, since neither
+  // endpoint returns any usable data once analytics isn't entitled.
+  const [capabilityDenied, setCapabilityDenied] = useState<CapabilityDeniedDetail | null>(null);
 
   const [comparison, setComparison] = useState<ComparisonPeriodKind>(initialComparison);
   const [trendData, setTrendData] = useState<TrendSnapshot | null>(null);
@@ -98,11 +108,14 @@ function AnalyticsPageContent() {
       setData(snapshot);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
+      const capabilityDetail = getCapabilityDeniedDetail(e);
       // Always a translated, generic message -- never the backend's own
       // response body, which is neither localized nor meant for display
       // (see e.g. average_payment_time.reason, an internal-facing string
       // by design, not end-user copy).
-      if (e instanceof ApiError && e.status === 403) {
+      if (capabilityDetail) {
+        setCapabilityDenied(capabilityDetail);
+      } else if (e instanceof ApiError && e.status === 403) {
         setError(PERMISSION_DENIED_ERROR);
       } else {
         setError(GENERIC_LOAD_ERROR);
@@ -131,7 +144,10 @@ function AnalyticsPageContent() {
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
-      if (e instanceof ApiError && e.status === 403) {
+      const capabilityDetail = getCapabilityDeniedDetail(e);
+      if (capabilityDetail) {
+        setCapabilityDenied(capabilityDetail);
+      } else if (e instanceof ApiError && e.status === 403) {
         setTrendError(PERMISSION_DENIED_ERROR);
       } else {
         setTrendError(GENERIC_LOAD_ERROR);
@@ -222,10 +238,34 @@ function AnalyticsPageContent() {
             <path d="M8 17v-3" />
           </svg>
         }
-        actions={<TimeWindowSelector value={window_} onChange={handleWindowChange} />}
+        actions={capabilityDenied ? undefined : <TimeWindowSelector value={window_} onChange={handleWindowChange} />}
       />
 
-      {error ? (
+      {capabilityDenied ? (
+        <EmptyState
+          icon={
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <rect x="3" y="11" width="18" height="10" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          }
+          title={t("analytics.planRestrictedTitle")}
+          description={t("analytics.planRestrictedDescription", { plan: capabilityDenied.plan.name })}
+        />
+      ) : (
+        <>
+          {error ? (
         <div
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
           role="alert"
@@ -402,6 +442,8 @@ function AnalyticsPageContent() {
           />
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }

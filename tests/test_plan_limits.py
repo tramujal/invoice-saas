@@ -26,6 +26,7 @@ from tests.factories import (
     make_org_with_owner,
     make_product,
     make_quote,
+    make_subscription,
     make_user,
 )
 
@@ -63,8 +64,12 @@ def _custom_plan(db_session, *, code: str, **overrides) -> Plan:
 
 
 def _assign_plan(db_session, organization, plan: Plan) -> None:
+    """Reassigns organization's plan. Phase 17A: entitlements resolve via
+    Subscription -> Plan, not Organization.plan_id (kept in sync here too,
+    harmlessly, since it's still a real column -- see that column's own
+    deprecation comment in app.models)."""
     organization.plan_id = plan.id
-    db_session.commit()
+    make_subscription(db_session, organization, plan=plan)
 
 
 class TestCheckLimitUnknownResource:
@@ -208,7 +213,7 @@ class TestCustomersEndpoint:
         from sqlalchemy import create_engine, event
         from sqlalchemy.orm import Session as RawSession
 
-        from app.models import Base, Organization, Plan
+        from app.models import Base, Organization, Plan, Subscription
         from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
 
         fd, path = tempfile.mkstemp(suffix=".db", prefix="saas_concurrency_")
@@ -232,6 +237,18 @@ class TestCustomersEndpoint:
                 setup_db.flush()
                 org = Organization(name="Race Co", plan_id=plan.id)
                 setup_db.add(org)
+                setup_db.flush()
+                now = datetime.now(timezone.utc)
+                setup_db.add(
+                    Subscription(
+                        organization_id=org.id,
+                        plan_id=plan.id,
+                        status="active",
+                        billing_period="monthly",
+                        current_period_start=now,
+                        current_period_end=now + timedelta(days=30),
+                    )
+                )
                 setup_db.commit()
                 org_id = org.id
 

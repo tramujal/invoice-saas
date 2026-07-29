@@ -23,6 +23,7 @@ from app.webhook_audit_action import WebhookAuditAction
 from app.webhook_event_type import WebhookEventType
 from app.webhook_signing import generate_webhook_secret
 from app.webhook_ssrf import assert_public_url
+from app.services.plan_limits import LimitedResource, check_limit
 from app.services.webhook_audit import record_webhook_action
 
 WILDCARD_EVENT = "*"
@@ -67,6 +68,7 @@ def create_endpoint(
     scope; the caller (the management router) must return it in the
     response body and never persist or log it, mirroring
     app.services.organization_api_keys.create_api_key exactly."""
+    check_limit(db, organization_id, LimitedResource.webhooks)
     assert_public_url(url)
     full_secret = generate_webhook_secret()
     endpoint = WebhookEndpoint(

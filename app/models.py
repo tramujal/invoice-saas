@@ -29,6 +29,9 @@ from app.product_type import ProductType
 from app.quote_status import QuoteStatus
 from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
+from app.billing_period import BillingPeriod
+from app.subscription_event_type import SubscriptionEventType
+from app.subscription_status import SubscriptionStatus
 from app.user_status import UserStatus
 from app.schema_migrations import run_startup_migrations
 
@@ -92,6 +95,23 @@ class Plan(Base):
     for the exact pattern) -- PATCH/activate/deactivate/make-default all
     go through one atomic `UPDATE ... WHERE version = expected_version`,
     never ORM attribute mutation followed by a blind commit.
+
+    Phase 17A adds pricing (`monthly_price`/`yearly_price`/`currency`),
+    `public` (whether to surface this plan to prospective customers vs.
+    a legacy plan kept only for its existing subscribers), and 4 more
+    commercial feature flags plus 2 more limits -- extending this same
+    row rather than introducing a second "billing plan" concept, since
+    `code`/`name`/`sort_order`/`is_active` already fill the "immutable
+    internal identifier / editable display name / display order / active"
+    roles Phase 17A's spec describes (see that phase's own completion
+    report for this exact mapping). `code` remains the one thing that
+    never changes once a plan is created -- see the module-level note on
+    PlanUpdateRequest.
+
+    `monthly_price`/`yearly_price` are NULL to mean "custom/contact us"
+    (the Enterprise seed row), the same NULL-means-unbounded convention
+    every limit column on this model already uses -- never a magic
+    sentinel number like -1 or 0 (0 is a valid free price).
     """
 
     __tablename__ = "plans"
@@ -111,10 +131,39 @@ class Plan(Base):
     max_quotes_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_ai_actions_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     storage_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Phase 17A additions -- same NULL=unlimited/0=unavailable convention.
+    max_api_keys: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_webhooks: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     custom_branding_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     api_access_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     advanced_reports_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Phase 17A additions -- commercial entitlements only, same rule as
+    # the three flags above (whether the plan is SUPPOSED to allow the
+    # capability; enforcement is a future phase, see
+    # app.billing.capabilities for the read-only capability layer this
+    # phase actually builds).
+    analytics_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    forecasting_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    ai_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    background_jobs_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+
+    # Phase 17A pricing -- informational only. No checkout, no charging,
+    # no provider anywhere reads these yet; they exist so a future
+    # payment-provider integration has real numbers to point at instead
+    # of a second migration. NULL means "contact us" / custom pricing.
+    monthly_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    yearly_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD", server_default="USD")
+    public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
 
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -123,6 +172,7 @@ class Plan(Base):
     )
 
     organizations: Mapped[list["Organization"]] = relationship(back_populates="plan")
+    subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="plan")
 
 
 class Organization(Base):
@@ -207,6 +257,16 @@ class Organization(Base):
     # see Plan's own docstring on why plans are deactivated, never
     # deleted, which is what makes RESTRICT here safe in practice (there
     # is no code path that ever attempts to delete a Plan row at all).
+    #
+    # Deprecated as of Phase 17A: no code path reads this column anymore
+    # (app.services.entitlements resolves entitlements via the
+    # organization's Subscription -> Plan instead -- see Subscription's
+    # own docstring below). Left in place, still written at registration
+    # as a harmless denormalized copy, rather than dropped now: dropping
+    # an ON DELETE RESTRICT-referenced column is a separately-riskier
+    # migration with no behavioral benefit this phase. A future cleanup
+    # phase can remove it once Subscription has been the sole source of
+    # truth in production for a while.
     plan_id: Mapped[str] = mapped_column(
         CHAR(36),
         ForeignKey("plans.id", ondelete="RESTRICT"),
@@ -222,6 +282,211 @@ class Organization(Base):
     products: Mapped[list["Product"]] = relationship(back_populates="organization")
     quotes: Mapped[list["Quote"]] = relationship(back_populates="organization")
     plan: Mapped["Plan"] = relationship(back_populates="organizations")
+    subscription: Mapped["Subscription | None"] = relationship(
+        back_populates="organization", uselist=False, passive_deletes=True
+    )
+
+
+class Subscription(Base):
+    """The single source of truth for what an organization is entitled
+    to -- see app.services.entitlements.get_organization_plan, which
+    resolves through this table's own `plan_id`, never through
+    Organization.plan_id (deprecated, see that column's own comment).
+    Every organization owns exactly one Subscription row, enforced by the
+    unique constraint on `organization_id` below, from the moment it's
+    created at registration (see app.billing.service.BillingService
+    .create_subscription, called from app.routers.auth.register) onward.
+
+    `provider_name`/`provider_reference` are nullable -- NULL for every
+    subscription with no attached payment provider (still every
+    subscription as of Phase 17A), populated once by
+    app.billing.service.BillingService.attach_provider_subscription when
+    a checkout_completed webhook event arrives from Phase 18's provider
+    layer (app.billing.provider_base.BillingProvider). This model itself
+    still has zero awareness of which provider, if any, is attached --
+    `provider_name` is just the provider's own short identifier string
+    (e.g. "stripe"), read back out only to route an incoming webhook to
+    the right BillingProvider implementation.
+
+    `status` supports `past_due`/`paused` for the same provider-driven
+    reason (see app.subscription_status.SubscriptionStatus) -- `past_due`
+    is set by BillingService.mark_past_due on a provider's payment_failed
+    webhook event; `paused` still has no writer anywhere in this app.
+
+    `metadata_json` is a nullable, JSON-encoded TEXT column (never a
+    native JSON column type) -- the same portable-across-SQLite/Postgres
+    convention app.models.BackgroundJob.payload and
+    app.models.PlatformAuditLog.details already use. Reserved for
+    forward-compatible, non-critical annotations; app.billing.service
+    never depends on anything stored here to make a decision.
+
+    `version` is the same optimistic-concurrency token Plan/
+    PlatformSettings already use -- every BillingService mutation goes
+    through an atomic `UPDATE ... WHERE version = expected_version`.
+    """
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    plan_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("plans.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=SubscriptionStatus.active.value
+    )
+    billing_period: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=BillingPeriod.monthly.value
+    )
+    trial_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trial_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    current_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # NULL until a checkout completes with a provider attached -- see class docstring.
+    provider_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="subscription")
+    plan: Mapped["Plan"] = relationship(back_populates="subscriptions")
+    events: Mapped[list["SubscriptionEvent"]] = relationship(
+        back_populates="subscription", order_by="SubscriptionEvent.created_at", passive_deletes=True
+    )
+
+
+class SubscriptionEvent(Base):
+    """Subscription HISTORY -- not the platform Audit Log
+    (PlatformAuditLog, which is untouched by this phase and keeps
+    recording platform-admin actions exactly as before). This table
+    answers "what happened to this subscription over time," written by
+    app.billing.service.BillingService itself on every mutating call,
+    including system-triggered transitions (trial_expired,
+    subscription_expired) that have no human actor -- `actor_user_id` is
+    nullable for exactly that case, the same nullable-actor precedent
+    PlatformAuditLog.actor_user_id already sets (there: SET NULL after a
+    user is deleted; here: NULL from the moment of creation for a
+    system-triggered event).
+
+    `previous_values`/`new_values`/`metadata_json` are nullable, JSON-
+    encoded TEXT columns -- same portable-JSON-as-TEXT convention as
+    Subscription.metadata_json above. Append-only: no route ever updates
+    or deletes a row here.
+    """
+
+    __tablename__ = "subscription_events"
+    __table_args__ = (
+        Index("ix_subscription_events_subscription_id", "subscription_id"),
+        Index("ix_subscription_events_organization_id", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    subscription_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    previous_values: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_values: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    subscription: Mapped["Subscription"] = relationship(back_populates="events")
+
+
+class ProviderWebhookReceipt(Base):
+    """Idempotency record for one incoming payment-provider webhook event
+    -- new infrastructure introduced by Phase 18's provider layer
+    (app.billing.provider_base), NOT a change to Subscription/Plan/
+    SubscriptionEvent (Phase 17A/17B's frozen billing foundations).
+    Every provider's webhook contract is built around the possibility of
+    the same event being delivered more than once (a slow/failed
+    acknowledgment, a manual redelivery from the provider's own
+    dashboard); app.routers.billing_webhooks writes exactly one row here
+    per event_id BEFORE calling
+    app.billing.service.BillingService.sync_from_webhook_event, and skips
+    processing entirely (returning 200 without re-applying any mutation)
+    if a row for that `(provider_name, event_id)` pair already exists.
+
+    Deliberately its own table rather than a column/index trick on
+    SubscriptionEvent -- an event can be legitimately received and
+    rejected (bad signature, unknown provider_reference) before any
+    SubscriptionEvent would ever be written for it, so idempotency can't
+    depend on one existing.
+    """
+
+    __tablename__ = "provider_webhook_receipts"
+    __table_args__ = (UniqueConstraint("provider_name", "event_id"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProviderCustomer(Base):
+    """Caches the provider-side customer id for one organization on one
+    provider -- Phase 18.1 hardening, so
+    app.billing.service.BillingService.start_checkout creates a Stripe (or
+    future Mercado Pago/Paddle/LemonSqueezy) customer record AT MOST ONCE
+    per organization per provider, reusing `provider_customer_id` on every
+    later checkout instead of accumulating a fresh, orphaned customer
+    record on the provider's side every time.
+
+    Not to be confused with app.billing.provider_base.ProviderCustomer,
+    the small immutable dataclass a BillingProvider.create_customer() call
+    returns in memory -- that value object is never persisted directly;
+    this ORM row is what makes its `id` durable and reusable across
+    requests. Distinct names, distinct modules, distinct purpose: this
+    table is a cache keyed by (organization_id, provider_name); that
+    dataclass is a single call's return value.
+
+    `provider_name` (not a foreign key -- just the provider's own short
+    string identifier, e.g. "stripe") lets the same organization hold one
+    cached customer per provider it has ever used, consistent with
+    Subscription.provider_name's own convention. The unique constraint is
+    what makes concurrent checkout attempts for the same organization
+    safe: a race that gets past the application-level existence check
+    still can't insert two rows -- see BillingService
+    ._get_or_create_provider_customer's own docstring for how the losing
+    request recovers.
+    """
+
+    __tablename__ = "provider_customers"
+    __table_args__ = (UniqueConstraint("organization_id", "provider_name"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_customer_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class User(Base):
@@ -1527,6 +1792,86 @@ class BackgroundJob(Base):
     )
 
     organization: Mapped["Organization | None"] = relationship()
+
+
+class Notification(Base):
+    """One in-app notification addressed to one organization member --
+    created for EVERY active member of the organization the moment a
+    domain event is emitted (see app.notifications.service.emit_event),
+    unconditionally, with no per-user opt-out: every member's inbox
+    should reflect what actually happened in their organization,
+    regardless of their email preference (see NotificationPreference,
+    which only ever governs the EMAIL channel). This mirrors
+    WebhookEvent's own "recorded regardless of subscription" precedent.
+
+    `title`/`body` are a frozen, point-in-time rendering of the event
+    (see app.notifications.copy) -- never re-derived later, exactly like
+    WebhookEvent.payload, so a future change to notification copy
+    templates can never alter the text of an already-delivered
+    notification.
+
+    `event_id` is a debugging/cross-reference pointer back to the single
+    WebhookEvent this notification (and any resulting notification.email
+    job) was generated from -- see that table's own docstring for why it
+    is the one durable, fully-resolved snapshot every channel reads from.
+    ON DELETE SET NULL is defensive schema hygiene only: WebhookEvent rows
+    are, by their own contract, never actually deleted.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_user_created", "user_id", "created_at"),
+        Index("ix_notifications_user_unread", "user_id", "read_at"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    event_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("webhook_events.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(String(1000), nullable=False)
+    object_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+
+
+class NotificationPreference(Base):
+    """Per-user, per-organization opt-out of the EMAIL notification
+    channel only -- in-app notifications (see Notification above) are
+    always created for every active member and cannot be disabled; this
+    row exists purely to stop receiving emails about them. Created
+    lazily, only when a user actually changes the default away from
+    email_enabled=True (see app.notifications.service.is_email_enabled)
+    -- the absence of a row means the default, exactly like
+    ProviderCustomer's own lazy-row-creation precedent from the billing
+    domain.
+    """
+
+    __tablename__ = "notification_preferences"
+    __table_args__ = (UniqueConstraint("user_id", "organization_id"),)
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 def init_db() -> None:

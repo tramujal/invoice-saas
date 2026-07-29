@@ -5,7 +5,7 @@ no timing flakiness. Each bucket is independent per test, so hitting a
 limit here can never bleed into another test's requests."""
 
 from app.rate_limit import RATE_LIMIT_CODE
-from tests.factories import make_org_with_owner, make_user
+from tests.factories import make_org_with_owner_on_plan, make_user
 
 
 def test_register_rate_limit_trips_after_configured_count(client):
@@ -59,7 +59,7 @@ def test_login_ip_rate_limit_trips_after_configured_count(client, db_session):
 def test_assistant_chat_rate_limit_trips_after_configured_count(client, db_session):
     # ASSISTANT_CHAT_RULES = 20/hour, keyed by user (and user+ip) -- uses
     # the autouse fake_ai_provider, never a real model call.
-    owner = make_org_with_owner(db_session, email="assistant-owner@example.com")
+    owner = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="assistant-owner@example.com")
     org_id = owner.organization.id
 
     for _ in range(20):
@@ -86,8 +86,8 @@ def test_rate_limit_buckets_are_independent_per_user(client, db_session):
     users sharing TestClient's one synthetic IP stay fully independent.
     Otherwise one org's heavy usage could deny service to every other
     tenant on the same rate limiter process."""
-    org_a = make_org_with_owner(db_session, email="tenant-a@example.com", org_name="Tenant A")
-    org_b = make_org_with_owner(db_session, email="tenant-b@example.com", org_name="Tenant B")
+    org_a = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="tenant-a@example.com", org_name="Tenant A")
+    org_b = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="tenant-b@example.com", org_name="Tenant B")
 
     for _ in range(20):
         client.post(

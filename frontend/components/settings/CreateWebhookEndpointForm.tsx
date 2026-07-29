@@ -4,11 +4,12 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { WebhookEndpointCreated, WebhookEventCatalogEntry } from "@/lib/types";
+import type { PlanLimitReachedDetail, WebhookEndpointCreated, WebhookEventCatalogEntry } from "@/lib/types";
 import {
   WEBHOOK_WILDCARD_EVENT,
   getWebhookEventDomainLabel,
@@ -34,6 +35,7 @@ export function CreateWebhookEndpointForm({ onCreated }: CreateWebhookEndpointFo
   const [urlError, setUrlError] = useState<string | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,9 +107,16 @@ export function CreateWebhookEndpointForm({ onCreated }: CreateWebhookEndpointFo
       onCreated(created);
     } catch (err) {
       toast.dismiss(loadingId);
-      toast.error(
-        isEmailNotVerifiedError(err) ? t("errors.emailNotVerified") : formatApiError(err, t("webhooks.toastCreateError"))
-      );
+      const planLimit = getPlanLimitReachedDetail(err);
+      if (planLimit) {
+        setPlanLimitDetail(planLimit);
+      } else {
+        toast.error(
+          isEmailNotVerifiedError(err)
+            ? t("errors.emailNotVerified")
+            : formatApiError(err, t("webhooks.toastCreateError"))
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -217,6 +226,7 @@ export function CreateWebhookEndpointForm({ onCreated }: CreateWebhookEndpointFo
           </Button>
         </div>
       </form>
+      <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
     </section>
   );
 }

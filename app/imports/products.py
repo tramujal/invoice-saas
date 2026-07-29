@@ -19,7 +19,7 @@ from app.models import Organization, Product
 from app.product_type import ProductType
 from app.schemas import ProductResponse
 from app.services.plan_limits import LimitedResource, check_limit
-from app.services.webhook_events import record_webhook_event
+from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 
 REASON_INVALID_PRICE = "invalid_price"
@@ -190,7 +190,7 @@ def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]],
         )
         db.add(product)
         db.flush()
-        record_webhook_event(
+        emit_event(
             db,
             organization_id=organization_id,
             event_type=WebhookEventType.product_created,

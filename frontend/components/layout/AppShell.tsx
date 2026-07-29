@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
@@ -381,27 +382,30 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Link href="/dashboard" className="text-lg font-semibold text-slate-900">
           Invoicing
         </Link>
-        <button
-          ref={hamburgerButtonRef}
-          type="button"
-          onClick={openMobileNav}
-          aria-label={t("nav.openMenu")}
-          className="rounded-lg p-2 text-slate-700 hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            aria-hidden
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          <button
+            ref={hamburgerButtonRef}
+            type="button"
+            onClick={openMobileNav}
+            aria-label={t("nav.openMenu")}
+            className="rounded-lg p-2 text-slate-700 hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
-            <path d="M3 6h18M3 12h18M3 18h18" />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Mobile off-canvas panel. A native <dialog> gets focus-trapping,
@@ -459,10 +463,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           just now hidden below md instead of also rendering (differently
           styled) on mobile. */}
       <aside className="hidden shrink-0 flex-col border-slate-200 bg-white md:flex md:w-56 md:border-r">
-        <div className="px-6 pt-6">
+        <div className="flex items-center justify-between px-6 pt-6">
           <Link href="/dashboard" className="text-lg font-semibold text-slate-900">
             Invoicing
           </Link>
+          <NotificationBell />
         </div>
         {renderNavContent("desktop")}
       </aside>

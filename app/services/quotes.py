@@ -54,7 +54,7 @@ from app.reminder_status import ReminderStatus
 from app.services.invoices import compute_invoice_totals, create_invoice_record
 from app.services.plan_limits import LimitedResource, check_limit
 from app.services.products import ProductNotFoundError, get_product_in_org
-from app.services.webhook_events import record_webhook_event
+from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 from app.schemas import (
     CurrencyCode,
@@ -248,7 +248,7 @@ def create_quote_record(
     )
     db.add(quote)
     db.flush()
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization_id,
         event_type=WebhookEventType.quote_created,
@@ -371,7 +371,7 @@ def update_quote_record(
     # webhook payload below -- QuoteResponse requires each line item's id
     # to be a real string, never None.
     db.flush()
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization_id,
         event_type=WebhookEventType.quote_updated,
@@ -409,7 +409,7 @@ def delete_draft_quote_record(db: Session, quote: Quote) -> None:
     if quote.status != QuoteStatus.draft.value:
         raise QuoteNotDraftError(quote.id)
     payload = QuoteResponse.model_validate(quote).model_dump(mode="json")
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=quote.organization_id,
         event_type=WebhookEventType.quote_deleted,
@@ -461,7 +461,7 @@ def mark_quote_accepted_record(db: Session, quote: Quote) -> Quote:
     accepted" action -- only legal from effective_status == sent."""
     _require_sent(quote)
     quote.status = QuoteStatus.accepted.value
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=quote.organization_id,
         event_type=WebhookEventType.quote_accepted,
@@ -477,7 +477,7 @@ def mark_quote_accepted_record(db: Session, quote: Quote) -> Quote:
 def mark_quote_rejected_record(db: Session, quote: Quote) -> Quote:
     _require_sent(quote)
     quote.status = QuoteStatus.rejected.value
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=quote.organization_id,
         event_type=WebhookEventType.quote_rejected,
@@ -537,7 +537,7 @@ def convert_quote_to_invoice(
     # on its own, before control ever returns here) -- "quote.converted"
     # is its own real, independently-atomic domain transition, not a
     # duplicate of invoice creation.
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization_id,
         event_type=WebhookEventType.quote_converted,
@@ -598,7 +598,7 @@ def send_quote_record(db: Session, quote: Quote) -> SendQuoteEmailResponse:
     # sending an already-sent quote is a harmless no-op status-wise.
     if quote.status == QuoteStatus.draft.value:
         quote.status = QuoteStatus.sent.value
-        record_webhook_event(
+        emit_event(
             db,
             organization_id=quote.organization_id,
             event_type=WebhookEventType.quote_sent,

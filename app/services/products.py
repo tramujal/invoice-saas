@@ -22,7 +22,7 @@ from app.models import Organization, Product
 from app.product_type import ProductType
 from app.schemas import CurrencyCode, ProductResponse
 from app.services.plan_limits import LimitedResource, check_limit
-from app.services.webhook_events import record_webhook_event
+from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 
 
@@ -70,7 +70,7 @@ def create_product_record(
     )
     db.add(product)
     db.flush()
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization_id,
         event_type=WebhookEventType.product_created,
@@ -91,7 +91,7 @@ def update_product_record(db: Session, product: Product, changes: dict) -> Produ
     app.routers.organizations's update endpoint applies its own PATCH."""
     for key, value in changes.items():
         setattr(product, key, value)
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=product.organization_id,
         event_type=WebhookEventType.product_updated,
@@ -110,7 +110,7 @@ def archive_product_record(db: Session, product: Product) -> Product:
     Product.active's docstring in app/models.py: there is no DELETE)."""
     if product.active:
         product.active = False
-        record_webhook_event(
+        emit_event(
             db,
             organization_id=product.organization_id,
             event_type=WebhookEventType.product_archived,
@@ -131,7 +131,7 @@ def restore_product_record(db: Session, product: Product) -> Product:
     if not product.active:
         check_limit(db, product.organization_id, LimitedResource.products)
         product.active = True
-        record_webhook_event(
+        emit_event(
             db,
             organization_id=product.organization_id,
             event_type=WebhookEventType.product_restored,

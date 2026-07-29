@@ -28,6 +28,7 @@ from app.models import (
     User,
 )
 from app.user_status import UserStatus
+from app.billing.service import BillingService
 from app.services.entitlements import get_default_plan
 from app.services.platform_settings import get_effective_settings
 from app.password_reset import (
@@ -200,7 +201,13 @@ def register(
         user_id=user.id, organization_id=organization.id, role=MembershipRole.owner.value
     )
     db.add(membership)
-    db.commit()
+    db.flush()
+
+    # Subscription (not organization.plan_id) is the source of truth for
+    # entitlements resolution -- see app.services.entitlements.get_active_
+    # subscription. organization.plan_id above is kept in sync as a
+    # harmless denormalized copy, not read by anything anymore.
+    BillingService(db).create_subscription(organization.id, default_plan.id, actor=user)
     db.refresh(user)
 
     # Registration always succeeds and issues the normal JWT regardless of

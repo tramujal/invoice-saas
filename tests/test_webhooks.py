@@ -50,7 +50,32 @@ from app.webhook_event_type import WebhookEventType, event_domain
 from app.webhook_signing import build_signed_headers, generate_webhook_secret
 from app.webhook_ssrf import UnsafeWebhookUrlError, assert_public_url
 
-from tests.factories import make_customer, make_org_with_owner, make_product
+from tests.factories import make_customer, make_org_with_owner, make_plan, make_product, make_subscription
+
+
+def _make_org_with_webhooks(db, *, email, org_name):
+    """Phase 17B enforces app.services.plan_limits.LimitedResource.webhooks
+    at creation time, and app.services.webhook_events.record_webhook_event
+    silently drops deliveries (never raises) when the plan's
+    background_jobs_enabled is false -- make_org_with_owner's default
+    (Free-tier) subscription has both max_webhooks=0 and
+    background_jobs_enabled=False, so every test in this file that
+    actually creates a webhook endpoint (or expects a delivery to be
+    enqueued for one) needs a plan with both raised first. Tests that
+    only check "zero configured endpoints" behavior are unaffected
+    either way (unused capacity, never a regression) -- used everywhere
+    in this file for that reason, not just where it's strictly
+    required."""
+    owner = make_org_with_owner(db, email=email, org_name=org_name)
+    plan = make_plan(
+        db,
+        code=f"webhooks-ok-{owner.organization.id}",
+        max_webhooks=None,
+        max_api_keys=None,
+        background_jobs_enabled=True,
+    )
+    make_subscription(db, owner.organization, plan=plan)
+    return owner
 
 
 # --- app.webhook_signing ----------------------------------------------------
@@ -138,7 +163,7 @@ class TestWebhookSsrf:
 
 class TestWebhookEndpointService:
     def test_create_returns_secret_once_and_persists_hash_only_conceptually(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep1@example.com", org_name="Ep1 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep1@example.com", org_name="Ep1 Co")
         endpoint, secret = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="test",
@@ -151,7 +176,7 @@ class TestWebhookEndpointService:
         assert endpoint.active is True
 
     def test_create_rejects_unsafe_url(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep2@example.com", org_name="Ep2 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep2@example.com", org_name="Ep2 Co")
         with pytest.raises(UnsafeWebhookUrlError):
             create_endpoint(
                 db_session, owner.organization.id, owner.user,
@@ -160,7 +185,7 @@ class TestWebhookEndpointService:
             )
 
     def test_empty_subscription_set_means_wildcard(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep3@example.com", org_name="Ep3 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep3@example.com", org_name="Ep3 Co")
         endpoint, _secret = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="", subscribed_events=None,
@@ -169,7 +194,7 @@ class TestWebhookEndpointService:
         assert is_subscribed(endpoint.subscribed_events, WebhookEventType.invoice_sent)
 
     def test_list_excludes_archived_by_default(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep4@example.com", org_name="Ep4 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep4@example.com", org_name="Ep4 Co")
         endpoint, _ = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -180,7 +205,7 @@ class TestWebhookEndpointService:
         assert len(list_endpoints_in_org(db_session, owner.organization.id, include_archived=True)) == 1
 
     def test_disabled_endpoint_excluded_from_active_subscribers(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep5@example.com", org_name="Ep5 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep5@example.com", org_name="Ep5 Co")
         endpoint, _ = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -191,7 +216,7 @@ class TestWebhookEndpointService:
         assert matches == []
 
     def test_enable_disable_idempotent(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep6@example.com", org_name="Ep6 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep6@example.com", org_name="Ep6 Co")
         endpoint, _ = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -202,7 +227,7 @@ class TestWebhookEndpointService:
         assert endpoint.enabled is False
 
     def test_rotate_changes_secret_and_updates_timestamp(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep7@example.com", org_name="Ep7 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep7@example.com", org_name="Ep7 Co")
         endpoint, original_secret = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -214,8 +239,8 @@ class TestWebhookEndpointService:
         assert rotated.last_rotated_at is not None
 
     def test_get_in_org_enforces_tenant_isolation(self, db_session):
-        owner_a = make_org_with_owner(db_session, email="ep8a@example.com", org_name="Ep8a Co")
-        owner_b = make_org_with_owner(db_session, email="ep8b@example.com", org_name="Ep8b Co")
+        owner_a = _make_org_with_webhooks(db_session, email="ep8a@example.com", org_name="Ep8a Co")
+        owner_b = _make_org_with_webhooks(db_session, email="ep8b@example.com", org_name="Ep8b Co")
         endpoint, _ = create_endpoint(
             db_session, owner_a.organization.id, owner_a.user,
             url="https://example.com/hook", description="",
@@ -225,7 +250,7 @@ class TestWebhookEndpointService:
             get_endpoint_in_org(db_session, owner_b.organization.id, endpoint.id)
 
     def test_update_url_revalidates_ssrf(self, db_session):
-        owner = make_org_with_owner(db_session, email="ep9@example.com", org_name="Ep9 Co")
+        owner = _make_org_with_webhooks(db_session, email="ep9@example.com", org_name="Ep9 Co")
         endpoint, _ = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -240,7 +265,7 @@ class TestWebhookEndpointService:
 
 class TestWebhookEventEmission:
     def test_creating_customer_with_no_subscribers_records_event_but_zero_deliveries(self, db_session):
-        owner = make_org_with_owner(db_session, email="em1@example.com", org_name="Em1 Co")
+        owner = _make_org_with_webhooks(db_session, email="em1@example.com", org_name="Em1 Co")
         customer = create_customer_record(
             db_session, owner.organization.id, name="A", email="a@example.com", phone="", address="", tax_id=""
         )
@@ -252,7 +277,7 @@ class TestWebhookEventEmission:
         assert db_session.query(WebhookDelivery).count() == 0
 
     def test_creating_customer_with_subscriber_creates_pending_delivery(self, db_session):
-        owner = make_org_with_owner(db_session, email="em2@example.com", org_name="Em2 Co")
+        owner = _make_org_with_webhooks(db_session, email="em2@example.com", org_name="Em2 Co")
         create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -270,7 +295,7 @@ class TestWebhookEventEmission:
         assert event.object_id == customer.id
 
     def test_unsubscribed_event_type_produces_no_delivery(self, db_session):
-        owner = make_org_with_owner(db_session, email="em3@example.com", org_name="Em3 Co")
+        owner = _make_org_with_webhooks(db_session, email="em3@example.com", org_name="Em3 Co")
         create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -282,7 +307,7 @@ class TestWebhookEventEmission:
         assert db_session.query(WebhookDelivery).count() == 0
 
     def test_update_and_delete_customer_each_emit_their_own_event(self, db_session):
-        owner = make_org_with_owner(db_session, email="em4@example.com", org_name="Em4 Co")
+        owner = _make_org_with_webhooks(db_session, email="em4@example.com", org_name="Em4 Co")
         customer = create_customer_record(
             db_session, owner.organization.id, name="A", email="a@example.com", phone="", address="", tax_id=""
         )
@@ -299,7 +324,7 @@ class TestWebhookEventEmission:
     def test_quote_conversion_emits_both_invoice_created_and_quote_converted(self, db_session):
         from app.services.quotes import convert_quote_to_invoice, mark_quote_accepted_record, send_quote_record
 
-        owner = make_org_with_owner(db_session, email="em5@example.com", org_name="Em5 Co")
+        owner = _make_org_with_webhooks(db_session, email="em5@example.com", org_name="Em5 Co")
         customer = make_customer(db_session, owner.organization, email="cust@example.com")
         quote = create_quote_record(
             db_session, owner.organization.id, owner.user, customer, CurrencyCode.USD,
@@ -323,7 +348,7 @@ class TestWebhookEventEmission:
     def test_duplicate_quote_emits_exactly_one_created_event_not_two(self, db_session):
         from app.services.quotes import duplicate_quote_record
 
-        owner = make_org_with_owner(db_session, email="em6@example.com", org_name="Em6 Co")
+        owner = _make_org_with_webhooks(db_session, email="em6@example.com", org_name="Em6 Co")
         quote = create_quote_record(
             db_session, owner.organization.id, owner.user, None, CurrencyCode.USD,
             [QuoteLineItemCreate(description="Line", quantity=Decimal("1"), unit_price=Decimal("50"))],
@@ -341,10 +366,11 @@ class TestWebhookEventEmission:
         this proves the ordering, not a mid-transaction rollback."""
         from tests.test_organization_api_keys import _custom_plan
 
-        owner = make_org_with_owner(db_session, email="em7@example.com", org_name="Em7 Co")
+        owner = _make_org_with_webhooks(db_session, email="em7@example.com", org_name="Em7 Co")
         plan = _custom_plan(db_session, code="tiny-em7", max_customers=1)
         owner.organization.plan_id = plan.id
         db_session.commit()
+        make_subscription(db_session, owner.organization, plan=plan)
 
         create_customer_record(
             db_session, owner.organization.id, name="A", email="a@example.com", phone="", address="", tax_id=""
@@ -368,7 +394,7 @@ class _FakeResponse:
 
 class TestWebhookDeliveryEngine:
     def _setup(self, db_session, monkeypatch, email: str):
-        owner = make_org_with_owner(db_session, email=email, org_name=f"{email}-co")
+        owner = _make_org_with_webhooks(db_session, email=email, org_name=f"{email}-co")
         endpoint, secret = create_endpoint(
             db_session, owner.organization.id, owner.user,
             url="https://example.com/hook", description="",
@@ -464,7 +490,7 @@ class TestWebhookDeliveryEngine:
 
     def test_get_delivery_in_org_enforces_tenant_isolation(self, db_session, monkeypatch):
         owner, endpoint, secret, delivery = self._setup(db_session, monkeypatch, "dl7@example.com")
-        other = make_org_with_owner(db_session, email="dl7b@example.com", org_name="Dl7b Co")
+        other = _make_org_with_webhooks(db_session, email="dl7b@example.com", org_name="Dl7b Co")
         with pytest.raises(DeliveryNotFoundInOrgError):
             get_delivery_in_org(db_session, other.organization.id, delivery.id)
 
@@ -481,7 +507,7 @@ class TestWebhookManagementRouter:
         )
 
     def test_create_returns_secret_once(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt1@example.com", org_name="Rt1 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt1@example.com", org_name="Rt1 Co")
         resp = self._create_via_api(client, owner.auth_headers, owner.organization.id)
         assert resp.status_code == 201
         body = resp.json()
@@ -489,14 +515,14 @@ class TestWebhookManagementRouter:
         assert "hashed_secret" not in body
 
     def test_list_never_includes_secret(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt2@example.com", org_name="Rt2 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt2@example.com", org_name="Rt2 Co")
         self._create_via_api(client, owner.auth_headers, owner.organization.id)
         resp = client.get(f"/organizations/{owner.organization.id}/webhooks", headers=owner.auth_headers)
         assert resp.status_code == 200
         assert all("secret" not in item for item in resp.json())
 
     def test_create_rejects_unsafe_url_as_422(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt3@example.com", org_name="Rt3 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt3@example.com", org_name="Rt3 Co")
         resp = client.post(
             f"/organizations/{owner.organization.id}/webhooks",
             json={"url": "https://169.254.169.254/hook", "description": "", "subscribed_events": ["*"]},
@@ -506,7 +532,7 @@ class TestWebhookManagementRouter:
         assert resp.json()["detail"]["code"] == "unsafe_webhook_url"
 
     def test_create_rejects_unknown_event_type(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt4@example.com", org_name="Rt4 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt4@example.com", org_name="Rt4 Co")
         resp = client.post(
             f"/organizations/{owner.organization.id}/webhooks",
             json={"url": "https://example.com/hook", "description": "", "subscribed_events": ["not.a.real.event"]},
@@ -517,7 +543,7 @@ class TestWebhookManagementRouter:
     def test_member_without_settings_manage_permission_is_forbidden(self, client, db_session):
         from tests.factories import make_member_in_org
 
-        owner = make_org_with_owner(db_session, email="rt5owner@example.com", org_name="Rt5 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt5owner@example.com", org_name="Rt5 Co")
         member = make_member_in_org(
             db_session, owner.organization, email="rt5member@example.com", role=MembershipRole.member
         )
@@ -525,8 +551,8 @@ class TestWebhookManagementRouter:
         assert resp.status_code == 403
 
     def test_endpoints_are_tenant_isolated(self, client, db_session):
-        owner_a = make_org_with_owner(db_session, email="rt6a@example.com", org_name="Rt6a Co")
-        owner_b = make_org_with_owner(db_session, email="rt6b@example.com", org_name="Rt6b Co")
+        owner_a = _make_org_with_webhooks(db_session, email="rt6a@example.com", org_name="Rt6a Co")
+        owner_b = _make_org_with_webhooks(db_session, email="rt6b@example.com", org_name="Rt6b Co")
         created = self._create_via_api(client, owner_a.auth_headers, owner_a.organization.id)
         endpoint_id = created.json()["id"]
         resp = client.get(
@@ -535,7 +561,7 @@ class TestWebhookManagementRouter:
         assert resp.status_code == 404
 
     def test_enable_disable_rotate_archive_lifecycle(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt7@example.com", org_name="Rt7 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt7@example.com", org_name="Rt7 Co")
         created = self._create_via_api(client, owner.auth_headers, owner.organization.id)
         endpoint_id = created.json()["id"]
         org_id = owner.organization.id
@@ -559,7 +585,7 @@ class TestWebhookManagementRouter:
         assert resp.json() == []
 
     def test_event_types_catalog_endpoint(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt8@example.com", org_name="Rt8 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt8@example.com", org_name="Rt8 Co")
         resp = client.get(f"/organizations/{owner.organization.id}/webhooks/event-types", headers=owner.auth_headers)
         assert resp.status_code == 200
         values = {row["event_type"] for row in resp.json()}
@@ -567,7 +593,7 @@ class TestWebhookManagementRouter:
         assert "invoice.sent" in values
 
     def test_deliveries_list_and_detail_and_resend(self, client, db_session, monkeypatch):
-        owner = make_org_with_owner(db_session, email="rt9@example.com", org_name="Rt9 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt9@example.com", org_name="Rt9 Co")
         created = self._create_via_api(client, owner.auth_headers, owner.organization.id)
         endpoint_id = created.json()["id"]
 
@@ -595,7 +621,7 @@ class TestWebhookManagementRouter:
         assert resp.json()["trigger"] == "manual_resend"
 
     def test_unauthenticated_request_is_rejected(self, client, db_session):
-        owner = make_org_with_owner(db_session, email="rt10@example.com", org_name="Rt10 Co")
+        owner = _make_org_with_webhooks(db_session, email="rt10@example.com", org_name="Rt10 Co")
         resp = client.get(f"/organizations/{owner.organization.id}/webhooks")
         assert resp.status_code in (401, 403)
 
@@ -605,7 +631,7 @@ class TestWebhookManagementRouter:
 
 class TestWebhookRegressionNoEndpoints:
     def test_invoice_creation_unaffected_by_zero_endpoints(self, db_session):
-        owner = make_org_with_owner(db_session, email="reg1@example.com", org_name="Reg1 Co")
+        owner = _make_org_with_webhooks(db_session, email="reg1@example.com", org_name="Reg1 Co")
         invoice = create_invoice_record(
             db_session, owner.organization.id, owner.user, None, CurrencyCode.USD,
             [InvoiceLineItemCreate(description="L", quantity=Decimal("1"), unit_price=Decimal("10"))],
@@ -616,7 +642,7 @@ class TestWebhookRegressionNoEndpoints:
         assert event.event_type == "invoice.created"
 
     def test_product_archive_restore_still_idempotent_with_events_wired(self, db_session):
-        owner = make_org_with_owner(db_session, email="reg2@example.com", org_name="Reg2 Co")
+        owner = _make_org_with_webhooks(db_session, email="reg2@example.com", org_name="Reg2 Co")
         product = make_product(db_session, owner.organization)
 
         from app.services.products import archive_product_record, restore_product_record

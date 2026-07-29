@@ -122,6 +122,7 @@ def fake_email_sender(monkeypatch):
     monkeypatch.setattr("app.routers.invitation_public.get_email_sender", lambda: sender)
     monkeypatch.setattr("app.services.invoices.get_email_sender", lambda: sender)
     monkeypatch.setattr("app.services.quotes.get_email_sender", lambda: sender)
+    monkeypatch.setattr("app.jobs.handlers.notification.get_email_sender", lambda: sender)
     return sender
 
 

@@ -27,6 +27,8 @@ from app.analytics.time_windows import (
     trailing_quarter_starts,
     trailing_year_starts,
 )
+from app.billing.capabilities import can_use_forecasting
+from app.billing.enforcement import CapabilityDeniedError, require_analytics
 from app.database import get_db
 from app.deps import get_current_user, require_permission
 from app.models import Organization, User
@@ -60,6 +62,13 @@ def get_kpi_snapshot(
     # only lived behind the dashboard endpoints -- this is the same
     # figures, just newly queryable on their own by window.
     require_permission(current_user, organization_id, Permission.dashboard_view, db)
+    # Phase 17B: the dedicated Analytics domain (this endpoint and
+    # /trends below) is plan-gated -- never the core /dashboard endpoint,
+    # which predates this and stays available to every plan.
+    try:
+        require_analytics(db, organization_id)
+    except CapabilityDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.to_error_detail())
 
     if window == TimeWindowKind.custom:
         # A custom range needs explicit start/end query params this route
@@ -154,7 +163,27 @@ def _series_response(points) -> list[SeriesPointResponse]:
     ]
 
 
-def _forecast_response(forecast) -> ForecastResponse:
+PLAN_RESTRICTED_FORECAST_REASON = "Forecasting is not included in your current plan."
+
+
+def _forecast_response(forecast, *, forecasting_allowed: bool) -> ForecastResponse:
+    """Phase 17B: forecasting degrades softly rather than 403ing the whole
+    /trends endpoint -- a plan with analytics but not forecasting (e.g.
+    Starter) still gets every trend/comparison/series field, just with
+    forecast fields reporting available=False, plan_restricted=True
+    instead of a real forecast_value. Distinct from the ordinary
+    "not enough history yet" unavailable case, which always has
+    plan_restricted=False -- see ForecastResponse's own docstring."""
+    if not forecasting_allowed:
+        return ForecastResponse(
+            available=False,
+            method=None,
+            forecast_value=None,
+            inputs=forecast.inputs,
+            window_size=None,
+            reason=PLAN_RESTRICTED_FORECAST_REASON,
+            plan_restricted=True,
+        )
     return ForecastResponse(
         available=forecast.available,
         method=forecast.method.value if forecast.method is not None else None,
@@ -182,6 +211,11 @@ def get_trend_snapshot(
     different cut of it.
     """
     require_permission(current_user, organization_id, Permission.dashboard_view, db)
+    try:
+        caps = require_analytics(db, organization_id)
+    except CapabilityDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.to_error_detail())
+    forecasting_allowed = can_use_forecasting(caps)
 
     if comparison not in COMPARISON_KINDS:
         raise HTTPException(
@@ -232,10 +266,11 @@ def get_trend_snapshot(
             service.quote_conversion_series(period_starts, granularity)
         ),
         revenue_forecast={
-            code: _forecast_response(f)
+            code: _forecast_response(f, forecasting_allowed=forecasting_allowed)
             for code, f in service.revenue_forecast(period_starts, granularity, method=method).items()
         },
         invoice_count_forecast=_forecast_response(
-            service.invoice_count_forecast(period_starts, granularity, method=method)
+            service.invoice_count_forecast(period_starts, granularity, method=method),
+            forecasting_allowed=forecasting_allowed,
         ),
     )

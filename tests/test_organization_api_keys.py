@@ -29,7 +29,7 @@ from app.services.organization_api_keys import (
     rotate_api_key,
     touch_api_key_last_used,
 )
-from tests.factories import make_customer, make_org_with_owner
+from tests.factories import make_customer, make_org_with_owner, make_subscription
 
 
 def _custom_plan(db_session, *, code: str, **overrides) -> Plan:
@@ -384,6 +384,7 @@ class TestPublicApiPlanEnforcement:
         plan = _custom_plan(db_session, code="api-limit-1cust", max_customers=1)
         owner.organization.plan_id = plan.id
         db_session.commit()
+        make_subscription(db_session, owner.organization, plan=plan)
 
         full_key = _create_key_via_api(client, owner, ["customers.read", "customers.write"])
         headers = {"Authorization": f"Bearer {full_key}"}

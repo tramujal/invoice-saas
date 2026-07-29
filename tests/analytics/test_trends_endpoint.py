@@ -8,18 +8,18 @@ tests/analytics/test_trend_calculators.py and test_forecast.py -- this
 file only exercises the HTTP layer.
 """
 
-from tests.factories import make_invoice, make_org_with_owner
+from tests.factories import make_invoice, make_org_with_owner_on_plan
 
 
 def test_requires_authentication(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-auth@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-auth@example.com")
     response = client.get(f"/organizations/{org.organization.id}/analytics/trends")
     assert response.status_code == 401
 
 
 def test_foreign_user_cannot_read_trends(client, db_session):
-    org_a = make_org_with_owner(db_session, email="trends-tenant-a@example.com")
-    org_b = make_org_with_owner(db_session, email="trends-tenant-b@example.com")
+    org_a = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-tenant-a@example.com")
+    org_b = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-tenant-b@example.com")
 
     response = client.get(
         f"/organizations/{org_a.organization.id}/analytics/trends", headers=org_b.auth_headers
@@ -28,7 +28,7 @@ def test_foreign_user_cannot_read_trends(client, db_session):
 
 
 def test_returns_trend_snapshot_for_default_comparison_and_granularity(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-default@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-default@example.com")
     make_invoice(db_session, org.organization, org.user)
 
     response = client.get(
@@ -57,7 +57,7 @@ def test_empty_organization_returns_empty_revenue_trend_and_zero_invoice_forecas
     points to average over; it just forecasts 0, not "unavailable" (that
     honest-gap state only occurs when fewer than 2 periods are
     requested, which the `periods` query param's own minimum blocks)."""
-    org = make_org_with_owner(db_session, email="trends-empty@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-empty@example.com")
 
     response = client.get(
         f"/organizations/{org.organization.id}/analytics/trends", headers=org.auth_headers
@@ -71,7 +71,7 @@ def test_empty_organization_returns_empty_revenue_trend_and_zero_invoice_forecas
 
 
 def test_accepts_each_supported_comparison_kind(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-comparisons@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-comparisons@example.com")
     for kind in ("current_month", "current_quarter", "current_year", "last_7_days", "last_30_days"):
         response = client.get(
             f"/organizations/{org.organization.id}/analytics/trends",
@@ -83,7 +83,7 @@ def test_accepts_each_supported_comparison_kind(client, db_session):
 
 
 def test_rejects_unsupported_comparison_kind(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-unsupported@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-unsupported@example.com")
 
     response = client.get(
         f"/organizations/{org.organization.id}/analytics/trends",
@@ -95,7 +95,7 @@ def test_rejects_unsupported_comparison_kind(client, db_session):
 
 
 def test_rejects_custom_comparison_kind(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-custom@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-custom@example.com")
 
     response = client.get(
         f"/organizations/{org.organization.id}/analytics/trends",
@@ -106,7 +106,7 @@ def test_rejects_custom_comparison_kind(client, db_session):
 
 
 def test_rejects_unknown_comparison_value(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-invalid@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-invalid@example.com")
 
     response = client.get(
         f"/organizations/{org.organization.id}/analytics/trends",
@@ -117,7 +117,7 @@ def test_rejects_unknown_comparison_value(client, db_session):
 
 
 def test_accepts_quarterly_and_yearly_granularity(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-granularity@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-granularity@example.com")
     make_invoice(db_session, org.organization, org.user)
 
     for granularity in ("quarterly", "yearly"):
@@ -131,7 +131,7 @@ def test_accepts_quarterly_and_yearly_granularity(client, db_session):
 
 
 def test_rejects_unknown_granularity_value(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-bad-granularity@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-bad-granularity@example.com")
 
     response = client.get(
         f"/organizations/{org.organization.id}/analytics/trends",
@@ -142,7 +142,7 @@ def test_rejects_unknown_granularity_value(client, db_session):
 
 
 def test_accepts_explicit_periods_and_forecast_method(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-periods@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-periods@example.com")
     make_invoice(db_session, org.organization, org.user)
 
     response = client.get(
@@ -156,7 +156,7 @@ def test_accepts_explicit_periods_and_forecast_method(client, db_session):
 
 
 def test_rejects_periods_below_minimum(client, db_session):
-    org = make_org_with_owner(db_session, email="trends-periods-min@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-periods-min@example.com")
 
     response = client.get(
         f"/organizations/{org.organization.id}/analytics/trends",
@@ -169,7 +169,7 @@ def test_rejects_periods_below_minimum(client, db_session):
 def test_does_not_break_the_existing_kpis_endpoint(client, db_session):
     """Regression guard: Phase 16C must be purely additive -- the Phase
     16B /kpis route's shape is untouched."""
-    org = make_org_with_owner(db_session, email="trends-no-regression@example.com")
+    org = make_org_with_owner_on_plan(db_session, analytics_enabled=True, forecasting_enabled=True, email="trends-no-regression@example.com")
     make_invoice(db_session, org.organization, org.user)
 
     response = client.get(

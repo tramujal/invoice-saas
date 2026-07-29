@@ -27,6 +27,7 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.billing.capabilities import can_use_background_jobs, get_organization_capabilities
 from app.job_type import JobType
 from app.models import WebhookDelivery, WebhookEvent
 from app.services.background_jobs import enqueue_job
@@ -53,7 +54,18 @@ def record_webhook_event(
     If no endpoint is subscribed, the WebhookEvent row is still recorded
     (it's genuine, immutable history -- a webhook being added later could
     otherwise never look back at what already happened), just with zero
-    deliveries."""
+    deliveries. Phase 17B: the same applies if the organization's plan
+    doesn't include background job processing at all
+    (app.billing.capabilities.can_use_background_jobs) -- this is the
+    one and only place that capability is enforced for the WEBHOOK
+    channel specifically (Phase 20's notification.email job is
+    deliberately NOT gated by this same capability -- see
+    app.notifications.service.emit_event's own docstring for why). This
+    matters most on a downgrade: an organization that had webhook
+    endpoints configured on a higher plan keeps those rows (they are
+    never deleted), but stops receiving deliveries the moment its plan
+    no longer includes background jobs, without needing a separate
+    sweep to disable them."""
     event = WebhookEvent(
         organization_id=organization_id,
         event_type=event_type.value,
@@ -63,6 +75,10 @@ def record_webhook_event(
     )
     db.add(event)
     db.flush()
+
+    caps = get_organization_capabilities(db, organization_id)
+    if not can_use_background_jobs(caps):
+        return event, []
 
     endpoints = list_active_subscribed_endpoints(db, organization_id, event_type)
     deliveries: list[WebhookDelivery] = []

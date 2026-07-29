@@ -3,12 +3,12 @@ another organization's data into the prompt -- checked by inspecting what
 was actually passed to the fake provider, since that's the exact string
 a real model would see."""
 
-from tests.factories import make_customer, make_org_with_owner
+from tests.factories import make_customer, make_org_with_owner_on_plan
 
 
 def test_business_context_is_scoped_to_calling_organization(client, db_session, fake_ai_provider):
-    org_a = make_org_with_owner(db_session, email="owner-a@example.com", org_name="Org A")
-    org_b = make_org_with_owner(db_session, email="owner-b@example.com", org_name="Org B")
+    org_a = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner-a@example.com", org_name="Org A")
+    org_b = make_org_with_owner_on_plan(db_session, ai_enabled=True, email="owner-b@example.com", org_name="Org B")
     make_customer(db_session, org_a.organization, name="Alpha Customer Ltd")
     make_customer(db_session, org_b.organization, name="Beta Customer Ltd")
 

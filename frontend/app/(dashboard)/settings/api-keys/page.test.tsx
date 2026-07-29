@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth-storage";
 import type { ApiKey, ApiKeyCreated } from "@/lib/types";
 import { renderWithProviders } from "@/tests/test-utils";
@@ -113,6 +114,40 @@ describe("ApiKeysPage", () => {
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(screen.getByText("sk_newprefix123_supersecretvalue")).toBeInTheDocument();
     expect(screen.queryByText(/upgrade/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the plan-limit dialog when the API key quota is reached (409 plan_limit_reached)", async () => {
+    apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith("/api-keys") && (!init || init.method === undefined)) {
+        return Promise.resolve([existingKey]);
+      }
+      if (path.endsWith("/api-keys") && init?.method === "POST") {
+        return Promise.reject(
+          new ApiError("Request failed (409)", 409, {
+            detail: {
+              code: "plan_limit_reached",
+              resource: "api_keys",
+              used: 1,
+              limit: 1,
+              plan: { id: "plan-1", code: "free", name: "Free" },
+              message: "You've reached your plan's limit for API keys.",
+            },
+          })
+        );
+      }
+      return Promise.reject(new Error(`unexpected call: ${path}`));
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<ApiKeysPage />);
+    await waitFor(() => expect(screen.getByText("Order sync")).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/Name/), "Second integration");
+    await user.click(screen.getByLabelText("Customers: Read"));
+    await user.click(screen.getByRole("button", { name: "Create API key" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText("You've reached your plan's limit for API keys.")).toBeInTheDocument();
   });
 
   it("rotates a key after confirmation and shows the new secret once", async () => {

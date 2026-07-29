@@ -4,6 +4,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.billing.provider_base import BillingProvider, BillingProviderNotConfiguredError
+from app.billing.provider_factory import get_billing_provider
 from app.database import get_db
 from app.membership_role import MembershipRole
 from app.membership_status import MembershipStatus
@@ -244,3 +246,29 @@ def require_verified_email(user: User) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "email_not_verified", "message": EMAIL_NOT_VERIFIED_MESSAGE},
         )
+
+
+def get_billing_provider_dependency() -> BillingProvider:
+    """FastAPI Depends()-compatible wrapper around
+    app.billing.provider_factory.get_billing_provider() -- the one place
+    a request handler needs a request-scoped BillingProvider (the
+    checkout endpoint, the provider webhook receiver). Every other
+    BillingService construction site (registration, platform-admin plan
+    changes, jobs, the CLI bootstrap script) calls get_billing_provider()
+    directly instead, exactly like get_ai_provider()/get_email_sender()
+    are called explicitly rather than via Depends() -- BillingService
+    itself is not FastAPI-request-scoped.
+
+    Converts BillingProviderNotConfiguredError into a clean 503, the same
+    "optional infrastructure, not a boot-time requirement" contract
+    app.ai.factory.get_ai_provider() already establishes for AI: a
+    missing/incomplete BILLING_PROVIDER configuration doesn't stop the
+    app from booting, it just makes a provider-dependent route 503 when
+    actually reached."""
+    try:
+        return get_billing_provider()
+    except BillingProviderNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "billing_provider_not_configured", "message": str(exc)},
+        ) from exc

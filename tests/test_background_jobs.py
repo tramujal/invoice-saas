@@ -40,10 +40,24 @@ from app.webhook_delivery_status import WebhookDeliveryStatus
 from app.webhook_delivery_trigger import WebhookDeliveryTrigger
 from app.webhook_event_type import WebhookEventType
 
-from tests.factories import make_org_with_owner
+from tests.factories import make_org_with_owner, make_plan, make_subscription
 
 
 def _make_webhook_endpoint(db, owner, *, events=None):
+    """Phase 17B enforces app.services.plan_limits.LimitedResource.webhooks
+    at creation time, and app.services.webhook_events.record_webhook_event
+    silently drops deliveries when background_jobs_enabled is false --
+    make_org_with_owner's default (Free-tier) subscription has both
+    max_webhooks=0 and background_jobs_enabled=False, so bump the org
+    onto a plan with both raised first."""
+    plan = make_plan(
+        db,
+        code=f"webhooks-ok-{owner.organization.id}",
+        max_webhooks=None,
+        max_api_keys=None,
+        background_jobs_enabled=True,
+    )
+    make_subscription(db, owner.organization, plan=plan)
     endpoint, _secret = create_endpoint(
         db,
         owner.organization.id,
@@ -510,9 +524,23 @@ class TestWebhookJobHandlers:
         first_job = claim_jobs(db_session, worker_id="w1")[0]
         run_claimed_job(db_session, first_job)
 
-        # The scheduled retry has available_at in the future -- must not
-        # be claimable yet.
-        assert claim_jobs(db_session, worker_id="w1") == []
+        retry_job = db_session.query(BackgroundJob).filter_by(job_type="webhook.retry").one()
+
+        # This same customer.created event also enqueued a
+        # notification.email job (see app.notifications.service
+        # .emit_event), which has no artificial backoff and may still be
+        # legitimately claimable -- drain anything else due first so this
+        # test asserts only what it's actually about: the webhook retry
+        # specifically must not be claimable before its own backoff delay.
+        while True:
+            claimed = claim_jobs(db_session, worker_id="w1")
+            if not claimed:
+                break
+            assert claimed[0].id != retry_job.id
+            run_claimed_job(db_session, claimed[0])
+
+        db_session.refresh(retry_job)
+        assert retry_job.status == JobStatus.pending.value
 
     def test_retry_fires_when_due_and_creates_new_delivery_row(self, db_session, monkeypatch):
         owner = make_org_with_owner(db_session, email="wh3@example.com", org_name="Wh3 Co")

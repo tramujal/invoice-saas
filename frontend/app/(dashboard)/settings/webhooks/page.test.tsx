@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth-storage";
 import type {
   PaginatedWebhookDeliveries,
@@ -112,6 +113,40 @@ describe("WebhooksPage", () => {
 
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(screen.getByText("whsec_supersecretvalue")).toBeInTheDocument();
+  });
+
+  it("shows the plan-limit dialog when the webhook quota is reached (409 plan_limit_reached)", async () => {
+    apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (path.endsWith("/webhooks") && method === "GET") return Promise.resolve([existingEndpoint]);
+      if (path.endsWith("/webhooks/event-types")) return Promise.resolve(catalog);
+      if (path.endsWith("/webhooks") && method === "POST") {
+        return Promise.reject(
+          new ApiError("Request failed (409)", 409, {
+            detail: {
+              code: "plan_limit_reached",
+              resource: "webhooks",
+              used: 1,
+              limit: 1,
+              plan: { id: "plan-1", code: "free", name: "Free" },
+              message: "You've reached your plan's limit for webhooks.",
+            },
+          })
+        );
+      }
+      return Promise.reject(new Error(`unexpected call: ${path} ${method}`));
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<WebhooksPage />);
+    await waitFor(() => expect(screen.getByText("https://example.com/hook")).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/Endpoint URL/), "https://example.com/new-hook");
+    await user.click(screen.getByLabelText("Customer created"));
+    await user.click(screen.getByRole("button", { name: "Add endpoint" }));
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText("You've reached your plan's limit for Webhooks.")).toBeInTheDocument();
   });
 
   it("rotates the secret after confirmation and shows the new secret once", async () => {

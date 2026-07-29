@@ -1081,7 +1081,13 @@ class ForecastResponse(BaseModel):
     honest gap (not enough history), never a fabricated forecast_value --
     see that module's own docstring. `inputs`/`method`/`window_size` are
     exposed instead of a prose explanation so the frontend can build its
-    own translated explanation from these structured values."""
+    own translated explanation from these structured values.
+
+    `plan_restricted` (Phase 17B) distinguishes *why* available=False:
+    true means the organization's plan doesn't include forecasting at
+    all (app.billing.capabilities.can_use_forecasting) -- a different
+    frontend message ("upgrade to unlock") than the ordinary "not enough
+    history yet" case, which always has plan_restricted=False."""
 
     available: bool
     method: str | None
@@ -1089,6 +1095,7 @@ class ForecastResponse(BaseModel):
     inputs: list[Decimal]
     window_size: int | None
     reason: str | None
+    plan_restricted: bool = False
 
 
 class TrendSnapshotResponse(BaseModel):
@@ -1428,11 +1435,17 @@ _PLAN_LIMIT_FIELD_NAMES = (
     "max_quotes_per_month",
     "max_ai_actions_per_month",
     "storage_limit_mb",
+    "max_api_keys",
+    "max_webhooks",
 )
 _PLAN_FEATURE_FIELD_NAMES = (
     "custom_branding_enabled",
     "api_access_enabled",
     "advanced_reports_enabled",
+    "analytics_enabled",
+    "forecasting_enabled",
+    "ai_enabled",
+    "background_jobs_enabled",
 )
 
 
@@ -1449,22 +1462,38 @@ class PlanLimits(BaseModel):
     max_quotes_per_month: int | None
     max_ai_actions_per_month: int | None
     storage_limit_mb: int | None
+    max_api_keys: int | None
+    max_webhooks: int | None
 
 
 class PlanFeatures(BaseModel):
     """Commercial entitlement only -- whether the plan is *supposed* to
     allow the capability, not whether it's actually wired up and
-    enforced anywhere yet (enforcement is a later phase)."""
+    enforced anywhere yet (enforcement is a later phase). The last four
+    were added in Phase 17A alongside the billing/subscription domain."""
 
     custom_branding_enabled: bool
     api_access_enabled: bool
     advanced_reports_enabled: bool
+    analytics_enabled: bool
+    forecasting_enabled: bool
+    ai_enabled: bool
+    background_jobs_enabled: bool
 
 
 class PlanResponse(BaseModel):
     """GET/POST/PATCH /admin/plans(/{id}) -- the full plan definition,
     including the optimistic-concurrency `version` every mutation must
-    round-trip as expected_version (see PlanUpdateRequest)."""
+    round-trip as expected_version (see PlanUpdateRequest).
+
+    `code`/`name`/`sort_order`/`is_active` are this app's own immutable-
+    internal-identifier / editable-display-name / display-order / active
+    fields (see Phase 17A's own completion report for this exact
+    mapping) -- `code` is never accepted by PlanUpdateRequest, which is
+    what makes it immutable through the API, not a runtime check.
+    `monthly_price`/`yearly_price` are null for "contact us" / custom
+    pricing (the Enterprise seed row) -- informational only, no
+    checkout/charging exists anywhere in this app."""
 
     id: str
     code: str
@@ -1473,6 +1502,10 @@ class PlanResponse(BaseModel):
     is_active: bool
     is_default: bool
     sort_order: int
+    public: bool
+    monthly_price: Decimal | None
+    yearly_price: Decimal | None
+    currency: str
     limits: PlanLimits
     features: PlanFeatures
     version: int
@@ -1508,6 +1541,10 @@ class PlanCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     sort_order: int = 0
+    public: bool = True
+    monthly_price: Decimal | None = None
+    yearly_price: Decimal | None = None
+    currency: str = Field(default="USD", min_length=3, max_length=8)
     max_users: int | None = None
     max_customers: int | None = None
     max_products: int | None = None
@@ -1515,9 +1552,15 @@ class PlanCreateRequest(BaseModel):
     max_quotes_per_month: int | None = None
     max_ai_actions_per_month: int | None = None
     storage_limit_mb: int | None = None
+    max_api_keys: int | None = None
+    max_webhooks: int | None = None
     custom_branding_enabled: bool = False
     api_access_enabled: bool = False
     advanced_reports_enabled: bool = False
+    analytics_enabled: bool = False
+    forecasting_enabled: bool = False
+    ai_enabled: bool = False
+    background_jobs_enabled: bool = False
     reason: str = Field(min_length=1, max_length=1000)
 
     @field_validator("code")
@@ -1537,6 +1580,13 @@ class PlanCreateRequest(BaseModel):
             raise ValueError("must be a non-negative integer, or null for unlimited")
         return value
 
+    @field_validator("monthly_price", "yearly_price")
+    @classmethod
+    def _price_non_negative(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and value < 0:
+            raise ValueError("must be a non-negative amount, or null for custom/contact-us pricing")
+        return value
+
 
 class PlanUpdateRequest(BaseModel):
     """Body for PATCH /admin/plans/{id} -- a genuine partial update
@@ -1554,6 +1604,10 @@ class PlanUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     sort_order: int | None = None
+    public: bool | None = None
+    monthly_price: Decimal | None = None
+    yearly_price: Decimal | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=8)
     max_users: int | None = None
     max_customers: int | None = None
     max_products: int | None = None
@@ -1561,9 +1615,15 @@ class PlanUpdateRequest(BaseModel):
     max_quotes_per_month: int | None = None
     max_ai_actions_per_month: int | None = None
     storage_limit_mb: int | None = None
+    max_api_keys: int | None = None
+    max_webhooks: int | None = None
     custom_branding_enabled: bool | None = None
     api_access_enabled: bool | None = None
     advanced_reports_enabled: bool | None = None
+    analytics_enabled: bool | None = None
+    forecasting_enabled: bool | None = None
+    ai_enabled: bool | None = None
+    background_jobs_enabled: bool | None = None
 
     @field_validator("reason")
     @classmethod
@@ -1577,9 +1637,32 @@ class PlanUpdateRequest(BaseModel):
             raise ValueError("must be a non-negative integer, or null for unlimited")
         return value
 
+    @field_validator("monthly_price", "yearly_price")
+    @classmethod
+    def _price_non_negative(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and value < 0:
+            raise ValueError("must be a non-negative amount, or null for custom/contact-us pricing")
+        return value
+
     @model_validator(mode="after")
     def _reject_empty_update(self) -> "PlanUpdateRequest":
-        editable_fields = ("name", "description", "sort_order", *_PLAN_LIMIT_FIELD_NAMES, *_PLAN_FEATURE_FIELD_NAMES)
+        # monthly_price/yearly_price are deliberately excluded from this
+        # check: None is both "not being changed" (PATCH semantics) and a
+        # perfectly valid target value (custom/contact-us pricing), so it
+        # can never distinguish the two -- a caller who only wants to set
+        # a plan's price to "custom" would otherwise be unable to combine
+        # that with leaving every other field alone. public/currency are
+        # unambiguous (no field here can legitimately be set to None) so
+        # they stay in the check.
+        editable_fields = (
+            "name",
+            "description",
+            "sort_order",
+            "public",
+            "currency",
+            *_PLAN_LIMIT_FIELD_NAMES,
+            *_PLAN_FEATURE_FIELD_NAMES,
+        )
         if all(getattr(self, field) is None for field in editable_fields):
             raise ValueError("At least one field must be provided.")
         return self
@@ -1631,6 +1714,191 @@ class OrganizationEntitlementsResponse(BaseModel):
     plan_name: str
     limits: PlanLimits
     features: PlanFeatures
+
+
+# --- Phase 17A: billing / subscription domain --------------------------
+#
+# Provider-independent throughout: no field here ever exposes a payment
+# token, a provider credential, or anything charge-related -- see
+# Subscription's own docstring in app.models for why provider_name/
+# provider_reference exist (forward-compatibility only, always null
+# today) and app.billing.service.BillingService for where every field
+# below actually gets its value.
+
+
+class CapabilitiesResponse(BaseModel):
+    """The resolved capability layer (see app.billing.capabilities) for
+    one organization -- feature flags plus remaining quotas, so the
+    frontend never has to re-derive "can I create another X" from raw
+    limits/usage itself."""
+
+    can_use_ai: bool
+    can_use_analytics: bool
+    can_use_forecasting: bool
+    can_use_background_jobs: bool
+    can_create_invoice: bool
+    can_create_quote: bool
+    can_create_api_key: bool
+    can_create_webhook: bool
+    remaining_invoice_quota: int | None
+    remaining_quote_quota: int | None
+    remaining_users: int | None
+    remaining_api_keys: int | None
+    remaining_webhooks: int | None
+
+
+class SubscriptionResponse(BaseModel):
+    """GET /organizations/{organization_id}/subscription -- the tenant-
+    facing, read-only view of an organization's own subscription.
+    Deliberately does not include provider_name/provider_reference (see
+    module note above) or any other organization's data."""
+
+    id: str
+    organization_id: str
+    plan: PlanResponse
+    status: str
+    billing_period: str
+    trial_start: datetime | None
+    trial_end: datetime | None
+    current_period_start: datetime
+    current_period_end: datetime
+    cancel_at_period_end: bool
+    canceled_at: datetime | None
+    ended_at: datetime | None
+    capabilities: CapabilitiesResponse
+    created_at: datetime
+    updated_at: datetime
+
+
+class StartCheckoutRequest(BaseModel):
+    """POST /organizations/{organization_id}/billing/checkout -- Phase 18's
+    first tenant-initiated plan-change entry point (every prior phase's
+    plan changes were platform-admin-only). `plan_id` is the target plan;
+    `success_url`/`cancel_url` are where the provider's own hosted
+    checkout page redirects back to once the tenant finishes (or
+    abandons) the flow -- validated against nothing here beyond being
+    non-empty strings, since the provider itself is what actually
+    redirects the browser there."""
+
+    plan_id: str
+    billing_period: str
+    success_url: str
+    cancel_url: str
+
+
+class StartCheckoutResponse(BaseModel):
+    """The URL to redirect the tenant's browser to -- nothing about the
+    organization's Subscription changes yet; that only happens once the
+    provider's own checkout_completed webhook event arrives (see
+    app.billing.service.BillingService.sync_from_webhook_event)."""
+
+    checkout_url: str
+
+
+class StartPortalSessionRequest(BaseModel):
+    """POST /organizations/{organization_id}/billing/portal -- `return_url`
+    is where the provider's own hosted billing-management page sends the
+    browser back once the tenant is done."""
+
+    return_url: str
+
+
+class StartPortalSessionResponse(BaseModel):
+    portal_url: str
+
+
+class SubscriptionEventResponse(BaseModel):
+    """One row of subscription HISTORY (see app.models.SubscriptionEvent's
+    own docstring on why this is distinct from PlatformAuditLog).
+    `previous_values`/`new_values`/`metadata` are already-parsed JSON
+    objects here, never the raw encoded string the database stores."""
+
+    id: str
+    subscription_id: str
+    organization_id: str
+    actor_user_id: str | None
+    event_type: str
+    previous_values: dict | None
+    new_values: dict | None
+    metadata: dict | None
+    created_at: datetime
+
+
+class PaginatedSubscriptionEvents(BaseModel):
+    total: int
+    items: list[SubscriptionEventResponse]
+
+
+class PlatformSubscriptionSummary(BaseModel):
+    """One row of GET /admin/subscriptions -- deliberately narrower than
+    the detail response (no event history), matching
+    PlatformOrganizationSummary's own list-vs-detail precedent."""
+
+    id: str
+    organization_id: str
+    organization_name: str
+    plan_code: str
+    plan_name: str
+    status: str
+    billing_period: str
+    trial_end: datetime | None
+    current_period_end: datetime
+    cancel_at_period_end: bool
+    created_at: datetime
+
+
+class PaginatedPlatformSubscriptions(BaseModel):
+    total: int
+    items: list[PlatformSubscriptionSummary]
+
+
+class PlatformSubscriptionDetail(BaseModel):
+    """GET /admin/subscriptions/{id} -- the full subscription plus its
+    own event history, for platform-admin inspection."""
+
+    id: str
+    organization_id: str
+    organization_name: str
+    plan: PlanResponse
+    status: str
+    billing_period: str
+    trial_start: datetime | None
+    trial_end: datetime | None
+    current_period_start: datetime
+    current_period_end: datetime
+    cancel_at_period_end: bool
+    canceled_at: datetime | None
+    ended_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    events: list[SubscriptionEventResponse]
+
+
+class AdminChangeSubscriptionPlanRequest(BaseModel):
+    """Body for POST /admin/subscriptions/{id}/change-plan. Direction
+    (upgrade vs. downgrade) is resolved server-side by comparing
+    Plan.sort_order -- never supplied by the caller, since that's exactly
+    the kind of plan-identity assumption this domain must never depend
+    on (see app.billing.service.BillingService's own docstring)."""
+
+    plan_id: str
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
+
+
+class AdminSubscriptionActionRequest(BaseModel):
+    """Body for POST /admin/subscriptions/{id}/cancel|reactivate|resume."""
+
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _require_non_blank_reason(value)
 
 
 class UsageResourceSnapshot(BaseModel):
@@ -2085,3 +2353,39 @@ class WebhookDeliveryDetailResponse(WebhookDeliveryResponse):
 
     request_headers: dict[str, str] | None
     event: WebhookEventResponse
+
+
+class NotificationResponse(BaseModel):
+    """One in-app Notification row addressed to the current user (see
+    app.models.Notification) -- title/body are already the frozen,
+    rendered text (see app.notifications.copy), never a raw payload the
+    frontend would have to format itself."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    event_type: str
+    title: str
+    body: str
+    object_type: str
+    object_id: str
+    read_at: datetime | None
+    created_at: datetime
+
+
+class PaginatedNotificationsResponse(BaseModel):
+    total: int
+    unread_count: int
+    items: list[NotificationResponse]
+
+
+class NotificationPreferenceResponse(BaseModel):
+    """Reflects app.notifications.service.is_email_enabled's own
+    default-True-when-no-row-exists semantics -- this response always has
+    a value, even for a user who has never touched their preferences."""
+
+    email_enabled: bool
+
+
+class UpdateNotificationPreferenceRequest(BaseModel):
+    email_enabled: bool

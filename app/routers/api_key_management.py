@@ -28,6 +28,7 @@ from app.services.organization_api_keys import (
     revoke_api_key,
     rotate_api_key,
 )
+from app.services.plan_limits import PlanLimitExceededError
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/api-keys", tags=["api-key-management"]
@@ -74,16 +75,19 @@ def create_organization_api_key(
 ) -> ApiKeyCreatedResponse:
     require_permission(current_user, organization_id, Permission.settings_manage, db)
     require_verified_email(current_user)
-    api_key, full_key = create_api_key(
-        db,
-        organization_id,
-        current_user,
-        name=body.name,
-        description=body.description,
-        permissions=frozenset(body.permissions),
-        expires_at=body.expires_at,
-        client_ip=get_client_ip(request),
-    )
+    try:
+        api_key, full_key = create_api_key(
+            db,
+            organization_id,
+            current_user,
+            name=body.name,
+            description=body.description,
+            permissions=frozenset(body.permissions),
+            expires_at=body.expires_at,
+            client_ip=get_client_ip(request),
+        )
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
     return _to_created_response(api_key, full_key)
 
 

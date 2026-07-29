@@ -11,15 +11,21 @@ exercise real business logic, not a parallel reimplementation of it.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from sqlalchemy import select
+
+from app.billing_period import BillingPeriod
 from app.membership_role import InvitationRole, MembershipRole
 from app.models import (
     Customer,
     Organization,
     OrganizationInvitation,
     OrganizationMember,
+    Plan,
     Product,
+    Subscription,
     User,
 )
 from app.schemas import CurrencyCode, InvoiceLineItemCreate, QuoteLineItemCreate
@@ -27,11 +33,10 @@ from app.security import create_access_token, hash_password
 from app.services.invoices import create_invoice_record
 from app.services.quotes import create_quote_record
 from app.services.team import invite_member_record
+from app.subscription_status import SubscriptionStatus
 
 
 def make_user(db, *, email: str = "user@example.com", verified: bool = True) -> User:
-    from datetime import datetime, timezone
-
     user = User(
         email=email,
         hashed_password=hash_password("Correct-Horse-1"),
@@ -44,11 +49,84 @@ def make_user(db, *, email: str = "user@example.com", verified: bool = True) -> 
 
 
 def make_organization(db, *, name: str = "Acme Inc") -> Organization:
+    """Every organization in this app owns exactly one Subscription (see
+    app.models.Subscription's own docstring -- it's the resolved source
+    of truth for entitlements as of Phase 17A, not Organization.plan_id).
+    A bare direct ORM insert here (not going through
+    app.billing.service.BillingService.create_subscription, which is
+    registration's own real path) is deliberately simple/minimal, matching
+    every other factory in this module -- tests that need a specific
+    subscription status/plan/trial should call make_subscription() below
+    afterward, which replaces this default one."""
     organization = Organization(name=name)
     db.add(organization)
     db.commit()
     db.refresh(organization)
+    make_subscription(db, organization)
     return organization
+
+
+def make_subscription(
+    db,
+    organization: Organization,
+    *,
+    plan: Plan | None = None,
+    status: SubscriptionStatus = SubscriptionStatus.active,
+    billing_period: BillingPeriod = BillingPeriod.monthly,
+    trial_start=None,
+    trial_end=None,
+    current_period_start=None,
+    current_period_end=None,
+    cancel_at_period_end: bool = False,
+) -> Subscription:
+    """Creates (replacing any existing one -- an organization has at most
+    one) a Subscription with the given fields, for tests that need a
+    specific status/plan/trial/period state rather than the plain active-
+    on-the-organization's-current-plan default make_organization() sets
+    up automatically."""
+    existing = db.scalar(
+        select(Subscription).where(Subscription.organization_id == organization.id)
+    )
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
+
+    now = datetime.now(timezone.utc)
+    subscription = Subscription(
+        organization_id=organization.id,
+        plan_id=plan.id if plan is not None else organization.plan_id,
+        status=status.value,
+        billing_period=billing_period.value,
+        trial_start=trial_start,
+        trial_end=trial_end,
+        current_period_start=current_period_start or now,
+        current_period_end=current_period_end or (now + timedelta(days=30)),
+        cancel_at_period_end=cancel_at_period_end,
+    )
+    db.add(subscription)
+    db.commit()
+    db.refresh(subscription)
+    return subscription
+
+
+def make_plan(
+    db,
+    *,
+    code: str,
+    name: str = "Test Plan",
+    sort_order: int = 0,
+    is_active: bool = True,
+    **overrides,
+) -> Plan:
+    """A custom Plan row for tests exercising upgrade/downgrade (which
+    classify by sort_order, never by code/name -- see
+    app.billing.service.BillingService) or plan-CRUD scenarios that
+    shouldn't touch the four seeded built-in plans."""
+    plan = Plan(code=code, name=name, sort_order=sort_order, is_active=is_active, **overrides)
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
 
 
 def make_membership(
@@ -85,6 +163,23 @@ def make_org_with_owner(
     organization = make_organization(db, name=org_name)
     membership = make_membership(db, user, organization, role=MembershipRole.owner)
     return OrgWithOwner(organization=organization, user=user, membership=membership)
+
+
+def make_org_with_owner_on_plan(
+    db, *, email: str = "owner@example.com", org_name: str = "Acme Inc", **plan_overrides
+) -> OrgWithOwner:
+    """Same as make_org_with_owner, but immediately replaces the auto-
+    created Free-tier subscription with one on a custom plan -- for
+    tests that need a specific capability/limit enabled (Phase 17B:
+    analytics_enabled, forecasting_enabled, ai_enabled,
+    background_jobs_enabled, max_api_keys, max_webhooks, ...) rather than
+    the Free tier's own restrictive defaults. `plan_overrides` are passed
+    straight through to make_plan, e.g. make_org_with_owner_on_plan(db,
+    analytics_enabled=True)."""
+    owner = make_org_with_owner(db, email=email, org_name=org_name)
+    plan = make_plan(db, code=f"test-plan-{owner.organization.id}", **plan_overrides)
+    make_subscription(db, owner.organization, plan=plan)
+    return owner
 
 
 def make_member_in_org(

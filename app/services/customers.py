@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.models import Customer
 from app.schemas import CustomerResponse
 from app.services.plan_limits import LimitedResource, check_limit
-from app.services.webhook_events import record_webhook_event
+from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 
 
@@ -62,7 +62,7 @@ def create_customer_record(
     )
     db.add(customer)
     db.flush()
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=organization_id,
         event_type=WebhookEventType.customer_created,
@@ -83,7 +83,7 @@ def update_customer_record(db: Session, customer: Customer, changes: dict) -> Cu
         if value is None:
             continue
         setattr(customer, key, value)
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=customer.organization_id,
         event_type=WebhookEventType.customer_updated,
@@ -103,7 +103,7 @@ def delete_customer_record(db: Session, customer: Customer) -> None:
     already had before this extraction. The event payload is snapshotted
     BEFORE db.delete() -- there is no row left to read from afterward."""
     payload = CustomerResponse.model_validate(customer).model_dump(mode="json")
-    record_webhook_event(
+    emit_event(
         db,
         organization_id=customer.organization_id,
         event_type=WebhookEventType.customer_deleted,

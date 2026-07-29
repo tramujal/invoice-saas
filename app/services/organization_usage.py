@@ -28,7 +28,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.membership_status import MembershipStatus
-from app.models import AssistantAction, Customer, Invoice, OrganizationMember, Product, Quote
+from app.models import (
+    AssistantAction,
+    Customer,
+    Invoice,
+    OrganizationApiKey,
+    OrganizationMember,
+    Product,
+    Quote,
+    WebhookEndpoint,
+)
 from app.services.entitlements import Entitlements, PlanLimit, get_limit, get_organization_entitlements
 
 
@@ -164,6 +173,56 @@ def count_ai_actions_current_month(db: Session, organization_id: str, *, now: da
             select(func.count())
             .select_from(AssistantAction)
             .where(AssistantAction.organization_id == organization_id, AssistantAction.created_at >= month_start)
+        )
+        or 0
+    )
+
+
+def count_api_keys(db: Session, organization_id: str) -> int:
+    """Non-revoked API keys only -- revocation is the removal mechanism
+    for this resource (see OrganizationApiKey's own docstring: rotation
+    revokes and creates a new row rather than mutating in place), the
+    same "hide, never destroy" convention count_products already follows
+    for archived products. An expired-but-not-yet-revoked key still
+    counts: it's a real credential the organization created and hasn't
+    explicitly removed.
+
+    Phase 17A: feeds app.billing.capabilities.remaining_api_keys /
+    can_create_api_key only -- not yet wired into
+    app.services.plan_limits (enforcement is a future phase; see that
+    module's own docstring on why storage is similarly absent today)."""
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(OrganizationApiKey)
+            .where(
+                OrganizationApiKey.organization_id == organization_id,
+                OrganizationApiKey.revoked_at.is_(None),
+            )
+        )
+        or 0
+    )
+
+
+def count_webhooks(db: Session, organization_id: str) -> int:
+    """Active (non-archived) webhook endpoints only -- see
+    WebhookEndpoint's own docstring on `active` vs. `enabled`: a merely
+    *disabled* (paused) endpoint still counts against the quota (it's
+    still a configured integration, just temporarily paused), only an
+    *archived* one doesn't, mirroring count_products' identical
+    active-vs-archived reasoning.
+
+    Phase 17A: feeds app.billing.capabilities.remaining_webhooks /
+    can_create_webhook only -- see count_api_keys' own docstring above
+    for why this isn't wired into app.services.plan_limits yet."""
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(WebhookEndpoint)
+            .where(
+                WebhookEndpoint.organization_id == organization_id,
+                WebhookEndpoint.active.is_(True),
+            )
         )
         or 0
     )

@@ -6,7 +6,7 @@ import json
 
 from app.models import Organization, OrganizationMember, PlatformAuditLog, User
 from app.security import create_access_token
-from tests.factories import make_org_with_owner, make_user
+from tests.factories import make_org_with_owner, make_subscription, make_user
 
 
 def _headers(user: User) -> dict[str, str]:
@@ -39,6 +39,7 @@ def test_pagination_and_deterministic_ordering(client, db_session, super_admin_h
     org = Organization(name="Pagination Org")
     db_session.add(org)
     db_session.commit()
+    make_subscription(db_session, org)
 
     for i in range(5):
         client.post(
@@ -95,11 +96,13 @@ def test_filter_by_target_organization_id(client, db_session, super_admin_header
     org = Organization(name="Target Org Filter")
     db_session.add(org)
     db_session.commit()
+    make_subscription(db_session, org)
     client.post(f"/admin/organizations/{org.id}/suspend", json={"reason": "test"}, headers=super_admin_headers)
 
     other_org = Organization(name="Other Org")
     db_session.add(other_org)
     db_session.commit()
+    make_subscription(db_session, other_org)
     client.post(f"/admin/organizations/{other_org.id}/suspend", json={"reason": "test"}, headers=super_admin_headers)
 
     response = client.get(f"/admin/audit-log?target_organization_id={org.id}", headers=super_admin_headers)
@@ -124,6 +127,7 @@ def test_filter_by_target_search_matches_org_name_or_user_email(client, db_sessi
     org = Organization(name="Searchable Org Name")
     db_session.add(org)
     db_session.commit()
+    make_subscription(db_session, org)
     client.post(f"/admin/organizations/{org.id}/suspend", json={"reason": "test"}, headers=super_admin_headers)
 
     user = make_user(db_session, email="searchable-target@example.com")
@@ -171,6 +175,7 @@ def test_snapshots_survive_organization_deletion(client, db_session, super_admin
     org = Organization(name="Doomed Org", business_name="Doomed Org Business")
     db_session.add(org)
     db_session.commit()
+    make_subscription(db_session, org)
     client.post(f"/admin/organizations/{org.id}/suspend", json={"reason": "test"}, headers=super_admin_headers)
 
     org_id = org.id
@@ -274,6 +279,7 @@ def test_every_successful_platform_mutation_writes_exactly_one_audit_row(
     org = Organization(name="Sweep Org")
     db_session.add(org)
     db_session.commit()
+    make_subscription(db_session, org)
 
     target = make_user(db_session, email="sweep-target@example.com", verified=False)
     second_admin = make_user(db_session, email="sweep-second-admin@example.com")

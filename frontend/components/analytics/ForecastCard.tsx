@@ -34,6 +34,8 @@ export function ForecastCard({ title, forecast, loading, formatValue }: Forecast
           <div className="h-8 w-24 animate-pulse rounded-lg bg-slate-200" />
           <div className="h-4 w-40 animate-pulse rounded bg-slate-100" />
         </div>
+      ) : forecast.plan_restricted ? (
+        <p className="mt-3 text-sm text-slate-500">{t("analytics.forecast.planRestricted")}</p>
       ) : !forecast.available || forecast.forecast_value === null || forecast.method === null ? (
         <p className="mt-3 text-sm text-slate-500">{t("analytics.forecast.unavailable")}</p>
       ) : (

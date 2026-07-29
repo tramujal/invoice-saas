@@ -31,6 +31,7 @@ from app.rate_limit import (
     user_identity,
     user_ip_identity,
 )
+from app.billing.enforcement import CapabilityDeniedError, require_ai
 from app.schemas import AssistantChatRequest
 from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
 
@@ -90,6 +91,17 @@ def assistant_chat(
     membership = require_permission(current_user, organization_id, Permission.assistant_chat, db)
     require_verified_email(current_user)
     caller_role = MembershipRole(membership.role)
+
+    # Phase 17B: the all-or-nothing AI feature flag, checked before rate
+    # limiting and before the (paid, comparatively expensive) provider
+    # call below -- a plan without AI at all should never reach either.
+    # The per-month ai_actions quota (LimitedResource.ai_actions) still
+    # applies on top of this, later, only once a tool is actually
+    # proposed -- see _handle_tool_invocation.
+    try:
+        require_ai(db, organization_id)
+    except CapabilityDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.to_error_detail())
 
     enforce_rate_limit(
         [

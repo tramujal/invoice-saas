@@ -10,6 +10,7 @@ Postgres. Safe to call on every startup.
 
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
@@ -56,6 +57,15 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_webhook_audit_log_table(engine)
     _add_background_jobs_table(engine)
     _backfill_background_jobs_for_pending_deliveries(engine)
+    _add_plan_billing_fields(engine)
+    _backfill_plan_billing_defaults(engine)
+    _add_subscriptions_table(engine)
+    _add_subscription_events_table(engine)
+    _backfill_subscriptions_for_existing_organizations(engine)
+    _add_provider_webhook_receipts_table(engine)
+    _add_provider_customers_table(engine)
+    _add_notifications_table(engine)
+    _add_notification_preferences_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1435,3 +1445,380 @@ def _backfill_invoice_numbers(conn) -> None:
             ),
             {"n": next_number, "org_id": org_id},
         )
+
+
+# --- Phase 17A: billing domain foundations ------------------------------
+
+# One-time per-tier backfill for the four built-in plans' new Phase 17A
+# columns, by fixed code -- applied only inside _add_plan_billing_fields'
+# own column-existence guard (so this runs exactly once, ever), and only
+# for these four codes -- a custom admin-created plan simply keeps the
+# column defaults (public=True, currency=USD, everything else
+# False/NULL), which an admin can then edit via PATCH like any other
+# field. Illustrative pricing, freely editable afterward via
+# PATCH /admin/plans -- this migration does not "own" these numbers.
+_PLAN_BILLING_BACKFILL = [
+    # code, monthly_price, yearly_price, analytics, forecasting, ai, background_jobs, max_api_keys, max_webhooks
+    ("free", "0.00", "0.00", False, False, False, False, 1, 0),
+    ("starter", "19.00", "190.00", True, False, False, True, 3, 2),
+    ("pro", "49.00", "490.00", True, True, True, True, 10, 10),
+    ("enterprise", None, None, True, True, True, True, None, None),
+]
+
+
+def _add_plan_billing_fields(engine: Engine) -> None:
+    """Adds pricing (monthly_price/yearly_price/currency), `public`
+    visibility, 4 more commercial capability flags (analytics/
+    forecasting/ai/background_jobs), and 2 more limits (max_api_keys/
+    max_webhooks) to the plans table -- see Plan's own docstring in
+    app.models for why these extend the existing row rather than
+    introducing a second "billing plan" concept.
+
+    Guarded by column presence, so this is a no-op both for a database
+    that already ran it (existing production deployments) AND for a
+    brand-new database, where Base.metadata.create_all() already created
+    the plans table with every Phase 17A column present (since Plan's
+    ORM model declares them) -- this function's ALTER TABLE statements
+    only ever apply to a pre-Phase-17A database. Deliberately does NOT
+    do the per-tier value backfill itself (see
+    _backfill_plan_billing_defaults below): that needs its own,
+    independent idempotency signal, since "the column already exists" is
+    true immediately on a fresh create_all()'d database, before any
+    backfill has ever actually run there."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("plans")}
+    if "monthly_price" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE plans ADD COLUMN monthly_price NUMERIC(10, 2) NULL"))
+        conn.execute(text("ALTER TABLE plans ADD COLUMN yearly_price NUMERIC(10, 2) NULL"))
+        conn.execute(
+            text("ALTER TABLE plans ADD COLUMN currency VARCHAR(8) NOT NULL DEFAULT 'USD'")
+        )
+        conn.execute(
+            text("ALTER TABLE plans ADD COLUMN public BOOLEAN NOT NULL DEFAULT TRUE")
+        )
+        conn.execute(
+            text("ALTER TABLE plans ADD COLUMN analytics_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        conn.execute(
+            text("ALTER TABLE plans ADD COLUMN forecasting_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        conn.execute(
+            text("ALTER TABLE plans ADD COLUMN ai_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE plans ADD COLUMN background_jobs_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(text("ALTER TABLE plans ADD COLUMN max_api_keys INTEGER NULL"))
+        conn.execute(text("ALTER TABLE plans ADD COLUMN max_webhooks INTEGER NULL"))
+
+
+def _backfill_plan_billing_defaults(engine: Engine) -> None:
+    """One-time per-tier backfill of the four built-in plans' Phase 17A
+    columns, by fixed code -- never touches a custom admin-created plan
+    (which simply keeps the column defaults: public=True, currency=USD,
+    every new flag False/NULL, freely editable via PATCH like any other
+    field).
+
+    Idempotency signal: the free plan's own `monthly_price` still being
+    NULL, checked fresh on every startup rather than gated on column
+    existence (see _add_plan_billing_fields' own docstring for why that
+    signal doesn't work here -- the column exists immediately on a fresh
+    database, before this has ever run there). Once applied, free.
+    monthly_price becomes "0.00" (a real, non-NULL price), so this never
+    fires again -- exactly like _seed_default_plans' own per-code
+    existence check, just keyed on a column value instead of row
+    existence, since these columns are added to already-existing rows
+    rather than new ones."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("plans")}
+    if "monthly_price" not in columns:
+        return  # _add_plan_billing_fields hasn't run yet this startup for some reason
+
+    with engine.begin() as conn:
+        already_applied = conn.execute(
+            text("SELECT monthly_price FROM plans WHERE code = 'free'")
+        ).scalar()
+        if already_applied is not None:
+            return
+
+        for (
+            code,
+            monthly,
+            yearly,
+            analytics,
+            forecasting,
+            ai,
+            background_jobs,
+            max_api_keys,
+            max_webhooks,
+        ) in _PLAN_BILLING_BACKFILL:
+            conn.execute(
+                text(
+                    "UPDATE plans SET "
+                    "monthly_price = :monthly, yearly_price = :yearly, "
+                    "analytics_enabled = :analytics, forecasting_enabled = :forecasting, "
+                    "ai_enabled = :ai, background_jobs_enabled = :background_jobs, "
+                    "max_api_keys = :max_api_keys, max_webhooks = :max_webhooks "
+                    "WHERE code = :code"
+                ),
+                {
+                    "code": code,
+                    "monthly": monthly,
+                    "yearly": yearly,
+                    "analytics": analytics,
+                    "forecasting": forecasting,
+                    "ai": ai,
+                    "background_jobs": background_jobs,
+                    "max_api_keys": max_api_keys,
+                    "max_webhooks": max_webhooks,
+                },
+            )
+
+
+def _add_subscriptions_table(engine: Engine) -> None:
+    """Creates subscriptions if it's missing -- same idempotent safety
+    net as _add_organization_api_keys_table (Base.metadata.create_all()
+    already creates this table on a fresh database since Subscription is
+    a declared model; this only matters for a database that already
+    existed before Phase 17A)."""
+    inspector = inspect(engine)
+    if "subscriptions" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS subscriptions ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL UNIQUE "
+                "REFERENCES organizations(id) ON DELETE CASCADE, "
+                "plan_id CHAR(36) NOT NULL REFERENCES plans(id) ON DELETE RESTRICT, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'active', "
+                "billing_period VARCHAR(16) NOT NULL DEFAULT 'monthly', "
+                "trial_start TIMESTAMP NULL, "
+                "trial_end TIMESTAMP NULL, "
+                "current_period_start TIMESTAMP NOT NULL, "
+                "current_period_end TIMESTAMP NOT NULL, "
+                "cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE, "
+                "canceled_at TIMESTAMP NULL, "
+                "ended_at TIMESTAMP NULL, "
+                "provider_name VARCHAR(32) NULL, "
+                "provider_reference VARCHAR(255) NULL, "
+                "metadata TEXT NULL, "
+                "version INTEGER NOT NULL DEFAULT 1, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+
+
+def _add_subscription_events_table(engine: Engine) -> None:
+    """Creates subscription_events if it's missing -- same rationale as
+    _add_subscriptions_table above."""
+    inspector = inspect(engine)
+    if "subscription_events" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS subscription_events ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "subscription_id CHAR(36) NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE, "
+                "actor_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "event_type VARCHAR(32) NOT NULL, "
+                "previous_values TEXT NULL, "
+                "new_values TEXT NULL, "
+                "metadata TEXT NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_subscription_events_subscription_id "
+                "ON subscription_events (subscription_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_subscription_events_organization_id "
+                "ON subscription_events (organization_id)"
+            )
+        )
+
+
+def _add_provider_webhook_receipts_table(engine: Engine) -> None:
+    """Creates provider_webhook_receipts if it's missing -- same
+    idempotent safety net as _add_subscriptions_table
+    (Base.metadata.create_all() already creates this table on a fresh
+    database since ProviderWebhookReceipt is a declared model; this only
+    matters for a database that already existed before Phase 18)."""
+    inspector = inspect(engine)
+    if "provider_webhook_receipts" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS provider_webhook_receipts ("
+                "id CHAR(36) PRIMARY KEY, "
+                "provider_name VARCHAR(32) NOT NULL, "
+                "event_id VARCHAR(255) NOT NULL, "
+                "received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "UNIQUE (provider_name, event_id)"
+                ")"
+            )
+        )
+
+
+def _add_provider_customers_table(engine: Engine) -> None:
+    """Creates provider_customers if it's missing -- same idempotent
+    safety net as _add_provider_webhook_receipts_table
+    (Base.metadata.create_all() already creates this table on a fresh
+    database since ProviderCustomer is a declared model; this only
+    matters for a database that already existed before Phase 18.1)."""
+    inspector = inspect(engine)
+    if "provider_customers" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS provider_customers ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "provider_name VARCHAR(32) NOT NULL, "
+                "provider_customer_id VARCHAR(255) NOT NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "UNIQUE (organization_id, provider_name)"
+                ")"
+            )
+        )
+
+
+def _add_notifications_table(engine: Engine) -> None:
+    """Creates notifications if it's missing -- same idempotent safety
+    net as _add_provider_customers_table (Base.metadata.create_all()
+    already creates this table on a fresh database since Notification is
+    a declared model; this only matters for a database that already
+    existed before Phase 20)."""
+    inspector = inspect(engine)
+    if "notifications" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS notifications ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "user_id CHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "event_id CHAR(36) REFERENCES webhook_events(id) ON DELETE SET NULL, "
+                "event_type VARCHAR(64) NOT NULL, "
+                "title VARCHAR(255) NOT NULL, "
+                "body VARCHAR(1000) NOT NULL, "
+                "object_type VARCHAR(32) NOT NULL, "
+                "object_id VARCHAR(36) NOT NULL, "
+                "read_at TIMESTAMP, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_notifications_user_created ON notifications (user_id, created_at)")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_notifications_user_unread ON notifications (user_id, read_at)")
+        )
+
+
+def _add_notification_preferences_table(engine: Engine) -> None:
+    """Creates notification_preferences if it's missing -- same
+    idempotent safety net as _add_notifications_table (Base.metadata
+    .create_all() already creates this table on a fresh database since
+    NotificationPreference is a declared model; this only matters for a
+    database that already existed before Phase 20)."""
+    inspector = inspect(engine)
+    if "notification_preferences" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS notification_preferences ("
+                "id CHAR(36) PRIMARY KEY, "
+                "user_id CHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "email_enabled BOOLEAN NOT NULL DEFAULT 1, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "UNIQUE (user_id, organization_id)"
+                ")"
+            )
+        )
+
+
+def _backfill_subscriptions_for_existing_organizations(engine: Engine) -> None:
+    """Every organization must own exactly one Subscription (see
+    Subscription's own docstring: it is the resolved source of truth for
+    entitlements from Phase 17A onward, not Organization.plan_id) --
+    this creates one for any organization that doesn't have one yet,
+    copying its current plan_id, status=active, billing_period=monthly,
+    current_period_start=now, current_period_end=+30 days, no trial.
+
+    Runs on every startup but is genuinely idempotent by construction:
+    it only ever inserts a row for an organization_id not already present
+    in subscriptions (the UNIQUE constraint on that column would reject a
+    duplicate anyway; the SELECT here just avoids relying on that error
+    path). A brand-new organization created after this phase ships never
+    reaches this function at all -- app.routers.auth.register creates its
+    Subscription directly via app.billing.service.BillingService
+    .create_subscription at signup time.
+    """
+    inspector = inspect(engine)
+    if "organizations" not in inspector.get_table_names():
+        return
+    if "subscriptions" not in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT o.id, o.plan_id FROM organizations o "
+                "LEFT JOIN subscriptions s ON s.organization_id = o.id "
+                "WHERE s.id IS NULL"
+            )
+        ).all()
+        if not rows:
+            return
+
+        now = datetime.now(timezone.utc)
+        period_end = now + timedelta(days=30)
+        for organization_id, plan_id in rows:
+            conn.execute(
+                text(
+                    "INSERT INTO subscriptions ("
+                    "id, organization_id, plan_id, status, billing_period, "
+                    "current_period_start, current_period_end, cancel_at_period_end, "
+                    "version, created_at, updated_at"
+                    ") VALUES ("
+                    ":id, :organization_id, :plan_id, 'active', 'monthly', "
+                    ":period_start, :period_end, FALSE, "
+                    "1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                    ")"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "organization_id": organization_id,
+                    "plan_id": plan_id,
+                    "period_start": now,
+                    "period_end": period_end,
+                },
+            )

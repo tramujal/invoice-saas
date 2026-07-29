@@ -1,12 +1,19 @@
 """Phase 14C -- the single centralized place that enforces plan limits.
 
-Reuses Phase 14A's entitlement service (the only reader of Plan columns)
-and Phase 14B's usage service (the only place that counts a resource) --
-this module adds nothing but the comparison between the two, plus the
-one atomic mechanism that makes that comparison race-safe. No router or
-service anywhere else may compare `used >= limit` itself; every creation
-path calls check_limit() (or, for bulk imports, remaining_capacity())
-here instead.
+Phase 17B: every limit/used number here is sourced from
+app.billing.capabilities (get_organization_capabilities + its
+remaining_* functions), never recomputed independently -- this module
+adds nothing but the row lock and the atomic check-and-raise ceremony on
+top of numbers capabilities.py already computes correctly. Before this
+phase, this module called app.services.entitlements/organization_usage
+directly, which meant the exact same "how many of X can this org still
+create" computation existed twice (once here, once in capabilities.py);
+routing it all through capabilities.py's OrganizationCapabilities
+removes that duplication while leaving every existing caller's contract
+(check_limit()'s signature, PlanLimitExceededError's shape, the 409
+response body) completely unchanged. No router or service anywhere else
+may compare `used >= limit` itself; every creation path calls
+check_limit() (or, for bulk imports, remaining_capacity()) here instead.
 
 Storage is deliberately absent from the dispatch table below: this app
 has no file-storage subsystem at all (see app.services.organization_usage
@@ -23,16 +30,19 @@ from enum import Enum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Organization
-from app.services.entitlements import Entitlements, PlanLimit, get_limit, get_organization_entitlements
-from app.services.organization_usage import (
-    count_ai_actions_current_month,
-    count_customers,
-    count_invoices_current_month,
-    count_products,
-    count_quotes_current_month,
-    count_users,
+from app.billing.capabilities import (
+    OrganizationCapabilities,
+    get_organization_capabilities,
+    remaining_ai_actions_quota,
+    remaining_api_keys,
+    remaining_customers,
+    remaining_invoice_quota,
+    remaining_products,
+    remaining_quote_quota,
+    remaining_users,
+    remaining_webhooks,
 )
+from app.models import Organization
 
 
 class LimitedResource(str, Enum):
@@ -40,7 +50,10 @@ class LimitedResource(str, Enum):
     app.services.organization_usage.UsageSnapshot's own field names
     ("users", not "max_users") since these are what the frontend already
     renders on the Plan & Limits page and what the 409 error contract's
-    "resource" field reports."""
+    "resource" field reports. `api_keys`/`webhooks` are Phase 17B
+    additions -- Phase 17A's capabilities.py already exposed their
+    remaining_* numbers, this is the first phase to actually enforce
+    them at creation time."""
 
     users = "users"
     customers = "customers"
@@ -48,21 +61,44 @@ class LimitedResource(str, Enum):
     invoices = "invoices"
     quotes = "quotes"
     ai_actions = "ai_actions"
+    api_keys = "api_keys"
+    webhooks = "webhooks"
 
 
 @dataclass(frozen=True)
 class _ResourceSpec:
-    plan_limit: PlanLimit
-    count_fn: Callable[[Session, str], int]
+    limit_fn: Callable[[OrganizationCapabilities], int | None]
+    used_fn: Callable[[OrganizationCapabilities], int]
+    remaining_fn: Callable[[OrganizationCapabilities], int | None]
 
 
 _RESOURCE_SPECS: dict[LimitedResource, _ResourceSpec] = {
-    LimitedResource.users: _ResourceSpec(PlanLimit.max_users, count_users),
-    LimitedResource.customers: _ResourceSpec(PlanLimit.max_customers, count_customers),
-    LimitedResource.products: _ResourceSpec(PlanLimit.max_products, count_products),
-    LimitedResource.invoices: _ResourceSpec(PlanLimit.max_invoices_per_month, count_invoices_current_month),
-    LimitedResource.quotes: _ResourceSpec(PlanLimit.max_quotes_per_month, count_quotes_current_month),
-    LimitedResource.ai_actions: _ResourceSpec(PlanLimit.max_ai_actions_per_month, count_ai_actions_current_month),
+    LimitedResource.users: _ResourceSpec(
+        lambda c: c.entitlements.max_users, lambda c: c.usage_users, remaining_users
+    ),
+    LimitedResource.customers: _ResourceSpec(
+        lambda c: c.entitlements.max_customers, lambda c: c.usage_customers, remaining_customers
+    ),
+    LimitedResource.products: _ResourceSpec(
+        lambda c: c.entitlements.max_products, lambda c: c.usage_products, remaining_products
+    ),
+    LimitedResource.invoices: _ResourceSpec(
+        lambda c: c.entitlements.max_invoices_per_month, lambda c: c.usage_invoices, remaining_invoice_quota
+    ),
+    LimitedResource.quotes: _ResourceSpec(
+        lambda c: c.entitlements.max_quotes_per_month, lambda c: c.usage_quotes, remaining_quote_quota
+    ),
+    LimitedResource.ai_actions: _ResourceSpec(
+        lambda c: c.entitlements.max_ai_actions_per_month,
+        lambda c: c.usage_ai_actions,
+        remaining_ai_actions_quota,
+    ),
+    LimitedResource.api_keys: _ResourceSpec(
+        lambda c: c.entitlements.max_api_keys, lambda c: c.usage_api_keys, remaining_api_keys
+    ),
+    LimitedResource.webhooks: _ResourceSpec(
+        lambda c: c.entitlements.max_webhooks, lambda c: c.usage_webhooks, remaining_webhooks
+    ),
     # storage intentionally omitted -- see module docstring.
 }
 
@@ -153,12 +189,8 @@ def remaining_capacity(db: Session, organization_id: str, resource: LimitedResou
     this per row."""
     spec = _resolve(resource)
     _lock_organization(db, organization_id)
-    entitlements: Entitlements = get_organization_entitlements(db, organization_id)
-    limit = get_limit(entitlements, spec.plan_limit)
-    if limit is None:
-        return None
-    used = spec.count_fn(db, organization_id)
-    return max(0, limit - used)
+    caps = get_organization_capabilities(db, organization_id)
+    return spec.remaining_fn(caps)
 
 
 def check_limit(
@@ -177,17 +209,17 @@ def check_limit(
     commits in the same transaction."""
     spec = _resolve(resource)
     _lock_organization(db, organization_id)
-    entitlements: Entitlements = get_organization_entitlements(db, organization_id)
-    limit = get_limit(entitlements, spec.plan_limit)
+    caps = get_organization_capabilities(db, organization_id)
+    limit = spec.limit_fn(caps)
     if limit is None:
         return
-    used = spec.count_fn(db, organization_id)
+    used = spec.used_fn(caps)
     if used + additional > limit:
         raise PlanLimitExceededError(
             resource=resource,
             used=used,
             limit=limit,
-            plan_id=entitlements.plan_id,
-            plan_code=entitlements.plan_code,
-            plan_name=entitlements.plan_name,
+            plan_id=caps.entitlements.plan_id,
+            plan_code=caps.entitlements.plan_code,
+            plan_name=caps.entitlements.plan_name,
         )
