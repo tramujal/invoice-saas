@@ -52,6 +52,7 @@ def create_product_record(
     default_unit_price: Decimal,
     currency_code: CurrencyCode | None,
     default_tax_rate: Decimal,
+    actor_user_id: str | None = None,
 ) -> Product:
     check_limit(db, organization_id, LimitedResource.products)
     organization = db.get(Organization, organization_id)
@@ -77,13 +78,16 @@ def create_product_record(
         object_type="product",
         object_id=product.id,
         payload=ProductResponse.model_validate(product).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(product)
     return product
 
 
-def update_product_record(db: Session, product: Product, changes: dict) -> Product:
+def update_product_record(
+    db: Session, product: Product, changes: dict, actor_user_id: str | None = None
+) -> Product:
     """`changes` is an already-validated dict of field -> new value
     (typically `ProductUpdateRequest.model_dump(exclude_unset=True,
     mode="json")` from the router) — enum/decimal values are expected to
@@ -98,13 +102,16 @@ def update_product_record(db: Session, product: Product, changes: dict) -> Produ
         object_type="product",
         object_id=product.id,
         payload=ProductResponse.model_validate(product).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(product)
     return product
 
 
-def archive_product_record(db: Session, product: Product) -> Product:
+def archive_product_record(
+    db: Session, product: Product, actor_user_id: str | None = None
+) -> Product:
     """Idempotent -- archiving an already-archived product is a no-op,
     never an error, since this is the only "removal" path (see
     Product.active's docstring in app/models.py: there is no DELETE)."""
@@ -117,13 +124,16 @@ def archive_product_record(db: Session, product: Product) -> Product:
             object_type="product",
             object_id=product.id,
             payload=ProductResponse.model_validate(product).model_dump(mode="json"),
+            actor_user_id=actor_user_id,
         )
         db.commit()
         db.refresh(product)
     return product
 
 
-def restore_product_record(db: Session, product: Product) -> Product:
+def restore_product_record(
+    db: Session, product: Product, actor_user_id: str | None = None
+) -> Product:
     """Restoring an archived product increases the standing active-
     product count exactly like creating a new one does, so it's gated
     by the same limit -- see Product.active's docstring: archive/
@@ -138,6 +148,7 @@ def restore_product_record(db: Session, product: Product) -> Product:
             object_type="product",
             object_id=product.id,
             payload=ProductResponse.model_validate(product).model_dump(mode="json"),
+            actor_user_id=actor_user_id,
         )
         db.commit()
         db.refresh(product)

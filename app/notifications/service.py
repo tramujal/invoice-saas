@@ -25,11 +25,17 @@ own "Governance" section. A future channel (Slack, Discord, SMS, Push,
 audit, analytics, ...) is added as a new subscriber inside this function's
 own fan-out (or a consumer of the WebhookEvent row it writes), never as a
 second call site elsewhere that reacts to a business mutation directly.
+
+Phase 22 added the audit-timeline channel exactly per that governance
+note -- app.audit.service.record_audit_entry is called from inside this
+function's own fan-out below, the same way the webhook/notification/email
+channels already are, never from a second call site anywhere else.
 """
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.audit.service import record_audit_entry
 from app.job_type import JobType
 from app.membership_status import MembershipStatus
 from app.models import Notification, NotificationPreference, OrganizationMember, User
@@ -83,17 +89,34 @@ def emit_event(
     object_type: str,
     object_id: str,
     payload: dict,
+    actor_user_id: str | None = None,
 ) -> None:
-    """Fans one domain event out to all three channels. Every active
+    """Fans one domain event out to all four channels. Every active
     member of the organization gets exactly one Notification row
     (in-app, unconditional -- see Notification's own docstring), and one
     notification.email BackgroundJob for every active member who hasn't
     opted out via NotificationPreference AND has a verified email
     address (an unverified address never receives any transactional
-    email in this app -- matches the invitation/reminder precedent)."""
+    email in this app -- matches the invitation/reminder precedent).
+
+    actor_user_id is optional and defaults to None -- many events have no
+    human actor (a scheduled reminder job, a public/anonymous quote
+    accept/reject, a public-API-key-authenticated mutation); None is the
+    honest value for "no user performed this," recorded verbatim on the
+    AuditEntry row (see app.audit.service.record_audit_entry) rather than
+    ever being defaulted to a fabricated system-user id."""
     event, _deliveries = record_webhook_event(
         db,
         organization_id=organization_id,
+        event_type=event_type,
+        object_type=object_type,
+        object_id=object_id,
+        payload=payload,
+    )
+    record_audit_entry(
+        db,
+        organization_id=organization_id,
+        actor_user_id=actor_user_id,
         event_type=event_type,
         object_type=object_type,
         object_id=object_id,

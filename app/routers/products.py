@@ -68,6 +68,7 @@ def create_product(
             body.default_unit_price,
             body.currency_code,
             body.default_tax_rate,
+            actor_user_id=current_user.id,
         )
     except PlanLimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
@@ -136,7 +137,7 @@ def update_product(
     for enum_field in ("type", "currency_code"):
         if changes.get(enum_field) is not None:
             changes[enum_field] = changes[enum_field].value
-    return update_product_record(db, product, changes)
+    return update_product_record(db, product, changes, actor_user_id=current_user.id)
 
 
 @router.post("/{product_id}/archive", response_model=ProductResponse)
@@ -149,7 +150,7 @@ def archive_product(
     require_permission(current_user, organization_id, Permission.product_write, db)
     require_verified_email(current_user)
     product = _product_or_404(db, organization_id, product_id)
-    return archive_product_record(db, product)
+    return archive_product_record(db, product, actor_user_id=current_user.id)
 
 
 @router.post("/{product_id}/restore", response_model=ProductResponse)
@@ -163,6 +164,6 @@ def restore_product(
     require_verified_email(current_user)
     product = _product_or_404(db, organization_id, product_id)
     try:
-        return restore_product_record(db, product)
+        return restore_product_record(db, product, actor_user_id=current_user.id)
     except PlanLimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())

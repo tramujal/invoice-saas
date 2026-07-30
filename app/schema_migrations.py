@@ -66,6 +66,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_provider_customers_table(engine)
     _add_notifications_table(engine)
     _add_notification_preferences_table(engine)
+    _add_audit_entries_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1822,3 +1823,35 @@ def _backfill_subscriptions_for_existing_organizations(engine: Engine) -> None:
                     "period_end": period_end,
                 },
             )
+
+
+def _add_audit_entries_table(engine: Engine) -> None:
+    """Creates audit_entries if it is missing -- the tenant-facing audit-
+    timeline table (see app.audit.service.record_audit_entry, Phase 22).
+    Mirrors _add_webhook_events_table's exact shape/rationale: one
+    idempotent CREATE TABLE IF NOT EXISTS plus its own composite index,
+    portable across SQLite and Postgres."""
+    inspector = inspect(engine)
+    if "audit_entries" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS audit_entries ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "actor_user_id CHAR(36) REFERENCES users(id) ON DELETE SET NULL, "
+                "event_type VARCHAR(64) NOT NULL, "
+                "resource_type VARCHAR(32) NOT NULL, "
+                "resource_id VARCHAR(36) NOT NULL, "
+                "metadata TEXT, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_audit_entries_organization_created "
+                "ON audit_entries (organization_id, created_at)"
+            )
+        )

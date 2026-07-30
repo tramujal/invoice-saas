@@ -255,6 +255,7 @@ def create_quote_record(
         object_type="quote",
         object_id=quote.id,
         payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+        actor_user_id=current_user.id if current_user else None,
     )
     db.commit()
     db.refresh(quote)
@@ -312,6 +313,7 @@ def update_quote_record(
     tax_rate: Decimal | None = None,
     expiry_date: date | None = _UNSET,
     notes: str | None = None,
+    actor_user_id: str | None = None,
 ) -> Quote:
     """Partial update -- only fields explicitly given are changed. Totals
     are always fully recomputed from the resulting line_items/tax_rate,
@@ -378,6 +380,7 @@ def update_quote_record(
         object_type="quote",
         object_id=quote.id,
         payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(quote)
@@ -401,7 +404,9 @@ def restore_quote_record(db: Session, quote: Quote) -> Quote:
     return quote
 
 
-def delete_draft_quote_record(db: Session, quote: Quote) -> None:
+def delete_draft_quote_record(
+    db: Session, quote: Quote, actor_user_id: str | None = None
+) -> None:
     """Hard delete -- only ever legal for status == draft (see
     QuoteNotDraftError). Anything sent/accepted/rejected/expired/converted
     can only ever be archived, never deleted -- it may already be
@@ -416,6 +421,7 @@ def delete_draft_quote_record(db: Session, quote: Quote) -> None:
         object_type="quote",
         object_id=quote.id,
         payload=payload,
+        actor_user_id=actor_user_id,
     )
     db.delete(quote)
     db.commit()
@@ -456,9 +462,14 @@ def _require_sent(quote: Quote) -> None:
         raise QuoteAlreadyRespondedError(quote.id)
 
 
-def mark_quote_accepted_record(db: Session, quote: Quote) -> Quote:
+def mark_quote_accepted_record(
+    db: Session, quote: Quote, actor_user_id: str | None = None
+) -> Quote:
     """Shared by the public accept endpoint and the authenticated "Mark as
-    accepted" action -- only legal from effective_status == sent."""
+    accepted" action -- only legal from effective_status == sent.
+    actor_user_id is always None from the public endpoint (an anonymous
+    customer, not a platform user) and the authenticated caller's id from
+    the authenticated action."""
     _require_sent(quote)
     quote.status = QuoteStatus.accepted.value
     emit_event(
@@ -468,13 +479,16 @@ def mark_quote_accepted_record(db: Session, quote: Quote) -> Quote:
         object_type="quote",
         object_id=quote.id,
         payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(quote)
     return quote
 
 
-def mark_quote_rejected_record(db: Session, quote: Quote) -> Quote:
+def mark_quote_rejected_record(
+    db: Session, quote: Quote, actor_user_id: str | None = None
+) -> Quote:
     _require_sent(quote)
     quote.status = QuoteStatus.rejected.value
     emit_event(
@@ -484,6 +498,7 @@ def mark_quote_rejected_record(db: Session, quote: Quote) -> Quote:
         object_type="quote",
         object_id=quote.id,
         payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(quote)
@@ -547,6 +562,7 @@ def convert_quote_to_invoice(
             **QuoteResponse.model_validate(quote).model_dump(mode="json"),
             "converted_invoice_id": invoice.id,
         },
+        actor_user_id=current_user.id,
     )
     db.commit()
     db.refresh(quote)
@@ -554,7 +570,9 @@ def convert_quote_to_invoice(
     return QuoteConversionResult(invoice=invoice)
 
 
-def send_quote_record(db: Session, quote: Quote) -> SendQuoteEmailResponse:
+def send_quote_record(
+    db: Session, quote: Quote, actor_user_id: str | None = None
+) -> SendQuoteEmailResponse:
     customer = quote.customer
     if customer is None or not customer.email:
         raise CustomerEmailMissingError(quote.id)
@@ -605,6 +623,7 @@ def send_quote_record(db: Session, quote: Quote) -> SendQuoteEmailResponse:
             object_type="quote",
             object_id=quote.id,
             payload=QuoteResponse.model_validate(quote).model_dump(mode="json"),
+            actor_user_id=actor_user_id,
         )
         db.commit()
         db.refresh(quote)

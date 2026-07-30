@@ -55,6 +55,7 @@ class Permission(str, Enum):
     assistant_execute = "assistant.execute"
     dashboard_view = "dashboard.view"
     insights_view = "insights.view"
+    audit_view = "audit.view"
 
 
 _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
@@ -88,6 +89,7 @@ _ADMIN_PERMISSIONS: frozenset[Permission] = _MEMBER_PERMISSIONS | frozenset(
     {
         Permission.members_manage,
         Permission.settings_manage,
+        Permission.audit_view,
     }
 )
 

@@ -721,6 +721,7 @@ def update_organization_plan(
             "old_plan": {"id": old_plan.id, "code": old_plan.code} if old_plan is not None else None,
             "new_plan": {"id": new_plan.id, "code": new_plan.code},
         },
+        actor_user_id=current_user.id,
     )
     db.commit()
     db.refresh(organization)

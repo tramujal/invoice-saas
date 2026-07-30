@@ -1696,6 +1696,69 @@ class WebhookAuditLog(Base):
     )
 
 
+class AuditEntry(Base):
+    """One immutable, point-in-time record of a domain event already
+    raised through app.notifications.service.emit_event (see Phase 22 --
+    docs/audit_timeline.md) -- the audit subsystem is just another
+    consumer inside that function's existing fan-out, alongside the
+    webhook/notification/email channels, never a second call site that
+    reacts to a business mutation directly.
+
+    Deliberately NOT the same table as PlatformAuditLog (platform-ADMIN
+    mutations on organizations/users -- a different, privileged,
+    cross-tenant surface) or WebhookAuditLog (webhook-ENDPOINT lifecycle
+    actions like create/rotate-secret -- a narrow configuration trail).
+    AuditEntry is the tenant-facing record of ordinary business-domain
+    events (customer/product/quote/invoice/... lifecycle transitions),
+    one row per emit_event call, queryable by the organization's own
+    members.
+
+    `event_type` reuses app.webhook_event_type.WebhookEventType's string
+    values verbatim -- the single canonical event catalog, never a second
+    enum.
+
+    `actor_user_id` is nullable, ON DELETE SET NULL (mirrors
+    WebhookAuditLog's own actor FK exactly): many events have no human
+    actor -- a scheduled reminder job sending a quote, a public/anonymous
+    quote accept/reject, a public-API-key-authenticated mutation -- and
+    None is the honest value for "no user performed this," never a
+    fabricated system-user id.
+
+    `metadata_json` is a JSON-encoded TEXT column (the Python attribute is
+    deliberately not named `metadata`, which collides with
+    DeclarativeBase's own reserved `Base.metadata` attribute) holding the
+    exact same payload emit_event's caller already built for the webhook
+    channel -- stored a second time here, not re-derived via a join to
+    WebhookEvent, so this row stays a faithful, standalone snapshot even
+    if the corresponding WebhookEvent row is ever pruned independently.
+
+    Never updated or deleted by any code path -- immutable, exactly like
+    WebhookEvent's own "never updated" precedent.
+    """
+
+    __tablename__ = "audit_entries"
+    __table_args__ = (
+        Index("ix_audit_entries_organization_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    metadata_json: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+
+
 class BackgroundJob(Base):
     """One durable unit of asynchronous work -- the entire Phase 15C job
     queue lives in this single table (see app.services.background_jobs

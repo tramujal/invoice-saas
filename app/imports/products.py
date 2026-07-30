@@ -154,7 +154,9 @@ def make_row_processor(
     return process
 
 
-def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]], None]:
+def make_persist_fn(
+    organization_id: str, actor_user_id: str | None = None
+) -> Callable[[Session, dict[str, str]], None]:
     """Returns a function that adds+flushes exactly one Product row.
     Deliberately does not commit -- app.imports.base.build_confirm owns
     the single outer commit. Values have already passed validate_row_fields
@@ -197,6 +199,7 @@ def make_persist_fn(organization_id: str) -> Callable[[Session, dict[str, str]],
             object_type="product",
             object_id=product.id,
             payload=ProductResponse.model_validate(product).model_dump(mode="json"),
+            actor_user_id=actor_user_id,
         )
 
     return persist

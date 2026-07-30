@@ -54,7 +54,14 @@ def create_customer(
     require_verified_email(current_user)
     try:
         return create_customer_record(
-            db, organization_id, body.name, body.email, body.phone, body.address, body.tax_id
+            db,
+            organization_id,
+            body.name,
+            body.email,
+            body.phone,
+            body.address,
+            body.tax_id,
+            actor_user_id=current_user.id,
         )
     except PlanLimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
@@ -100,7 +107,9 @@ def update_customer(
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
     customer = _customer_or_404(db, organization_id, customer_id)
-    return update_customer_record(db, customer, body.model_dump(exclude_unset=True))
+    return update_customer_record(
+        db, customer, body.model_dump(exclude_unset=True), actor_user_id=current_user.id
+    )
 
 
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -113,5 +122,5 @@ def delete_customer(
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
     customer = _customer_or_404(db, organization_id, customer_id)
-    delete_customer_record(db, customer)
+    delete_customer_record(db, customer, actor_user_id=current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

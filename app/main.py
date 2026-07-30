@@ -14,6 +14,7 @@ from app.routers import (
     api_key_management,
     assistant,
     assistant_actions,
+    audit,
     auth,
     billing,
     billing_webhooks,
@@ -166,6 +167,7 @@ app.include_router(platform_admin.router)
 app.include_router(public_config.router)
 app.include_router(api_key_management.router)
 app.include_router(webhooks.router)
+app.include_router(audit.router)
 app.include_router(api_v1_customers.router)
 app.include_router(api_v1_products.router)
 app.include_router(api_v1_quotes.router)

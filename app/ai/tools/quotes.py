@@ -364,7 +364,7 @@ class SendQuoteTool(ActionTool):
         quote = _resolve_quote(db, organization_id, resolved.quote_id)
 
         try:
-            result = send_quote_record(db, quote)
+            result = send_quote_record(db, quote, actor_user_id=current_user.id)
         except ServiceCustomerEmailMissingError:
             raise QuoteCustomerEmailMissingError(resolved.quote_id)
         except ServiceEmailSendFailedError as exc:

@@ -259,7 +259,7 @@ def send_invoice_email(
     invoice = _invoice_in_org(db, organization_id, invoice_id)
 
     try:
-        return send_invoice_email_record(db, invoice)
+        return send_invoice_email_record(db, invoice, actor_user_id=current_user.id)
     except CustomerEmailMissingError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -288,7 +288,9 @@ def update_invoice_payment_status(
 ) -> Invoice:
     require_permission(current_user, organization_id, Permission.invoice_edit, db)
     invoice = _invoice_in_org(db, organization_id, invoice_id)
-    return update_invoice_payment_status_record(db, invoice, body.payment_status)
+    return update_invoice_payment_status_record(
+        db, invoice, body.payment_status, actor_user_id=current_user.id
+    )
 
 
 @router.post("", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED)

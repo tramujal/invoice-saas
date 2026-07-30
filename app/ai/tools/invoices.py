@@ -392,7 +392,9 @@ class UpdateInvoiceStatusTool(ActionTool):
         except ServiceInvoiceNotFoundError:
             raise InvoiceNotFoundError(resolved.invoice_id)
 
-        invoice = update_invoice_payment_status_record(db, invoice, resolved.new_status)
+        invoice = update_invoice_payment_status_record(
+            db, invoice, resolved.new_status, actor_user_id=current_user.id
+        )
         return ExecutionResult(
             summary={
                 "invoice_number": format_invoice_number(invoice.invoice_number),
@@ -454,7 +456,7 @@ class SendInvoiceEmailTool(ActionTool):
             raise InvoiceNotFoundError(resolved.invoice_id)
 
         try:
-            result = send_invoice_email_record(db, invoice)
+            result = send_invoice_email_record(db, invoice, actor_user_id=current_user.id)
         except ServiceCustomerEmailMissingError:
             raise CustomerEmailMissingError(resolved.invoice_id)
         except ServiceEmailSendFailedError as exc:

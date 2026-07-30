@@ -294,6 +294,7 @@ def update_quote(
             line_items=body.line_items if "line_items" in changes else None,
             tax_rate=changes.get("tax_rate"),
             notes=changes.get("notes"),
+            actor_user_id=current_user.id,
             **customer_kwarg,
             **expiry_kwarg,
         )
@@ -371,7 +372,7 @@ def delete_quote(
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
-        delete_draft_quote_record(db, quote)
+        delete_draft_quote_record(db, quote, actor_user_id=current_user.id)
     except QuoteNotDraftError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -413,7 +414,7 @@ def mark_quote_accepted(
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
-        return mark_quote_accepted_record(db, quote)
+        return mark_quote_accepted_record(db, quote, actor_user_id=current_user.id)
     except QuoteAlreadyRespondedError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -435,7 +436,7 @@ def mark_quote_rejected(
     require_verified_email(current_user)
     quote = _quote_in_org(db, organization_id, quote_id)
     try:
-        return mark_quote_rejected_record(db, quote)
+        return mark_quote_rejected_record(db, quote, actor_user_id=current_user.id)
     except QuoteAlreadyRespondedError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -513,7 +514,7 @@ def send_quote_email(
     quote = _quote_in_org(db, organization_id, quote_id)
 
     try:
-        return send_quote_record(db, quote)
+        return send_quote_record(db, quote, actor_user_id=current_user.id)
     except CustomerEmailMissingError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

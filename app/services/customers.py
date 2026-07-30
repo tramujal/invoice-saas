@@ -50,6 +50,7 @@ def create_customer_record(
     phone: str,
     address: str,
     tax_id: str,
+    actor_user_id: str | None = None,
 ) -> Customer:
     check_limit(db, organization_id, LimitedResource.customers)
     customer = Customer(
@@ -69,13 +70,16 @@ def create_customer_record(
         object_type="customer",
         object_id=customer.id,
         payload=CustomerResponse.model_validate(customer).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(customer)
     return customer
 
 
-def update_customer_record(db: Session, customer: Customer, changes: dict) -> Customer:
+def update_customer_record(
+    db: Session, customer: Customer, changes: dict, actor_user_id: str | None = None
+) -> Customer:
     """`changes` is an already-validated dict of field -> new value,
     typically `CustomerUpdateRequest.model_dump(exclude_unset=True)` --
     matches app.services.products.update_product_record's own contract."""
@@ -90,13 +94,16 @@ def update_customer_record(db: Session, customer: Customer, changes: dict) -> Cu
         object_type="customer",
         object_id=customer.id,
         payload=CustomerResponse.model_validate(customer).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(customer)
     return customer
 
 
-def delete_customer_record(db: Session, customer: Customer) -> None:
+def delete_customer_record(
+    db: Session, customer: Customer, actor_user_id: str | None = None
+) -> None:
     """Hard delete -- Customer has no archive/restore lifecycle (unlike
     Product), so this is the one genuine DELETE in the customer/product/
     quote/invoice family. Matches the exact behavior the browser router
@@ -110,6 +117,7 @@ def delete_customer_record(db: Session, customer: Customer) -> None:
         object_type="customer",
         object_id=customer.id,
         payload=payload,
+        actor_user_id=actor_user_id,
     )
     db.delete(customer)
     db.commit()

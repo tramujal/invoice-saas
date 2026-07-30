@@ -2458,6 +2458,31 @@ class PaginatedNotificationsResponse(BaseModel):
     items: list[NotificationResponse]
 
 
+class AuditEntryResponse(BaseModel):
+    """One immutable row from the tenant-facing audit timeline (see
+    app.models.AuditEntry, Phase 22) -- actor_email is resolved live
+    against the current Users table for display (AuditEntry itself keeps
+    only actor_user_id, mirroring WebhookAuditLog's simpler precedent
+    rather than PlatformAuditLog's own actor_email snapshot), and is None
+    both when there was no human actor and when the actor's account has
+    since been deleted."""
+
+    id: str
+    organization_id: str
+    actor_user_id: str | None
+    actor_email: str | None
+    event_type: str
+    resource_type: str
+    resource_id: str
+    metadata: dict[str, Any] | None
+    created_at: datetime
+
+
+class PaginatedAuditEntriesResponse(BaseModel):
+    total: int
+    items: list[AuditEntryResponse]
+
+
 class NotificationPreferenceResponse(BaseModel):
     """Reflects app.notifications.service.is_email_enabled's own
     default-True-when-no-row-exists semantics -- this response always has

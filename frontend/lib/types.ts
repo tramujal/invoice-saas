@@ -1431,6 +1431,28 @@ export type PaginatedPlatformAuditLog = {
   items: PlatformAuditLogEntry[];
 };
 
+// Phase 22 -- tenant-facing Audit Timeline. Distinct from
+// PlatformAuditLogEntry above (platform-admin actions on
+// organizations/users, a different privileged surface) -- this is the
+// ordinary business-domain event trail (customer/product/quote/invoice
+// lifecycle transitions) scoped to a single organization.
+export type AuditEntry = {
+  id: string;
+  organization_id: string;
+  actor_user_id: string | null;
+  actor_email: string | null;
+  event_type: string;
+  resource_type: string;
+  resource_id: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type PaginatedAuditEntries = {
+  total: number;
+  items: AuditEntry[];
+};
+
 // Phase 15A -- Organization API Keys. The wire-facing permission strings
 // match app.api_key_permissions.ApiKeyPermission exactly (dotted,
 // plural-noun form -- "customers.read", not "customer.read" like the

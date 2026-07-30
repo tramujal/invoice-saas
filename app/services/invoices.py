@@ -275,6 +275,7 @@ def create_invoice_record(
         object_type="invoice",
         object_id=invoice.id,
         payload=InvoiceResponse.model_validate(invoice).model_dump(mode="json"),
+        actor_user_id=current_user.id if current_user else None,
     )
     db.commit()
     db.refresh(invoice)
@@ -312,7 +313,7 @@ def get_invoice_in_org(db: Session, organization_id: str, invoice_reference: str
 
 
 def update_invoice_payment_status_record(
-    db: Session, invoice: Invoice, new_status: PaymentStatus
+    db: Session, invoice: Invoice, new_status: PaymentStatus, actor_user_id: str | None = None
 ) -> Invoice:
     invoice.payment_status = new_status.value
     emit_event(
@@ -322,13 +323,16 @@ def update_invoice_payment_status_record(
         object_type="invoice",
         object_id=invoice.id,
         payload=InvoiceResponse.model_validate(invoice).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     db.refresh(invoice)
     return invoice
 
 
-def send_invoice_email_record(db: Session, invoice: Invoice) -> SendInvoiceEmailResponse:
+def send_invoice_email_record(
+    db: Session, invoice: Invoice, actor_user_id: str | None = None
+) -> SendInvoiceEmailResponse:
     customer = invoice.customer
     if customer is None or not customer.email:
         raise CustomerEmailMissingError(invoice.id)
@@ -391,6 +395,7 @@ def send_invoice_email_record(db: Session, invoice: Invoice) -> SendInvoiceEmail
         object_type="invoice",
         object_id=invoice.id,
         payload=InvoiceResponse.model_validate(invoice).model_dump(mode="json"),
+        actor_user_id=actor_user_id,
     )
     db.commit()
     return SendInvoiceEmailResponse(sent=True, sent_to=customer.email)
