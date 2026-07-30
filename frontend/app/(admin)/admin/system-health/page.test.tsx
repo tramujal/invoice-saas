@@ -28,6 +28,16 @@ const healthy: PlatformSystemHealth = {
   reminder_emails_pending: 2,
   reminder_emails_sent_7d: 10,
   reminder_emails_failed_7d: 1,
+  queue_pending: 0,
+  queue_running: 0,
+  queue_retry_scheduled: 0,
+  jobs_failed_total: 0,
+  jobs_succeeded_total: 0,
+  storage_used_mb: 0,
+  database_size_mb: 1.5,
+  average_api_latency_ms: 12.3,
+  error_rate_percent: 0,
+  request_sample_count: 42,
 };
 
 beforeEach(() => {
@@ -64,6 +74,16 @@ describe("PlatformSystemHealthPage", () => {
       reminder_emails_pending: 0,
       reminder_emails_sent_7d: 0,
       reminder_emails_failed_7d: 0,
+      queue_pending: 0,
+      queue_running: 0,
+      queue_retry_scheduled: 0,
+      jobs_failed_total: 0,
+      jobs_succeeded_total: 0,
+      storage_used_mb: 0,
+      database_size_mb: null,
+      average_api_latency_ms: null,
+      error_rate_percent: null,
+      request_sample_count: 0,
     } satisfies PlatformSystemHealth);
     renderWithProviders(<PlatformSystemHealthPage />);
 

@@ -859,6 +859,60 @@ export type PlatformSystemHealth = {
   reminder_emails_pending: number;
   reminder_emails_sent_7d: number;
   reminder_emails_failed_7d: number;
+  // Phase 21 additions -- see app.platform_metrics.health.
+  queue_pending: number;
+  queue_running: number;
+  queue_retry_scheduled: number;
+  jobs_failed_total: number;
+  jobs_succeeded_total: number;
+  storage_used_mb: number;
+  database_size_mb: number | null;
+  average_api_latency_ms: number | null;
+  error_rate_percent: number | null;
+  request_sample_count: number;
+};
+
+// Phase 21: Platform Operations Dashboard
+export type PlatformBusinessMetrics = {
+  organizations_total: number;
+  active_users_total: number;
+  paying_organizations: number;
+  trial_organizations: number;
+  mrr: string;
+  arr: string;
+  currency: string;
+  churn_rate_30d: number;
+  conversion_rate_30d: number;
+  average_revenue_per_organization: string;
+};
+
+export type PlatformUsageMetrics = {
+  ai_requests_30d: number;
+  api_keys_active: number;
+  api_keys_used_7d: number;
+  webhook_deliveries_30d: number;
+  webhook_deliveries_succeeded_30d: number;
+  webhook_deliveries_failed_30d: number;
+  background_jobs_30d: number;
+  background_jobs_succeeded_30d: number;
+  background_jobs_failed_30d: number;
+  emails_sent_30d: number;
+  notifications_created_30d: number;
+};
+
+export type PlatformDailySignupCount = { day: string; count: number };
+export type PlatformWeeklyActiveOrganizationsCount = { week_start: string; count: number };
+export type PlatformFeatureAdoption = {
+  feature: string;
+  adopted_paying_organizations: number;
+  adopted_percent: number;
+};
+
+export type PlatformGrowthMetrics = {
+  daily_signups: PlatformDailySignupCount[];
+  weekly_active_organizations: PlatformWeeklyActiveOrganizationsCount[];
+  monthly_growth_percent: number;
+  feature_adoption: PlatformFeatureAdoption[];
 };
 
 export type PlatformSettings = {

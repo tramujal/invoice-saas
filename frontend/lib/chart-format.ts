@@ -22,3 +22,12 @@ export function formatPeriodLabel(period: string, granularity: "monthly" | "quar
   }
   return period;
 }
+
+/** Formats an ISO "YYYY-MM-DD" date key as a short day label, e.g.
+ * "2026-07-30" -> "Jul 30". Used by the Phase 21 operations dashboard's
+ * daily/weekly growth charts. */
+export function formatDayLabel(dateKey: string): string {
+  const date = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateKey;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}

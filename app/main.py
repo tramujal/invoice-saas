@@ -1,12 +1,14 @@
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
 
 import app.jobs.bootstrap  # noqa: F401 -- populates the background-job registry
 from app.models import init_db
+from app.request_metrics import record_request
 from app.routers import (
     analytics,
     api_key_management,
@@ -119,6 +121,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _record_request_metrics(request: Request, call_next):
+    """Feeds app.request_metrics -- see that module's own docstring for
+    why this is an in-memory rolling window, not a persisted table.
+    Registered before CORSMiddleware runs (Starlette applies middleware
+    in reverse registration order, outermost-added-last), so timing
+    includes the full request/response cycle seen by a real client."""
+    started_at = time.monotonic()
+    response = await call_next(request)
+    duration_ms = (time.monotonic() - started_at) * 1000
+    record_request(duration_ms=duration_ms, is_error=response.status_code >= 500)
+    return response
 
 
 @app.get("/health")

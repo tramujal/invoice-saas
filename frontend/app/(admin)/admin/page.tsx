@@ -2,18 +2,33 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { DailySignupsChart } from "@/components/admin/DailySignupsChart";
+import { FeatureAdoptionChart } from "@/components/admin/FeatureAdoptionChart";
+import { OrganizationSplitChart } from "@/components/admin/OrganizationSplitChart";
+import { UsageOutcomeChart } from "@/components/admin/UsageOutcomeChart";
+import { WeeklyActiveOrganizationsChart } from "@/components/admin/WeeklyActiveOrganizationsChart";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
-import type { PlatformDashboard } from "@/lib/types";
+import { formatCurrency } from "@/lib/money";
+import type {
+  PlatformBusinessMetrics,
+  PlatformDashboard,
+  PlatformGrowthMetrics,
+  PlatformSystemHealth,
+  PlatformUsageMetrics,
+} from "@/lib/types";
 
 const GENERIC_LOAD_ERROR = "__generic_load_error__";
 
-export default function PlatformAdminDashboardPage() {
-  const { t } = useTranslation();
-  const [data, setData] = useState<PlatformDashboard | null>(null);
+/** Generic per-section load state -- Phase 21's four sections each fetch
+ * independently (see useSectionLoader below) so one section's failure
+ * never blanks out the others, matching this page's own existing
+ * error-banner precedent for the legacy overview data. */
+function useSectionLoader<T>(path: string) {
+  const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -25,9 +40,7 @@ export default function PlatformAdminDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const json = await apiFetch<PlatformDashboard>("/admin/dashboard", {
-        signal: controller.signal,
-      });
+      const json = await apiFetch<T>(path, { signal: controller.signal });
       setData(json);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -36,104 +49,174 @@ export default function PlatformAdminDashboardPage() {
     } finally {
       if (abortRef.current === controller) setLoading(false);
     }
-  }, []);
+  }, [path]);
 
   useEffect(() => {
     void load();
     return () => abortRef.current?.abort();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path]);
+
+  return { data, loading, error, reload: load };
+}
+
+export default function PlatformAdminDashboardPage() {
+  const { t } = useTranslation();
+
+  const overview = useSectionLoader<PlatformDashboard>("/admin/dashboard");
+  const business = useSectionLoader<PlatformBusinessMetrics>("/admin/dashboard/business");
+  const usage = useSectionLoader<PlatformUsageMetrics>("/admin/dashboard/usage");
+  const health = useSectionLoader<PlatformSystemHealth>("/admin/system/health");
+  const growth = useSectionLoader<PlatformGrowthMetrics>("/admin/dashboard/growth?days=30");
+
+  function reloadAll() {
+    void overview.reload();
+    void business.reload();
+    void usage.reload();
+    void health.reload();
+    void growth.reload();
+  }
+
+  const anyLoading = overview.loading || business.loading || usage.loading || health.loading || growth.loading;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-8">
       <PageHeader
         title={t("admin.dashboardTitle")}
         subtitle={t("admin.dashboardSubtitle")}
         actions={
-          <Button type="button" variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
-            {loading ? t("common.refreshing") : t("common.refresh")}
+          <Button type="button" variant="secondary" size="sm" onClick={reloadAll} disabled={anyLoading}>
+            {anyLoading ? t("common.refreshing") : t("common.refresh")}
           </Button>
         }
       />
 
-      {error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
-          {error === GENERIC_LOAD_ERROR ? t("admin.loadError") : error}
-        </div>
-      ) : null}
-
-      <section
-        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
-        aria-label={t("admin.systemHealthTitle")}
-      >
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {t("admin.systemHealthTitle")}
-        </h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <HealthPill
-            label={t("admin.databaseLabel")}
-            ok={data?.health.database_reachable ?? null}
-            loading={loading}
-          />
-          <HealthPill
-            label={t("admin.emailProviderLabel")}
-            ok={data ? data.health.email_provider_configured : null}
-            loading={loading}
-          />
-          <HealthPill
-            label={t("admin.aiProviderLabel")}
-            ok={data ? data.health.ai_provider_configured : null}
-            loading={loading}
-          />
-        </div>
-      </section>
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <DashboardCard
           title={t("admin.organizationsTotal")}
-          value={data ? String(data.organizations_total) : "—"}
+          value={overview.data ? String(overview.data.organizations_total) : "—"}
           description={
-            data ? t("admin.new7d30d", { d7: data.organizations_new_7d, d30: data.organizations_new_30d }) : undefined
+            overview.data
+              ? t("admin.new7d30d", { d7: overview.data.organizations_new_7d, d30: overview.data.organizations_new_30d })
+              : undefined
           }
-          loading={loading}
+          loading={overview.loading}
         />
         <DashboardCard
           title={t("admin.usersTotal")}
-          value={data ? String(data.users_total) : "—"}
-          description={data ? t("admin.new7d30d", { d7: data.users_new_7d, d30: data.users_new_30d }) : undefined}
-          loading={loading}
+          value={overview.data ? String(overview.data.users_total) : "—"}
+          description={
+            overview.data ? t("admin.new7d30d", { d7: overview.data.users_new_7d, d30: overview.data.users_new_30d }) : undefined
+          }
+          loading={overview.loading}
         />
-        <DashboardCard
-          title={t("admin.invoicesTotal")}
-          value={data ? String(data.invoices_total) : "—"}
-          loading={loading}
-        />
-        <DashboardCard
-          title={t("admin.quotesTotal")}
-          value={data ? String(data.quotes_total) : "—"}
-          loading={loading}
-        />
-        <DashboardCard
-          title={t("admin.customersTotal")}
-          value={data ? String(data.customers_total) : "—"}
-          loading={loading}
-        />
-        <DashboardCard
-          title={t("admin.productsTotal")}
-          value={data ? String(data.products_total) : "—"}
-          loading={loading}
-        />
+        <DashboardCard title={t("admin.invoicesTotal")} value={overview.data ? String(overview.data.invoices_total) : "—"} loading={overview.loading} />
+        <DashboardCard title={t("admin.quotesTotal")} value={overview.data ? String(overview.data.quotes_total) : "—"} loading={overview.loading} />
+        <DashboardCard title={t("admin.customersTotal")} value={overview.data ? String(overview.data.customers_total) : "—"} loading={overview.loading} />
+        <DashboardCard title={t("admin.productsTotal")} value={overview.data ? String(overview.data.products_total) : "—"} loading={overview.loading} />
         <DashboardCard
           title={t("admin.reminderEmails7d")}
-          value={data ? String(data.reminder_emails_sent_7d) : "—"}
-          description={data ? t("admin.reminderEmailsFailed7d", { count: data.reminder_emails_failed_7d }) : undefined}
-          loading={loading}
+          value={overview.data ? String(overview.data.reminder_emails_sent_7d) : "—"}
+          description={overview.data ? t("admin.reminderEmailsFailed7d", { count: overview.data.reminder_emails_failed_7d }) : undefined}
+          loading={overview.loading}
         />
-        <DashboardCard
-          title={t("admin.aiActionsExecuted7d")}
-          value={data ? String(data.ai_actions_executed_7d) : "—"}
-          loading={loading}
-        />
+        <DashboardCard title={t("admin.aiActionsExecuted7d")} value={overview.data ? String(overview.data.ai_actions_executed_7d) : "—"} loading={overview.loading} />
       </div>
+
+      {/* ---------- Business Metrics ---------- */}
+      <section aria-label={t("opsDashboard.businessSectionTitle")} className="space-y-4">
+        <h2 className="text-sm font-semibold text-slate-900">{t("opsDashboard.businessSectionTitle")}</h2>
+        {business.error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {business.error === GENERIC_LOAD_ERROR ? t("opsDashboard.loadError") : business.error}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <DashboardCard title={t("opsDashboard.mrr")} value={business.data ? formatCurrency(business.data.mrr, business.data.currency) : "—"} loading={business.loading} tone="success" />
+          <DashboardCard title={t("opsDashboard.arr")} value={business.data ? formatCurrency(business.data.arr, business.data.currency) : "—"} loading={business.loading} tone="success" />
+          <DashboardCard title={t("opsDashboard.payingOrganizations")} value={business.data ? String(business.data.paying_organizations) : "—"} loading={business.loading} />
+          <DashboardCard title={t("opsDashboard.trialOrganizations")} value={business.data ? String(business.data.trial_organizations) : "—"} loading={business.loading} />
+          <DashboardCard title={t("opsDashboard.activeUsers")} value={business.data ? String(business.data.active_users_total) : "—"} loading={business.loading} />
+          <DashboardCard title={t("opsDashboard.churnRate")} value={business.data ? `${business.data.churn_rate_30d}%` : "—"} loading={business.loading} />
+          <DashboardCard title={t("opsDashboard.conversionRate")} value={business.data ? `${business.data.conversion_rate_30d}%` : "—"} loading={business.loading} />
+          <DashboardCard title={t("opsDashboard.arpu")} value={business.data ? formatCurrency(business.data.average_revenue_per_organization, business.data.currency) : "—"} loading={business.loading} />
+        </div>
+        <OrganizationSplitChart data={business.data} loading={business.loading} />
+      </section>
+
+      {/* ---------- Usage Metrics ---------- */}
+      <section aria-label={t("opsDashboard.usageSectionTitle")} className="space-y-4">
+        <h2 className="text-sm font-semibold text-slate-900">{t("opsDashboard.usageSectionTitle")}</h2>
+        {usage.error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {usage.error === GENERIC_LOAD_ERROR ? t("opsDashboard.loadError") : usage.error}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <DashboardCard title={t("opsDashboard.aiRequests")} value={usage.data ? String(usage.data.ai_requests_30d) : "—"} loading={usage.loading} />
+          <DashboardCard
+            title={t("opsDashboard.apiKeys")}
+            value={usage.data ? String(usage.data.api_keys_active) : "—"}
+            description={usage.data ? t("opsDashboard.apiKeysUsed7d", { count: usage.data.api_keys_used_7d }) : undefined}
+            loading={usage.loading}
+          />
+          <DashboardCard title={t("opsDashboard.webhookDeliveries")} value={usage.data ? String(usage.data.webhook_deliveries_30d) : "—"} loading={usage.loading} />
+          <DashboardCard title={t("opsDashboard.backgroundJobs")} value={usage.data ? String(usage.data.background_jobs_30d) : "—"} loading={usage.loading} />
+          <DashboardCard title={t("opsDashboard.emailsSent")} value={usage.data ? String(usage.data.emails_sent_30d) : "—"} loading={usage.loading} />
+          <DashboardCard title={t("opsDashboard.notificationsCreated")} value={usage.data ? String(usage.data.notifications_created_30d) : "—"} loading={usage.loading} />
+        </div>
+        <UsageOutcomeChart data={usage.data} loading={usage.loading} />
+      </section>
+
+      {/* ---------- System Health ---------- */}
+      <section aria-label={t("admin.systemHealthTitle")} className="space-y-4">
+        <h2 className="text-sm font-semibold text-slate-900">{t("admin.systemHealthTitle")}</h2>
+        {health.error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {health.error === GENERIC_LOAD_ERROR ? t("opsDashboard.loadError") : health.error}
+          </div>
+        ) : null}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap gap-2">
+            <HealthPill label={t("admin.databaseLabel")} ok={health.data?.database_reachable ?? null} loading={health.loading} />
+            <HealthPill label={t("admin.emailProviderLabel")} ok={health.data ? health.data.email_provider_configured : null} loading={health.loading} />
+            <HealthPill label={t("admin.aiProviderLabel")} ok={health.data ? health.data.ai_provider_configured : null} loading={health.loading} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <DashboardCard title={t("opsDashboard.queuePending")} value={health.data ? String(health.data.queue_pending) : "—"} loading={health.loading} />
+          <DashboardCard title={t("opsDashboard.queueRunning")} value={health.data ? String(health.data.queue_running) : "—"} loading={health.loading} />
+          <DashboardCard title={t("opsDashboard.jobsFailed")} value={health.data ? String(health.data.jobs_failed_total) : "—"} loading={health.loading} tone={health.data && health.data.jobs_failed_total > 0 ? "info" : "neutral"} />
+          <DashboardCard title={t("opsDashboard.retryScheduled")} value={health.data ? String(health.data.queue_retry_scheduled) : "—"} loading={health.loading} />
+          <DashboardCard title={t("opsDashboard.storageUsed")} value={health.data ? `${health.data.storage_used_mb} MB` : "—"} loading={health.loading} />
+          <DashboardCard title={t("opsDashboard.databaseSize")} value={health.data?.database_size_mb != null ? `${health.data.database_size_mb} MB` : t("opsDashboard.unavailable")} loading={health.loading} />
+          <DashboardCard
+            title={t("opsDashboard.averageApiLatency")}
+            value={health.data?.average_api_latency_ms != null ? `${health.data.average_api_latency_ms} ms` : t("opsDashboard.unavailable")}
+            description={health.data ? t("opsDashboard.requestSampleCount", { count: health.data.request_sample_count }) : undefined}
+            loading={health.loading}
+          />
+          <DashboardCard title={t("opsDashboard.errorRate")} value={health.data?.error_rate_percent != null ? `${health.data.error_rate_percent}%` : t("opsDashboard.unavailable")} loading={health.loading} />
+        </div>
+      </section>
+
+      {/* ---------- Growth ---------- */}
+      <section aria-label={t("opsDashboard.growthSectionTitle")} className="space-y-4">
+        <h2 className="text-sm font-semibold text-slate-900">{t("opsDashboard.growthSectionTitle")}</h2>
+        {growth.error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            {growth.error === GENERIC_LOAD_ERROR ? t("opsDashboard.loadError") : growth.error}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <DashboardCard title={t("opsDashboard.monthlyGrowth")} value={growth.data ? `${growth.data.monthly_growth_percent}%` : "—"} loading={growth.loading} />
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <DailySignupsChart data={growth.data?.daily_signups ?? []} loading={growth.loading} />
+          <WeeklyActiveOrganizationsChart data={growth.data?.weekly_active_organizations ?? []} loading={growth.loading} />
+        </div>
+        <FeatureAdoptionChart data={growth.data?.feature_adoption ?? []} loading={growth.loading} />
+      </section>
     </div>
   );
 }

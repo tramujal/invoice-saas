@@ -1338,6 +1338,85 @@ class PlatformSystemHealthResponse(BaseModel):
     reminder_emails_pending: int
     reminder_emails_sent_7d: int
     reminder_emails_failed_7d: int
+    # Phase 21 additions -- see app.platform_metrics.health. Extends this
+    # SAME response rather than a second health endpoint.
+    queue_pending: int
+    queue_running: int
+    queue_retry_scheduled: int
+    jobs_failed_total: int
+    jobs_succeeded_total: int
+    storage_used_mb: int
+    database_size_mb: float | None
+    average_api_latency_ms: float | None
+    error_rate_percent: float | None
+    request_sample_count: int
+
+
+class PlatformBusinessMetricsResponse(BaseModel):
+    """GET /admin/dashboard/business -- see app.platform_metrics.business
+    for the single query this response is built from. `currency` is a
+    single-currency-deployment simplification (see that module's own
+    docstring); `average_revenue_per_organization` is MRR divided by
+    paying_organizations, 0 when there are none."""
+
+    organizations_total: int
+    active_users_total: int
+    paying_organizations: int
+    trial_organizations: int
+    mrr: Decimal
+    arr: Decimal
+    currency: str
+    churn_rate_30d: float
+    conversion_rate_30d: float
+    average_revenue_per_organization: Decimal
+
+
+class PlatformUsageMetricsResponse(BaseModel):
+    """GET /admin/dashboard/usage -- see app.platform_metrics.usage.
+    `api_keys_active`/`api_keys_used_7d` are the honest ceiling of what
+    this app tracks for API keys (no per-request log exists -- see that
+    module's own docstring); every other field is a genuine count over
+    its own table."""
+
+    ai_requests_30d: int
+    api_keys_active: int
+    api_keys_used_7d: int
+    webhook_deliveries_30d: int
+    webhook_deliveries_succeeded_30d: int
+    webhook_deliveries_failed_30d: int
+    background_jobs_30d: int
+    background_jobs_succeeded_30d: int
+    background_jobs_failed_30d: int
+    emails_sent_30d: int
+    notifications_created_30d: int
+
+
+class PlatformDailySignupCount(BaseModel):
+    day: date
+    count: int
+
+
+class PlatformWeeklyActiveOrganizationsCount(BaseModel):
+    week_start: date
+    count: int
+
+
+class PlatformFeatureAdoption(BaseModel):
+    feature: str
+    adopted_paying_organizations: int
+    adopted_percent: float
+
+
+class PlatformGrowthMetricsResponse(BaseModel):
+    """GET /admin/dashboard/growth -- see app.platform_metrics.growth.
+    `daily_signups`/`weekly_active_organizations` only include buckets
+    with at least one row (no zero-filled gaps) -- the frontend fills
+    gaps for charting, since a missing day IS zero, not absent data."""
+
+    daily_signups: list[PlatformDailySignupCount]
+    weekly_active_organizations: list[PlatformWeeklyActiveOrganizationsCount]
+    monthly_growth_percent: float
+    feature_adoption: list[PlatformFeatureAdoption]
 
 
 class PlatformSettingsResponse(BaseModel):

@@ -84,7 +84,11 @@ from app.schemas import (
     PlatformAuditLogEntry,
     PlatformBackgroundJobDetail,
     PlatformBackgroundJobEntry,
+    PlatformBusinessMetricsResponse,
+    PlatformDailySignupCount,
     PlatformDashboardResponse,
+    PlatformFeatureAdoption,
+    PlatformGrowthMetricsResponse,
     PlatformJobActionRequest,
     PlatformOrganizationActionRequest,
     PlatformOrganizationDetail,
@@ -97,16 +101,23 @@ from app.schemas import (
     PlatformSubscriptionDetail,
     PlatformSubscriptionSummary,
     PlatformSystemHealthResponse,
+    PlatformUsageMetricsResponse,
     PlatformUserActionRequest,
     PlatformUserActionResponse,
     PlatformUserDetail,
     PlatformUserOrganization,
     PlatformUserSummary,
+    PlatformWeeklyActiveOrganizationsCount,
     SubscriptionEventResponse,
     UsageResourceSnapshot,
 )
 from app.job_status import JobStatus
 from app.job_type import JobType
+from app.platform_metrics import health as platform_metrics_health
+from app.platform_metrics.business import compute_business_metrics
+from app.platform_metrics.growth import compute_growth_metrics
+from app.platform_metrics.usage import compute_usage_metrics
+from app.request_metrics import get_snapshot as get_request_metrics_snapshot
 from app.services.background_jobs import enqueue_job
 from app.services.entitlements import get_active_subscription, get_default_plan
 from app.services.organization_usage import ResourceUsage, get_usage_snapshot
@@ -311,6 +322,9 @@ def _system_health(db: Session) -> PlatformSystemHealthResponse:
         db, QuoteReminder, ReminderStatus.failed, since_7d
     )
 
+    queue = platform_metrics_health.queue_status(db)
+    request_snapshot = get_request_metrics_snapshot()
+
     return PlatformSystemHealthResponse(
         database_reachable=database_reachable,
         email_provider_configured=email_configured,
@@ -320,6 +334,16 @@ def _system_health(db: Session) -> PlatformSystemHealthResponse:
         reminder_emails_pending=pending,
         reminder_emails_sent_7d=sent_7d,
         reminder_emails_failed_7d=failed_7d,
+        queue_pending=queue.pending,
+        queue_running=queue.running,
+        queue_retry_scheduled=queue.retry_scheduled,
+        jobs_failed_total=queue.failed_total,
+        jobs_succeeded_total=queue.succeeded_total,
+        storage_used_mb=platform_metrics_health.storage_used_mb(),
+        database_size_mb=platform_metrics_health.database_size_mb(db),
+        average_api_latency_ms=request_snapshot.average_latency_ms,
+        error_rate_percent=request_snapshot.error_rate_percent,
+        request_sample_count=request_snapshot.sample_count,
     )
 
 
@@ -1327,6 +1351,81 @@ def get_platform_system_health(
 ) -> PlatformSystemHealthResponse:
     require_platform_permission(current_user, PlatformPermission.dashboard_view)
     return _system_health(db)
+
+
+@router.get("/dashboard/business", response_model=PlatformBusinessMetricsResponse)
+def get_platform_business_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformBusinessMetricsResponse:
+    """Phase 21 -- see app.platform_metrics.business.compute_business_metrics,
+    the single query this response wraps verbatim."""
+    require_platform_permission(current_user, PlatformPermission.dashboard_view)
+    metrics = compute_business_metrics(db)
+    return PlatformBusinessMetricsResponse(
+        organizations_total=metrics.organizations_total,
+        active_users_total=metrics.active_users_total,
+        paying_organizations=metrics.paying_organizations,
+        trial_organizations=metrics.trial_organizations,
+        mrr=metrics.mrr,
+        arr=metrics.arr,
+        currency=metrics.currency,
+        churn_rate_30d=metrics.churn_rate_30d,
+        conversion_rate_30d=metrics.conversion_rate_30d,
+        average_revenue_per_organization=metrics.average_revenue_per_organization,
+    )
+
+
+@router.get("/dashboard/usage", response_model=PlatformUsageMetricsResponse)
+def get_platform_usage_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PlatformUsageMetricsResponse:
+    """Phase 21 -- see app.platform_metrics.usage.compute_usage_metrics."""
+    require_platform_permission(current_user, PlatformPermission.dashboard_view)
+    metrics = compute_usage_metrics(db)
+    return PlatformUsageMetricsResponse(
+        ai_requests_30d=metrics.ai_requests_30d,
+        api_keys_active=metrics.api_keys_active,
+        api_keys_used_7d=metrics.api_keys_used_7d,
+        webhook_deliveries_30d=metrics.webhook_deliveries_30d,
+        webhook_deliveries_succeeded_30d=metrics.webhook_deliveries_succeeded_30d,
+        webhook_deliveries_failed_30d=metrics.webhook_deliveries_failed_30d,
+        background_jobs_30d=metrics.background_jobs_30d,
+        background_jobs_succeeded_30d=metrics.background_jobs_succeeded_30d,
+        background_jobs_failed_30d=metrics.background_jobs_failed_30d,
+        emails_sent_30d=metrics.emails_sent_30d,
+        notifications_created_30d=metrics.notifications_created_30d,
+    )
+
+
+@router.get("/dashboard/growth", response_model=PlatformGrowthMetricsResponse)
+def get_platform_growth_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    days: int = Query(default=30, ge=1, le=365),
+) -> PlatformGrowthMetricsResponse:
+    """Phase 21 -- see app.platform_metrics.growth.compute_growth_metrics."""
+    require_platform_permission(current_user, PlatformPermission.dashboard_view)
+    metrics = compute_growth_metrics(db, days=days)
+    return PlatformGrowthMetricsResponse(
+        daily_signups=[
+            PlatformDailySignupCount(day=item.day, count=item.count) for item in metrics.daily_signups
+        ],
+        weekly_active_organizations=[
+            PlatformWeeklyActiveOrganizationsCount(week_start=item.week_start, count=item.count)
+            for item in metrics.weekly_active_organizations
+        ],
+        monthly_growth_percent=metrics.monthly_growth_percent,
+        feature_adoption=[
+            PlatformFeatureAdoption(
+                feature=item.feature,
+                adopted_paying_organizations=item.adopted_paying_organizations,
+                adopted_percent=item.adopted_percent,
+            )
+            for item in metrics.feature_adoption
+        ],
+    )
 
 
 def _build_settings_response(db: Session, row: PlatformSettings) -> PlatformSettingsResponse:
