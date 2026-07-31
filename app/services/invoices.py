@@ -178,6 +178,8 @@ def create_invoice_record(
     line_items: list[InvoiceLineItemCreate],
     tax_rate: Decimal,
     due_date: date | None = None,
+    *,
+    commit: bool = True,
 ) -> Invoice:
     """The actual DB write: numbering-locked, currency/language pinned at
     creation time. Totals are always recomputed here from `line_items` --
@@ -195,7 +197,20 @@ def create_invoice_record(
     (see app.routers.api_v1.invoices) rather than a browser session -- a
     key is not a person, so created_by_user_id is correctly left NULL
     for API-created invoices, matching that column's existing
-    nullability."""
+    nullability.
+
+    commit defaults to True (this function's own commit finalizes the
+    invoice, matching every caller's pre-Phase-P2.2 expectation of
+    getting back an already-persisted row) -- app.services.quotes
+    .convert_quote_to_invoice is the one caller that passes commit=False,
+    so its own quote.status/converted_invoice_id update and this
+    invoice's creation land in the SAME transaction instead of two
+    separate ones (Phase P2.2, H4: a crash between two separate commits
+    used to leave a committed invoice but an unconverted quote, and a
+    retry would create a SECOND invoice since the QuoteAlreadyConvertedError
+    guard never saw the first one). When commit=False, the caller owns
+    calling db.commit()/db.refresh(invoice) itself once its own
+    additional writes are also ready."""
     check_limit(db, organization_id, LimitedResource.invoices)
     # A line's product_id is purely an analytics tag (see
     # InvoiceLineItem.product_id's docstring) -- validated to resolve
@@ -277,8 +292,9 @@ def create_invoice_record(
         payload=InvoiceResponse.model_validate(invoice).model_dump(mode="json"),
         actor_user_id=current_user.id if current_user else None,
     )
-    db.commit()
-    db.refresh(invoice)
+    if commit:
+        db.commit()
+        db.refresh(invoice)
     return invoice
 
 

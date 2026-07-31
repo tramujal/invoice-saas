@@ -231,7 +231,7 @@ def confirm_product_import(
 
     existing_skus = fetch_existing_skus(db, organization_id)
     process_row = make_row_processor(existing_skus)
-    persist_row = make_persist_fn(organization_id, actor_user_id=current_user.id)
+    persist_row = make_persist_fn(db, organization_id, actor_user_id=current_user.id)
 
     try:
         result = build_confirm(db, parsed, PRODUCT_FIELD_SPECS, manual_mapping, process_row, persist_row)

@@ -206,7 +206,17 @@ def check_limit(
     (returns None) when the limit is unlimited or usage stays within it.
     Locks the organization row first -- see _lock_organization -- so the
     count this reads can't go stale before the caller's own insert
-    commits in the same transaction."""
+    commits in the same transaction.
+
+    For creating ONE row at a time from a single request, this is the
+    right call. A caller creating MANY rows in one transaction (a bulk
+    CSV import) should use open_limit_tracker() instead -- see that
+    function's own docstring for why calling check_limit() per row
+    re-resolves the same entitlements+usage numbers (1 entitlements
+    query + 8 usage-count queries, see
+    app.billing.capabilities.get_organization_capabilities) on every
+    single row for no reason, when nothing about the organization's plan
+    or its usage-outside-this-import changes mid-loop."""
     spec = _resolve(resource)
     _lock_organization(db, organization_id)
     caps = get_organization_capabilities(db, organization_id)
@@ -223,3 +233,69 @@ def check_limit(
             plan_code=caps.entitlements.plan_code,
             plan_name=caps.entitlements.plan_name,
         )
+
+
+@dataclass
+class LimitTracker:
+    """Returned by open_limit_tracker() -- holds one resource's limit and
+    plan info resolved ONCE, plus a running `used` count this tracker
+    itself advances locally. `.consume()` is the per-row replacement for
+    calling check_limit() again: a pure, in-memory comparison, no query.
+    """
+
+    resource: LimitedResource
+    limit: int | None
+    used: int
+    plan_id: str
+    plan_code: str
+    plan_name: str
+
+    def consume(self, additional: int = 1) -> None:
+        """Raises PlanLimitExceededError with the exact same shape
+        check_limit() would raise -- callers (app.imports.*) that
+        already catch PlanLimitExceededError per row need no changes at
+        all beyond swapping which function raises it. Deliberately keeps
+        raising on every call once the cap is reached (never "raise
+        once, then silently stop counting"), matching check_limit()'s
+        own per-row behavior when called repeatedly past the limit --
+        every row past the cap must still be reported by
+        app.imports.base.build_confirm as plan_limit_reached, not just
+        the first one."""
+        if self.limit is not None and self.used + additional > self.limit:
+            raise PlanLimitExceededError(
+                resource=self.resource,
+                used=self.used,
+                limit=self.limit,
+                plan_id=self.plan_id,
+                plan_code=self.plan_code,
+                plan_name=self.plan_name,
+            )
+        self.used += additional
+
+
+def open_limit_tracker(db: Session, organization_id: str, resource: LimitedResource) -> LimitTracker:
+    """The bulk-creation counterpart to check_limit() -- resolves this
+    organization's limit/used/plan info for `resource` exactly ONCE
+    (locking the organization row exactly once, see _lock_organization),
+    for a caller (a CSV import's persist function, built once per import
+    and then invoked once per row -- see app.imports.customers/products
+    .make_persist_fn) that will go on to create many rows within the
+    SAME transaction. Every subsequent row calls the returned tracker's
+    own .consume() instead of check_limit(), which does zero additional
+    queries.
+
+    Must be called, and every .consume() call plus its corresponding
+    row insert, within the same db session/transaction as each other --
+    same requirement _lock_organization's own docstring already states
+    for check_limit(), unchanged here."""
+    spec = _resolve(resource)
+    _lock_organization(db, organization_id)
+    caps = get_organization_capabilities(db, organization_id)
+    return LimitTracker(
+        resource=resource,
+        limit=spec.limit_fn(caps),
+        used=spec.used_fn(caps),
+        plan_id=caps.entitlements.plan_id,
+        plan_code=caps.entitlements.plan_code,
+        plan_name=caps.entitlements.plan_name,
+    )

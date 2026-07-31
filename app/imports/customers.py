@@ -25,7 +25,7 @@ from app.imports.validation import validate_row_fields
 from app.localization import get_language, t
 from app.models import Customer, Organization
 from app.schemas import CustomerResponse
-from app.services.plan_limits import LimitedResource, check_limit
+from app.services.plan_limits import LimitedResource, open_limit_tracker
 from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 
@@ -173,23 +173,27 @@ def make_row_processor(
 
 
 def make_persist_fn(
-    organization_id: str, actor_user_id: str | None = None
+    db: Session, organization_id: str, actor_user_id: str | None = None
 ) -> Callable[[Session, dict[str, str]], None]:
     """Returns a function that adds+flushes exactly one Customer row.
     Deliberately does not commit — app.imports.base.build_confirm owns the
     single outer commit, and wraps each call to this function in its own
     db.begin_nested() savepoint.
 
-    Calls the exact same check_limit() every single-item creation path
-    goes through, once per row -- not a separately-computed "remaining
-    slots" counter. This works correctly across the whole import because
-    persist() flushes (never commits) each row: a not-yet-committed but
-    flushed row from earlier in this same import is already visible to
-    the count query check_limit() runs, so the cap is enforced row by
-    row within one transaction, not just once at the start."""
+    Resolves the organization's customers limit/usage exactly ONCE here
+    (via open_limit_tracker(), called once when this function itself is
+    built, before the per-row loop in build_confirm even starts) rather
+    than re-resolving it on every row -- see open_limit_tracker's own
+    docstring for why calling check_limit() per row was a real N+1 (1
+    entitlements query + 8 usage-count queries per row). The returned
+    tracker's .consume() enforces the exact same cap, row by row, purely
+    in memory from then on -- still correctly enforced across the whole
+    import, since .consume() advances its own local `used` counter on
+    every row regardless of whether that row has actually committed yet."""
+    tracker = open_limit_tracker(db, organization_id, LimitedResource.customers)
 
     def persist(db: Session, values: dict[str, str]) -> None:
-        check_limit(db, organization_id, LimitedResource.customers)
+        tracker.consume()
         customer = Customer(
             organization_id=organization_id,
             name=values.get("name", ""),

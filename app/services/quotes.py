@@ -518,7 +518,21 @@ def convert_quote_to_invoice(
     completely unchanged -- zero duplicated totals/tax/numbering logic.
     The resulting invoice has fresh InvoiceLineItem rows (new ids) and
     never references the quote; only the quote gains a one-directional
-    converted_invoice_id pointer back to it."""
+    converted_invoice_id pointer back to it.
+
+    Phase P2.2 (H4): the invoice's own creation (commit=False -- see
+    create_invoice_record's own docstring) and this function's quote
+    status update + quote.converted event are committed together, ONCE,
+    at the end of this function -- a single atomic transaction, not two.
+    Before this, create_invoice_record committed on its own, so a crash
+    between that commit and this function's own (second) commit left a
+    real, committed invoice with no converted_invoice_id ever recorded
+    on the quote -- and since the guard above only checks
+    quote.converted_invoice_id, a retry of this same action would create
+    a SECOND invoice for the same quote. With one shared commit, either
+    both the invoice and the quote's converted state land together, or
+    neither does; a retry after any failure always starts from a quote
+    that's still genuinely un-converted."""
     if quote.converted_invoice_id is not None:
         raise QuoteAlreadyConvertedError(quote.id)
     if quote.status != QuoteStatus.accepted.value:
@@ -542,16 +556,15 @@ def convert_quote_to_invoice(
         CurrencyCode(quote.currency_code),
         invoice_line_items,
         quote.tax_rate,
+        commit=False,
     )
 
     quote.status = QuoteStatus.converted.value
     quote.converted_invoice_id = invoice.id
-    # A genuinely separate, second transaction from the "invoice.created"
-    # event already emitted inside create_invoice_record above (see this
-    # phase's transaction-boundary analysis: create_invoice_record commits
-    # on its own, before control ever returns here) -- "quote.converted"
-    # is its own real, independently-atomic domain transition, not a
-    # duplicate of invoice creation.
+    # "quote.converted" is its own real domain transition, distinct from
+    # "invoice.created" (emitted inside create_invoice_record above) --
+    # both events are now recorded in the same still-open transaction,
+    # and become durable together with this function's own commit below.
     emit_event(
         db,
         organization_id=organization_id,

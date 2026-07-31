@@ -139,6 +139,77 @@ class TestEmitEventFanOut:
         assert db_session.query(Notification).count() == 0
         assert db_session.query(BackgroundJob).filter_by(job_type=JobType.notification_email.value).count() == 0
 
+    def test_email_eligibility_lookups_do_not_scale_with_member_count(self, db_session):
+        """Phase P2.2 (H3): before this fix, the per-recipient loop called
+        is_email_enabled() (1 query against notification_preferences) and
+        db.get(User, ...) (1 query against users) for EVERY active
+        member -- 2N queries against those two tables for N members, on
+        top of everything else emit_event legitimately does once per
+        recipient (one BackgroundJob row + its own idempotency-key check
+        per eligible email -- untouched by this fix, since that's real
+        per-job work, not a redundant lookup). Counting only statements
+        against notification_preferences/users specifically (rather than
+        every query emit_event issues) isolates exactly the piece this
+        finding is about."""
+        from contextlib import contextmanager
+
+        from sqlalchemy import event
+
+        from app.database import engine as app_engine
+
+        @contextmanager
+        def _count_matching_statements(*substrings: str):
+            count = 0
+
+            def _on_execute(_conn, _cursor, statement, *_rest):
+                nonlocal count
+                if any(substring in statement for substring in substrings):
+                    count += 1
+
+            event.listen(app_engine, "before_cursor_execute", _on_execute)
+            try:
+                yield lambda: count
+            finally:
+                event.remove(app_engine, "before_cursor_execute", _on_execute)
+
+        def _emit_for_member_count(member_count: int) -> int:
+            owner = make_org_with_owner(db_session, email=f"qc-owner-{member_count}@example.com")
+            members = [
+                make_member_in_org(db_session, owner.organization, email=f"qc-member-{member_count}-{i}@example.com")
+                for i in range(member_count)
+            ]
+            # A couple of realistic wrinkles so the batched lookups still
+            # have to make the same per-recipient decision, not just skip
+            # work entirely.
+            if members:
+                set_email_enabled(
+                    db_session, user_id=members[0].user.id, organization_id=owner.organization.id, enabled=False
+                )
+                members[-1].user.email_verified_at = None
+            db_session.commit()
+
+            with _count_matching_statements("FROM notification_preferences", "FROM users") as get_count:
+                emit_event(
+                    db_session,
+                    organization_id=owner.organization.id,
+                    event_type=WebhookEventType.customer_created,
+                    object_type="customer",
+                    object_id="does-not-matter",
+                    payload={"name": "Query Count Co"},
+                )
+            db_session.commit()
+            return get_count()
+
+        small_count = _emit_for_member_count(3)
+        large_count = _emit_for_member_count(20)
+
+        # Exactly one batched SELECT against each table, regardless of
+        # whether there are 4 total active members (owner + 3) or 21
+        # (owner + 20) -- if this ever regresses back to a per-member
+        # query, these two numbers would diverge instead of both being 2.
+        assert small_count == 2, small_count
+        assert large_count == 2, large_count
+
 
 class TestEmailPreference:
     def test_defaults_to_enabled_when_no_row_exists(self, db_session):

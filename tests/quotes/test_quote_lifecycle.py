@@ -1,6 +1,9 @@
 from decimal import Decimal
 
+import pytest
+
 from app.quote_status import QuoteStatus
+from app.webhook_event_type import WebhookEventType
 from tests.factories import make_customer, make_org_with_owner, make_product, make_quote
 
 
@@ -218,3 +221,87 @@ def test_invoice_from_converted_quote_immune_to_later_quote_edits(client, db_ses
     # The invoice has its own independent line item rows -- never the
     # same primary keys as the quote's.
     assert invoice.line_items[0].id != quote.line_items[0].id
+
+
+def test_convert_interrupted_before_shared_commit_leaves_neither_invoice_nor_quote_change(
+    client, db_session, monkeypatch
+):
+    """Phase P2.2 (H4): create_invoice_record(commit=False) inside
+    convert_quote_to_invoice no longer commits on its own -- the invoice
+    creation and the quote's own status/converted_invoice_id update share
+    ONE commit at the end of convert_quote_to_invoice. Simulates a crash
+    in that window (after the invoice's own writes are queued, before
+    the shared commit) by making the quote.converted emit_event call
+    raise -- db.rollback() (what a real request's session teardown does
+    implicitly on an unhandled exception, see app.database.get_db) must
+    discard BOTH the queued invoice AND the queued quote update, not just
+    one of them."""
+    from app.models import Invoice
+    from app.services import quotes as quotes_service
+
+    owner = make_org_with_owner(db_session, email="owner-atomic@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user)
+    _mark_sent(db_session, quote)
+    quote.status = QuoteStatus.accepted.value
+    db_session.commit()
+
+    original_emit_event = quotes_service.emit_event
+
+    def _raise_on_quote_converted(db, *, event_type, **kwargs):
+        if event_type == WebhookEventType.quote_converted:
+            raise RuntimeError("simulated crash before the shared commit")
+        return original_emit_event(db, event_type=event_type, **kwargs)
+
+    monkeypatch.setattr(quotes_service, "emit_event", _raise_on_quote_converted)
+
+    with pytest.raises(RuntimeError):
+        quotes_service.convert_quote_to_invoice(db_session, owner.organization.id, quote, owner.user)
+
+    db_session.rollback()
+
+    assert db_session.query(Invoice).filter_by(organization_id=owner.organization.id).count() == 0
+    db_session.refresh(quote)
+    assert quote.status == QuoteStatus.accepted.value
+    assert quote.converted_invoice_id is None
+
+
+def test_convert_retry_after_interruption_creates_exactly_one_invoice(client, db_session, monkeypatch):
+    """Directly continues test_convert_interrupted_before_shared_commit_...
+    -- once the transaction that failed has been rolled back, the SAME
+    quote must still be convertible, and retrying must produce exactly
+    one invoice. Before this fix (create_invoice_record's own internal
+    commit persisting the invoice independently of the quote update), a
+    genuine crash in this window would have left a committed invoice
+    with no converted_invoice_id recorded, so this same retry would have
+    created a SECOND invoice for one quote."""
+    from app.models import Invoice
+    from app.services import quotes as quotes_service
+
+    owner = make_org_with_owner(db_session, email="owner-atomic-retry@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user)
+    _mark_sent(db_session, quote)
+    quote.status = QuoteStatus.accepted.value
+    db_session.commit()
+
+    original_emit_event = quotes_service.emit_event
+    call_count = {"n": 0}
+
+    def _raise_once_on_quote_converted(db, *, event_type, **kwargs):
+        if event_type == WebhookEventType.quote_converted and call_count["n"] == 0:
+            call_count["n"] += 1
+            raise RuntimeError("simulated crash on first attempt only")
+        return original_emit_event(db, event_type=event_type, **kwargs)
+
+    monkeypatch.setattr(quotes_service, "emit_event", _raise_once_on_quote_converted)
+
+    with pytest.raises(RuntimeError):
+        quotes_service.convert_quote_to_invoice(db_session, owner.organization.id, quote, owner.user)
+    db_session.rollback()
+
+    # Retry: the same quote, still un-converted, now succeeds for real.
+    result = quotes_service.convert_quote_to_invoice(db_session, owner.organization.id, quote, owner.user)
+
+    assert db_session.query(Invoice).filter_by(organization_id=owner.organization.id).count() == 1
+    db_session.refresh(quote)
+    assert quote.status == QuoteStatus.converted.value
+    assert quote.converted_invoice_id == result.invoice.id

@@ -133,6 +133,7 @@ def emit_event(
         return
 
     title, body = render_notification_copy(event_type, payload)
+    user_ids = [member.user_id for member in members]
 
     notifications: list[Notification] = []
     for member in members:
@@ -150,10 +151,29 @@ def emit_event(
         notifications.append(notification)
     db.flush()
 
+    # Two batched lookups instead of is_email_enabled()/db.get(User, ...)
+    # per member (an N+1 for N active members -- 1 + 2N queries before
+    # this) -- everything below is otherwise byte-for-byte the same
+    # per-recipient decision is_email_enabled's own docstring documents
+    # (default True when no preference row exists) and the same
+    # verified-email gate.
+    preference_rows = db.scalars(
+        select(NotificationPreference).where(
+            NotificationPreference.organization_id == organization_id,
+            NotificationPreference.user_id.in_(user_ids),
+        )
+    ).all()
+    email_enabled_by_user_id = {pref.user_id: pref.email_enabled for pref in preference_rows}
+
+    users_by_id = {
+        user.id: user
+        for user in db.scalars(select(User).where(User.id.in_(user_ids)))
+    }
+
     for notification in notifications:
-        if not is_email_enabled(db, user_id=notification.user_id, organization_id=organization_id):
+        if not email_enabled_by_user_id.get(notification.user_id, True):
             continue
-        user = db.get(User, notification.user_id)
+        user = users_by_id.get(notification.user_id)
         if user is None or not user.email_verified:
             continue
         enqueue_job(

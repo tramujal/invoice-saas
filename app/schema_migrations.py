@@ -67,6 +67,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_notifications_table(engine)
     _add_notification_preferences_table(engine)
     _add_audit_entries_table(engine)
+    _add_high_priority_query_indexes(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1855,3 +1856,116 @@ def _add_audit_entries_table(engine: Engine) -> None:
                 "ON audit_entries (organization_id, created_at)"
             )
         )
+
+
+def _add_high_priority_query_indexes(engine: Engine) -> None:
+    """Phase P2.2 (H1) -- indexes backing query patterns that were only
+    ever served by a full-table scan or an FK column with no index of
+    its own. Each one below is tied to a real, existing query; see each
+    CREATE INDEX's own comment for exactly which one.
+
+    Every table referenced here already exists by the time this runs
+    (customers/organization_members/invoices/quotes/password_reset_tokens/
+    email_verification_tokens are all created by Base.metadata.create_all
+    on a fresh DB, or by an earlier guarded migration above on an
+    existing one) -- CREATE INDEX IF NOT EXISTS alone is the idempotency
+    guarantee here, matching _add_due_date_and_status_indexes's exact
+    pattern, since indexing an existing column needs no inspector
+    column-existence check the way ALTER TABLE ADD COLUMN does.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        if "customers" in existing_tables:
+            # Every customer list/lookup/import-dedup query filters by
+            # organization_id first (app.services.customers,
+            # app.imports.customers.fetch_existing_keys) -- previously an
+            # unindexed FK column, full-table-scanned on every call.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_customers_organization_id "
+                    "ON customers (organization_id)"
+                )
+            )
+
+        if "organization_members" in existing_tables:
+            # The existing UNIQUE(user_id, organization_id) constraint's
+            # own index is keyed user_id-first, so it can't serve an
+            # organization_id-first lookup (every "list this org's
+            # members" query -- team page, require_org_member, permission
+            # checks, emit_event's own fan-out) without a leading-column
+            # index of its own.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_organization_members_organization_id "
+                    "ON organization_members (organization_id)"
+                )
+            )
+
+        if "invoices" in existing_tables:
+            # ix_invoices_due_date (added earlier, above) is due_date-only
+            # -- every real caller (app.jobs.send_due_invoice_reminders,
+            # dashboard/insights due-soon & overdue counts) filters by
+            # organization_id AND due_date together, which a single-org's
+            # rows still have to be scanned out of a global due_date
+            # index for. This composite index serves that exact shape
+            # directly; the single-column ix_invoices_due_date is left in
+            # place since it's still the right index for any future
+            # cross-tenant, due_date-only query (e.g. a platform-admin
+            # job), and dropping it would be a separate, unrelated change.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_invoices_organization_due_date "
+                    "ON invoices (organization_id, due_date)"
+                )
+            )
+            # customer_id was the only FK on Invoice with no index --
+            # Customer.invoices' own relationship lazy-load and any
+            # "this customer's invoices" lookup were full-table scans.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_invoices_customer_id "
+                    "ON invoices (customer_id)"
+                )
+            )
+
+        if "quotes" in existing_tables:
+            # Same rationale as ix_invoices_customer_id -- Quote.customer
+            # relationship lazy-load and per-customer quote lookups.
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_quotes_customer_id ON quotes (customer_id)")
+            )
+
+        if "password_reset_tokens" in existing_tables:
+            # app.routers.auth's forgot-password flow looks up a user's
+            # existing (unexpired/unused) tokens by user_id before
+            # issuing a new one -- an unindexed FK column today.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_password_reset_tokens_user_id "
+                    "ON password_reset_tokens (user_id)"
+                )
+            )
+
+        if "email_verification_tokens" in existing_tables:
+            # Same rationale as ix_password_reset_tokens_user_id -- the
+            # verification-email resend path looks up by user_id first.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_email_verification_tokens_user_id "
+                    "ON email_verification_tokens (user_id)"
+                )
+            )
+
+        if "assistant_actions" in existing_tables:
+            # app.services.organization_usage.count_ai_actions_current_month
+            # filters WHERE organization_id = ? AND created_at >= ? on
+            # every AI-quota check (every check_limit() call for
+            # ai_actions, i.e. every AI assistant action proposal) --
+            # previously zero indexes on this table at all.
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_assistant_actions_org_created "
+                    "ON assistant_actions (organization_id, created_at)"
+                )
+            )

@@ -296,6 +296,160 @@ def test_webhook_returns_409_and_writes_no_receipt_on_a_version_conflict(
     assert receipt is None
 
 
+def _build_webhook_race_db():
+    """Standalone SQLite file + engine (its own schema, one organization,
+    one active Subscription, one plan) -- for tests that need to prove
+    genuine cross-connection durability, not just same-session pending
+    state. Mirrors tests/billing/test_subscription_concurrency.py's own
+    _build_race_db helper exactly, for the same reason: the shared,
+    SAVEPOINT-nested `client`/`db_session` fixtures used everywhere else
+    in this suite never actually commit to the underlying database file
+    (see tests/conftest.py), so a second, independent connection against
+    them would never see anything -- these tests need a real commit a
+    fresh connection can actually observe."""
+    import os
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as RawSession
+
+    from app.billing_period import BillingPeriod
+    from app.models import Base, Organization, Plan, Subscription
+    from app.subscription_status import SubscriptionStatus
+
+    fd, path = tempfile.mkstemp(suffix=".db", prefix="saas_webhook_atomicity_")
+    os.close(fd)
+    engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+
+    with RawSession(engine) as setup_db:
+        plan = Plan(code="webhook-atomic-plan", name="Webhook Atomic Plan", is_active=True, is_default=True)
+        setup_db.add(plan)
+        setup_db.flush()
+        org = Organization(name="Webhook Atomic Co", plan_id=plan.id)
+        setup_db.add(org)
+        setup_db.flush()
+        now = datetime.now(timezone.utc)
+        subscription = Subscription(
+            organization_id=org.id,
+            plan_id=plan.id,
+            status=SubscriptionStatus.active.value,
+            billing_period=BillingPeriod.monthly.value,
+            current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+        )
+        setup_db.add(subscription)
+        setup_db.commit()
+        org_id, plan_id, subscription_id = org.id, plan.id, subscription.id
+
+    def cleanup():
+        engine.dispose()
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    return engine, cleanup, org_id, plan_id, subscription_id
+
+
+def test_webhook_mutation_and_receipt_are_durably_atomic_on_success():
+    """Phase P2.2 (H5): reproduces exactly the sequence
+    app.routers.billing_webhooks.receive_stripe_webhook follows (add the
+    receipt to the session, THEN call sync_from_webhook_event, whose own
+    internal commit -- see BillingService._commit -- flushes both
+    together) against a standalone engine, then opens a genuinely
+    SEPARATE connection to verify both the subscription mutation and the
+    receipt are visible there -- proof this is real, cross-connection
+    durability, not just same-session pending state that a later
+    rollback could still discard."""
+    from sqlalchemy.orm import Session as RawSession
+
+    from app.billing.provider_base import BillingProviderEventType, ProviderWebhookEvent
+    from app.billing.service import BillingService
+    from app.models import Plan, ProviderWebhookReceipt, Subscription
+    from tests.billing.fakes import FakeBillingProvider
+
+    engine, cleanup, org_id, plan_id, subscription_id = _build_webhook_race_db()
+    try:
+        session = RawSession(engine)
+        provider = FakeBillingProvider()
+        event = ProviderWebhookEvent(
+            provider_name="fake",
+            event_id="evt_durable_1",
+            event_type=BillingProviderEventType.checkout_completed,
+            provider_reference="sub_durable_1",
+            metadata={"organization_id": org_id, "plan_id": plan_id, "billing_period": "monthly"},
+        )
+
+        session.add(ProviderWebhookReceipt(provider_name="fake", event_id="evt_durable_1"))
+        BillingService(session, provider=provider).sync_from_webhook_event(event)
+        session.close()
+
+        with RawSession(engine) as verify_db:
+            receipt = (
+                verify_db.query(ProviderWebhookReceipt)
+                .filter_by(provider_name="fake", event_id="evt_durable_1")
+                .one_or_none()
+            )
+            assert receipt is not None
+
+            subscription = verify_db.get(Subscription, subscription_id)
+            assert subscription.provider_reference == "sub_durable_1"
+    finally:
+        cleanup()
+
+
+def test_webhook_mutation_and_receipt_are_both_absent_when_processing_fails():
+    """The other half of atomicity: if sync_from_webhook_event raises
+    before its own commit (an unresolvable event, exactly like
+    test_webhook_returns_400_for_an_unresolvable_event below, but proven
+    here at the cross-connection durability level), a fresh connection
+    must see NEITHER the subscription mutation NOR the receipt -- never
+    a state where only one of the two landed."""
+    from sqlalchemy.orm import Session as RawSession
+
+    from app.billing.provider_base import BillingProviderEventType, ProviderWebhookEvent
+    from app.billing.service import BillingService
+    from app.models import ProviderWebhookReceipt, Subscription
+    from tests.billing.fakes import FakeBillingProvider
+
+    engine, cleanup, org_id, plan_id, subscription_id = _build_webhook_race_db()
+    try:
+        session = RawSession(engine)
+        provider = FakeBillingProvider()
+        event = ProviderWebhookEvent(
+            provider_name="fake",
+            event_id="evt_fail_1",
+            event_type=BillingProviderEventType.checkout_completed,
+            provider_reference="sub_fail_1",
+            # plan_id deliberately wrong -- raises LookupError before any
+            # mutating commit, mirroring the router's own except
+            # (LookupError, ValueError) branch and its db.rollback().
+            metadata={"organization_id": org_id, "plan_id": "plan-does-not-exist", "billing_period": "monthly"},
+        )
+
+        session.add(ProviderWebhookReceipt(provider_name="fake", event_id="evt_fail_1"))
+        try:
+            BillingService(session, provider=provider).sync_from_webhook_event(event)
+            raise AssertionError("expected LookupError")
+        except LookupError:
+            session.rollback()
+        session.close()
+
+        with RawSession(engine) as verify_db:
+            receipt = (
+                verify_db.query(ProviderWebhookReceipt).filter_by(provider_name="fake", event_id="evt_fail_1").one_or_none()
+            )
+            assert receipt is None
+
+            subscription = verify_db.get(Subscription, subscription_id)
+            assert subscription.provider_reference is None
+            assert subscription.status == "active"
+    finally:
+        cleanup()
+
+
 def test_webhook_returns_400_for_an_unresolvable_event(client, fake_provider):
     fake_provider.events_to_return.append(
         ProviderWebhookEvent(

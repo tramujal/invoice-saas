@@ -231,7 +231,7 @@ def confirm_customer_import(
 
     existing_emails, existing_tax_ids = fetch_existing_keys(db, organization_id)
     process_row = make_row_processor(existing_emails, existing_tax_ids)
-    persist_row = make_persist_fn(organization_id, actor_user_id=current_user.id)
+    persist_row = make_persist_fn(db, organization_id, actor_user_id=current_user.id)
 
     try:
         result = build_confirm(db, parsed, CUSTOMER_FIELD_SPECS, manual_mapping, process_row, persist_row)

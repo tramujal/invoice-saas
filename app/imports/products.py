@@ -18,7 +18,7 @@ from app.localization import get_language, t
 from app.models import Organization, Product
 from app.product_type import ProductType
 from app.schemas import ProductResponse
-from app.services.plan_limits import LimitedResource, check_limit
+from app.services.plan_limits import LimitedResource, open_limit_tracker
 from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 
@@ -155,21 +155,22 @@ def make_row_processor(
 
 
 def make_persist_fn(
-    organization_id: str, actor_user_id: str | None = None
+    db: Session, organization_id: str, actor_user_id: str | None = None
 ) -> Callable[[Session, dict[str, str]], None]:
     """Returns a function that adds+flushes exactly one Product row.
     Deliberately does not commit -- app.imports.base.build_confirm owns
     the single outer commit. Values have already passed validate_row_fields
     by the time this runs, so parsing here never needs its own error
     handling -- a malformed value would have already been rejected as
-    invalid and never reach persist."""
+    invalid and never reach persist.
+
+    See app.imports.customers.make_persist_fn's own docstring for why
+    the products limit/usage is resolved once via open_limit_tracker()
+    here, rather than re-resolving it via check_limit() on every row."""
+    tracker = open_limit_tracker(db, organization_id, LimitedResource.products)
 
     def persist(db: Session, values: dict[str, str]) -> None:
-        # See app.imports.customers.make_persist_fn's own docstring for
-        # why calling check_limit() per row (rather than a separately
-        # pre-computed counter) correctly enforces the cap across the
-        # whole import.
-        check_limit(db, organization_id, LimitedResource.products)
+        tracker.consume()
         organization = db.get(Organization, organization_id)
         type_value = _TYPE_ALIASES.get(
             values.get("type", "").strip().lower(), ProductType.service.value
