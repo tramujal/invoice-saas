@@ -241,6 +241,61 @@ def test_webhook_skips_a_duplicate_delivery_of_the_same_event(client, db_session
     assert len(fake_provider.events_to_return) == 0
 
 
+def test_webhook_returns_409_and_writes_no_receipt_on_a_version_conflict(
+    client, db_session, fake_provider, monkeypatch
+):
+    """A SubscriptionConflictError (Phase P2.1) -- this subscription's row
+    was concurrently modified by another writer (a platform-admin action,
+    or another webhook event for the same subscription processed by a
+    different worker) between this handler's read and its own commit --
+    must map to a 409, and critically must NOT record a
+    ProviderWebhookReceipt: never in-process blindly retried (the
+    subscription's true state may have moved in a way that makes
+    reapplying this exact event wrong), so a future redelivery from
+    Stripe's own retry schedule must still be treated as unprocessed and
+    get a real second attempt. Simulated via monkeypatch rather than a
+    genuine second DB connection, since the shared, SAVEPOINT-nested
+    `client`/`db_session` fixtures bind every request in a test to one
+    single connection (see tests/conftest.py) -- a true multi-connection
+    reproduction of this race lives in
+    tests/billing/test_subscription_concurrency.py instead, at the
+    BillingService layer the conflict actually originates from."""
+    from app.billing.service import BillingService, SubscriptionConflictError
+
+    owner = make_org_with_owner(db_session, email="webhook-conflict-owner@example.com", org_name="Webhook Conflict Co")
+    plan = make_plan(db_session, code="webhook-conflict-plan", sort_order=4)
+
+    def _raise_conflict(self, event, *, actor=None):
+        raise SubscriptionConflictError("simulated concurrent write", current_version=7)
+
+    monkeypatch.setattr(BillingService, "sync_from_webhook_event", _raise_conflict)
+
+    fake_provider.events_to_return.append(
+        ProviderWebhookEvent(
+            provider_name="fake",
+            event_id="evt_conflict_1",
+            event_type=BillingProviderEventType.checkout_completed,
+            provider_reference="sub_conflict_1",
+            metadata={"organization_id": owner.organization.id, "plan_id": plan.id, "billing_period": "monthly"},
+        )
+    )
+
+    response = client.post(
+        "/billing/webhooks/stripe",
+        content=b'{"id":"evt_conflict_1"}',
+        headers={"stripe-signature": VALID_SIGNATURE},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "subscription_version_conflict"
+    receipt = (
+        db_session.query(ProviderWebhookReceipt)
+        .filter_by(provider_name="fake", event_id="evt_conflict_1")
+        .one_or_none()
+    )
+    assert receipt is None
+
+
 def test_webhook_returns_400_for_an_unresolvable_event(client, fake_provider):
     fake_provider.events_to_return.append(
         ProviderWebhookEvent(

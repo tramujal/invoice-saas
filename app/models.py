@@ -320,9 +320,24 @@ class Subscription(Base):
     forward-compatible, non-critical annotations; app.billing.service
     never depends on anything stored here to make a decision.
 
-    `version` is the same optimistic-concurrency token Plan/
-    PlatformSettings already use -- every BillingService mutation goes
-    through an atomic `UPDATE ... WHERE version = expected_version`.
+    `version` provides the same optimistic-concurrency guarantee as
+    Plan/PlatformSettings's `expected_version` pattern, but through a
+    different mechanism: those two are updated by routers issuing a
+    hand-written `UPDATE ... WHERE id = :id AND version = :expected_version`
+    directly. Subscription is instead always mutated through
+    app.billing.service.BillingService, which only ever assigns ORM
+    attributes and calls db.commit() -- so this column is wired up via
+    SQLAlchemy's own `version_id_col` mapper feature (see
+    `__mapper_args__` below) instead of a hand-written conditional
+    UPDATE. Every flush SQLAlchemy performs for this class already
+    scopes its UPDATE to `WHERE version = <the value this row was loaded
+    with>` and auto-increments it on success; if a concurrent writer
+    already advanced the row first, the flush affects zero rows and
+    SQLAlchemy raises `sqlalchemy.orm.exc.StaleDataError`, which
+    BillingService._commit translates into the domain-level
+    `app.billing.service.SubscriptionConflictError` (never a silent
+    lost update) -- see that class's own docstring for the full
+    request/webhook race this protects against.
     """
 
     __tablename__ = "subscriptions"
@@ -358,6 +373,12 @@ class Subscription(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    # See `version`'s own docstring above -- this is what turns every
+    # BillingService flush into an automatic `WHERE version = ...`
+    # conditional UPDATE, the same guarantee Plan/PlatformSettings get
+    # from a hand-written statement instead.
+    __mapper_args__ = {"version_id_col": version}
 
     organization: Mapped["Organization"] = relationship(back_populates="subscription")
     plan: Mapped["Plan"] = relationship(back_populates="subscriptions")

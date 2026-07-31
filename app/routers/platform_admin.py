@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.factory import is_ai_configured
 from app.assistant_action_status import AssistantActionStatus
-from app.billing.service import BillingService, InvalidSubscriptionStateError
+from app.billing.service import BillingService, InvalidSubscriptionStateError, SubscriptionConflictError
 from app.subscription_status import SubscriptionStatus
 from app.database import get_db
 from app.deps import get_current_user, require_platform_permission
@@ -691,11 +691,15 @@ def update_organization_plan(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "no_changes", "message": "This organization is already on that plan."},
         )
+    _check_subscription_version(subscription, body.expected_version)
 
     # A platform-admin reassignment accepts any active plan regardless of
     # sort_order direction -- see BillingService.change_plan's own
     # docstring for why this differs from upgrade_plan/downgrade_plan.
-    BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+    try:
+        BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+    except SubscriptionConflictError as exc:
+        raise _subscription_conflict_response(exc.current_version) from exc
 
     organization.plan_id = new_plan.id
     record_organization_action(
@@ -743,6 +747,35 @@ def _subscription_or_404(db: Session, subscription_id: str) -> Subscription:
     if subscription is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
     return subscription
+
+
+def _subscription_conflict_response(current_version: int | None) -> HTTPException:
+    """Same structured shape as Plan/PlatformSettings's own
+    *_version_conflict responses (see update_platform_settings's own
+    docstring) -- a caller that already knows that convention needs no
+    special-casing for subscriptions."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "subscription_version_conflict",
+            "message": "This subscription was changed by another process. Reload and try again.",
+            "current_version": current_version,
+        },
+    )
+
+
+def _check_subscription_version(subscription: Subscription, expected_version: int | None) -> None:
+    """Early, friendly staleness check for callers that supply
+    expected_version (see OrganizationPlanChangeRequest's own comment on
+    why it's optional here unlike Plan/PlatformSettings). Not the
+    mechanism that actually prevents a lost update -- that's
+    Subscription's version_id_col, enforced unconditionally by
+    BillingService's own commit regardless of whether this check ever
+    runs; this only turns an already-known-stale request into a 409
+    before doing any work, instead of letting BillingService discover
+    the same conflict a moment later."""
+    if expected_version is not None and subscription.version != expected_version:
+        raise _subscription_conflict_response(subscription.version)
 
 
 def _build_subscription_event_response(event: SubscriptionEvent) -> SubscriptionEventResponse:
@@ -882,8 +915,12 @@ def change_platform_subscription_plan(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "no_changes", "message": "This subscription is already on that plan."},
         )
+    _check_subscription_version(subscription, body.expected_version)
 
-    BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+    try:
+        BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+    except SubscriptionConflictError as exc:
+        raise _subscription_conflict_response(exc.current_version) from exc
     organization.plan_id = new_plan.id
     record_organization_action(
         db,
@@ -917,8 +954,12 @@ def cancel_platform_subscription(
     require_platform_permission(current_user, PlatformPermission.organizations_manage)
     subscription = _subscription_or_404(db, subscription_id)
     organization = _organization_or_404(db, subscription.organization_id)
+    _check_subscription_version(subscription, body.expected_version)
 
-    BillingService(db).cancel_immediately(subscription, actor=current_user)
+    try:
+        BillingService(db).cancel_immediately(subscription, actor=current_user)
+    except SubscriptionConflictError as exc:
+        raise _subscription_conflict_response(exc.current_version) from exc
     record_organization_action(
         db,
         actor=current_user,
@@ -943,6 +984,7 @@ def reactivate_platform_subscription(
     require_platform_permission(current_user, PlatformPermission.organizations_manage)
     subscription = _subscription_or_404(db, subscription_id)
     organization = _organization_or_404(db, subscription.organization_id)
+    _check_subscription_version(subscription, body.expected_version)
 
     try:
         BillingService(db).reactivate(subscription, actor=current_user)
@@ -951,6 +993,8 @@ def reactivate_platform_subscription(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "not_cancelable", "message": str(exc)},
         ) from exc
+    except SubscriptionConflictError as exc:
+        raise _subscription_conflict_response(exc.current_version) from exc
 
     record_organization_action(
         db,
@@ -976,6 +1020,7 @@ def resume_platform_subscription(
     require_platform_permission(current_user, PlatformPermission.organizations_manage)
     subscription = _subscription_or_404(db, subscription_id)
     organization = _organization_or_404(db, subscription.organization_id)
+    _check_subscription_version(subscription, body.expected_version)
 
     try:
         BillingService(db).resume(subscription, actor=current_user)
@@ -984,6 +1029,8 @@ def resume_platform_subscription(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "not_paused", "message": str(exc)},
         ) from exc
+    except SubscriptionConflictError as exc:
+        raise _subscription_conflict_response(exc.current_version) from exc
 
     record_organization_action(
         db,

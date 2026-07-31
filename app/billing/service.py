@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.billing.null_provider import NullBillingProvider
 from app.billing.provider_base import (
@@ -67,6 +68,30 @@ class InvalidSubscriptionStateError(Exception):
     state that operation doesn't apply to (e.g. resume() on a
     subscription that isn't paused) -- fails closed rather than
     silently producing an inconsistent state + a misleading event."""
+
+
+class SubscriptionConflictError(Exception):
+    """Raised by _commit when a concurrent writer already advanced this
+    Subscription's `version` between when this call loaded it and when
+    it tried to commit -- the domain-level translation of the
+    StaleDataError SQLAlchemy's version_id_col mapper feature raises
+    (see Subscription's own docstring in app.models). This is exactly
+    the "two mutations racing on the same subscription" case Phase P2.1
+    hardens: a Stripe webhook and a platform-admin action (or two
+    webhooks, or two admin actions) each loading the same row and
+    racing to commit a change. Every router that can reach a
+    BillingService mutation maps this to a stable 409 response --
+    never retried automatically here or by any caller in this module,
+    since the subscription's true current state may have moved in a
+    way that makes blindly repeating the same mutation wrong (e.g. a
+    webhook's cancel racing an admin's plan change: re-applying the
+    cancel after the plan change without re-reading first would step on
+    it silently -- the same lost-update bug this whole mechanism exists
+    to prevent, just one layer up)."""
+
+    def __init__(self, message: str, *, current_version: int | None = None):
+        super().__init__(message)
+        self.current_version = current_version
 
 
 def _period_length(billing_period: str) -> timedelta:
@@ -109,11 +134,26 @@ class BillingService:
         self.db.add(event)
         return event
 
-    def _bump_version(self, subscription: Subscription) -> None:
-        subscription.version += 1
-
     def _commit(self, subscription: Subscription) -> Subscription:
-        self.db.commit()
+        """Commits whatever ORM-attribute mutations the caller already
+        made to `subscription` -- version_id_col (see Subscription's own
+        docstring) makes this flush's UPDATE conditional on the version
+        this instance was loaded with, so a StaleDataError here means
+        another writer's commit already won the race. That's translated
+        to SubscriptionConflictError rather than left to leak a
+        SQLAlchemy-specific exception type past this class's own
+        boundary -- every caller of a BillingService method should only
+        ever need to know this module's own vocabulary."""
+        try:
+            self.db.commit()
+        except StaleDataError as exc:
+            self.db.rollback()
+            current = self.db.get(Subscription, subscription.id)
+            raise SubscriptionConflictError(
+                f"Subscription {subscription.id!r} was concurrently modified by another "
+                "process; reload and retry.",
+                current_version=current.version if current is not None else None,
+            ) from exc
         self.db.refresh(subscription)
         return subscription
 
@@ -203,7 +243,6 @@ class BillingService:
         subscription.status = SubscriptionStatus.trialing.value
         subscription.trial_start = now
         subscription.trial_end = now + timedelta(days=trial_days)
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.trial_started,
@@ -226,7 +265,6 @@ class BillingService:
         previous_status = subscription.status
         subscription.status = SubscriptionStatus.expired.value
         subscription.ended_at = datetime.now(timezone.utc)
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.trial_expired,
@@ -247,7 +285,6 @@ class BillingService:
             return subscription
         previous_status = subscription.status
         subscription.status = SubscriptionStatus.active.value
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_activated,
@@ -295,7 +332,6 @@ class BillingService:
 
         old_plan_id = subscription.plan_id
         subscription.plan_id = new_plan.id
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=resolved_event_type,
@@ -359,7 +395,6 @@ class BillingService:
         subscription.current_period_end = subscription.current_period_start + _period_length(
             new_period.value
         )
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.billing_period_changed,
@@ -378,7 +413,6 @@ class BillingService:
         previous_end = subscription.current_period_end
         subscription.current_period_start = previous_end
         subscription.current_period_end = previous_end + length
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_renewed,
@@ -402,7 +436,6 @@ class BillingService:
         subscription.status = SubscriptionStatus.canceled.value
         subscription.canceled_at = now
         subscription.ended_at = now
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_canceled,
@@ -426,7 +459,6 @@ class BillingService:
             return subscription
         subscription.cancel_at_period_end = True
         subscription.canceled_at = datetime.now(timezone.utc)
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_canceled,
@@ -450,7 +482,6 @@ class BillingService:
         if subscription.status == SubscriptionStatus.canceled.value:
             subscription.status = SubscriptionStatus.active.value
             subscription.ended_at = None
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_reactivated,
@@ -471,7 +502,6 @@ class BillingService:
                 f"Cannot resume a subscription with status {subscription.status!r}"
             )
         subscription.status = SubscriptionStatus.active.value
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_resumed,
@@ -493,7 +523,6 @@ class BillingService:
         previous_status = subscription.status
         subscription.status = SubscriptionStatus.expired.value
         subscription.ended_at = datetime.now(timezone.utc)
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.subscription_expired,
@@ -541,7 +570,6 @@ class BillingService:
         previous_provider_reference = subscription.provider_reference
         subscription.provider_name = provider_name
         subscription.provider_reference = provider_reference
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.provider_linked,
@@ -578,7 +606,6 @@ class BillingService:
         subscription.current_period_start = current_period_start
         subscription.current_period_end = current_period_end
         subscription.cancel_at_period_end = cancel_at_period_end
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.provider_subscription_updated,
@@ -605,7 +632,6 @@ class BillingService:
             return subscription
         previous_status = subscription.status
         subscription.status = SubscriptionStatus.past_due.value
-        self._bump_version(subscription)
         self._record_event(
             subscription,
             event_type=SubscriptionEventType.payment_failed,

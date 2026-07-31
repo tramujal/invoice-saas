@@ -30,7 +30,7 @@ from app.billing.provider_base import (
     InvalidWebhookSignatureError,
     UnsupportedWebhookEventError,
 )
-from app.billing.service import BillingService
+from app.billing.service import BillingService, SubscriptionConflictError
 from app.database import get_db
 from app.deps import get_billing_provider_dependency
 from app.models import ProviderWebhookReceipt
@@ -96,6 +96,28 @@ async def receive_stripe_webhook(
             exc,
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SubscriptionConflictError as exc:
+        # This event's own subscription row was concurrently modified by
+        # another writer (a platform-admin action, or another webhook
+        # event for the same subscription processed by a different
+        # worker) between this handler's read and its own commit. Never
+        # recorded as processed -- deliberately NOT retried in-process
+        # (the subscription's true current state may have moved in a way
+        # that makes blindly re-applying this same event wrong; see
+        # SubscriptionConflictError's own docstring), so Stripe's own
+        # redelivery schedule is what drives the next attempt, by which
+        # point this event will be reapplied against the row's now-
+        # current state.
+        logger.warning(
+            "receive_stripe_webhook: version conflict applying event provider=%s event_id=%s: %s",
+            event.provider_name,
+            event.event_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "subscription_version_conflict", "message": str(exc)},
+        ) from exc
 
     receipt = ProviderWebhookReceipt(provider_name=event.provider_name, event_id=event.event_id)
     db.add(receipt)

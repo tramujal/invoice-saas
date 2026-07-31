@@ -1774,6 +1774,15 @@ class OrganizationPlanChangeRequest(BaseModel):
 
     plan_id: str
     reason: str = Field(min_length=1, max_length=1000)
+    # Optional, unlike Plan/PlatformSettings's mandatory expected_version --
+    # this endpoint predates Phase P2.1's concurrency hardening and existing
+    # callers never sent one, so it stays optional to preserve backward
+    # compatibility (see docs/subscription_concurrency.md). When supplied,
+    # the router performs an early staleness check for a friendlier 409
+    # before ever calling BillingService; when omitted, the subscription's
+    # version_id_col-backed protection (see app.models.Subscription's own
+    # docstring) still makes a true lost update impossible either way.
+    expected_version: int | None = Field(default=None, gt=0)
 
     @field_validator("reason")
     @classmethod
@@ -1962,6 +1971,9 @@ class AdminChangeSubscriptionPlanRequest(BaseModel):
 
     plan_id: str
     reason: str = Field(min_length=1, max_length=1000)
+    # See OrganizationPlanChangeRequest's own comment on why this is
+    # optional rather than mandatory like Plan/PlatformSettings.
+    expected_version: int | None = Field(default=None, gt=0)
 
     @field_validator("reason")
     @classmethod
@@ -1973,6 +1985,9 @@ class AdminSubscriptionActionRequest(BaseModel):
     """Body for POST /admin/subscriptions/{id}/cancel|reactivate|resume."""
 
     reason: str = Field(min_length=1, max_length=1000)
+    # See OrganizationPlanChangeRequest's own comment on why this is
+    # optional rather than mandatory like Plan/PlatformSettings.
+    expected_version: int | None = Field(default=None, gt=0)
 
     @field_validator("reason")
     @classmethod

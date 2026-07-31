@@ -1,0 +1,78 @@
+name: CI
+
+# Merge-blocking verification for every pull request and every push to
+# main. Deliberately two independent jobs (backend/frontend) rather than
+# one combined job -- a frontend-only change shouldn't wait on backend
+# setup and vice versa, and GitHub renders each as its own required-check
+# entry. No deployment step here (see render.yaml for that) and no
+# npm audit / pip-audit -- this repo has no documented policy for either
+# yet, so neither is wired up as a blocking gate.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# A newer push to the same PR/branch cancels whatever CI run is already
+# in flight for it, so stale runs don't keep burning minutes once a
+# commit is superseded.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-test.txt
+
+      # tests/conftest.py sets DATABASE_URL/JWT_SECRET_KEY/ENVIRONMENT
+      # itself (a throwaway SQLite tempfile, a fixed test-only JWT
+      # secret, ENVIRONMENT=development) before any app module is
+      # imported -- no secrets or env vars need to be supplied here for
+      # the suite to run. See that file's own module docstring.
+      - name: Run backend test suite
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (typecheck, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run frontend test suite
+        run: npm test
+
+      # NEXT_PUBLIC_API_URL is inlined into the client bundle at build
+      # time (see frontend/Dockerfile's own comment on this same
+      # variable) but next build succeeds without it set -- no runtime
+      # secret is required to verify the build itself compiles.
+      - name: Production build
+        run: npm run build
