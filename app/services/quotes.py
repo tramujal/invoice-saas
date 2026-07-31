@@ -89,6 +89,13 @@ class QuoteNotDraftError(Exception):
     """The requested operation (hard delete) only applies to draft quotes."""
 
 
+class QuoteNotEditableError(Exception):
+    """The quote has already been accepted, rejected, or converted --
+    those are customer-facing, decided outcomes and must never be
+    retroactively rewritten. Draft and sent quotes remain editable (see
+    update_quote_record)."""
+
+
 class QuoteAlreadyRespondedError(Exception):
     """The quote is not currently "sent" -- accept/reject only applies to
     a quote the customer hasn't already decided on (or that hasn't expired
@@ -229,6 +236,25 @@ def create_quote_record(
     )
     language = organization.language
 
+    # H6: snapshot the customer's own fields at creation time, exactly
+    # like line items snapshot description/unit_price -- editing (or
+    # deleting) the Customer row afterward must never alter what this
+    # quote displays. See Quote.customer_name_snapshot's own docstring.
+    if customer is not None:
+        snapshot = {
+            "customer_name_snapshot": customer.name,
+            "customer_email_snapshot": customer.email,
+            "customer_phone_snapshot": customer.phone,
+            "customer_address_snapshot": customer.address,
+        }
+    else:
+        snapshot = {
+            "customer_name_snapshot": None,
+            "customer_email_snapshot": None,
+            "customer_phone_snapshot": None,
+            "customer_address_snapshot": None,
+        }
+
     quote = Quote(
         organization_id=organization_id,
         quote_number=quote_number,
@@ -245,6 +271,7 @@ def create_quote_record(
         notes=notes,
         public_token=generate_quote_public_token(),
         line_items=line_models,
+        **snapshot,
     )
     db.add(quote)
     db.flush()
@@ -318,7 +345,15 @@ def update_quote_record(
     """Partial update -- only fields explicitly given are changed. Totals
     are always fully recomputed from the resulting line_items/tax_rate,
     never patched incrementally, so subtotal/tax_amount/total can never
-    drift from what the stored line items actually add up to."""
+    drift from what the stored line items actually add up to.
+
+    Only legal while status is draft or sent -- accepted/rejected/
+    converted are decided, customer-facing outcomes (accepted quotes may
+    already have produced a real invoice; rejected/accepted quotes may
+    already be what the customer saw and acted on) and must never be
+    retroactively rewritten. See QuoteNotEditableError."""
+    if quote.status not in (QuoteStatus.draft.value, QuoteStatus.sent.value):
+        raise QuoteNotEditableError(quote.id)
     if customer is not _UNSET:
         quote.customer_id = customer.id if customer else None
     if expiry_date is not _UNSET:
@@ -557,6 +592,18 @@ def convert_quote_to_invoice(
         invoice_line_items,
         quote.tax_rate,
         commit=False,
+        # H6: forwards the QUOTE's own already-stored snapshot rather
+        # than letting create_invoice_record derive a fresh one from
+        # quote.customer's CURRENT live fields -- if the customer was
+        # edited between quote creation and this conversion, the
+        # resulting invoice must still reflect what the quote itself
+        # captured at issuance, not the customer's state right now.
+        customer_snapshot_override={
+            "customer_name_snapshot": quote.customer_name_snapshot,
+            "customer_email_snapshot": quote.customer_email_snapshot,
+            "customer_phone_snapshot": quote.customer_phone_snapshot,
+            "customer_address_snapshot": quote.customer_address_snapshot,
+        },
     )
 
     quote.status = QuoteStatus.converted.value

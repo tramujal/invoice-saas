@@ -37,11 +37,22 @@ PASSWORD_POLICY_MESSAGE = (
 )
 
 
+# bcrypt's own hard limit is 72 BYTES, not characters -- a password with
+# multi-byte UTF-8 characters can be well under 72 characters (already
+# enforced by RegisterRequest/ResetPasswordRequest's max_length=72) yet
+# still exceed 72 bytes once encoded, which makes bcrypt.hashpw raise a
+# raw ValueError. Checked here, as part of the one shared policy
+# function, so an over-length password is rejected with the ordinary
+# policy-violation error instead of ever reaching hash_password.
+PASSWORD_MAX_BYTES = 72
+
+
 def password_meets_policy(password: str) -> bool:
     """The single source of truth for password strength, used by both
     registration and password reset. No special character is required."""
     return (
         len(password) >= PASSWORD_MIN_LENGTH
+        and len(password.encode("utf-8")) <= PASSWORD_MAX_BYTES
         and any(c.isupper() for c in password)
         and any(c.islower() for c in password)
         and any(c.isdigit() for c in password)

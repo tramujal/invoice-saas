@@ -1,0 +1,167 @@
+# Self-hosted PRODUCTION stack: Postgres + backend (web, multi-worker) +
+# background worker + frontend + Caddy (automatic HTTPS reverse proxy).
+#
+# This is an ALTERNATIVE to the Render + Vercel + Neon path documented in
+# README.md's own Deployment section and in docs/deployment.md -- use
+# this file only if you're deploying to your own server/VM rather than
+# those managed platforms. It does not replace or alter render.yaml,
+# docker-compose.yml (local dev), or any existing deployment.
+#
+# Unlike docker-compose.yml (local dev), NOTHING here has a safe hardcoded
+# default for a secret -- every `${VAR:?...}` below MUST be set in a real
+# `.env` file (copy .env.prod.example) or `docker compose` refuses to
+# start, with that message, rather than silently booting with an
+# insecure/wrong value. See .env.prod.example for the full list and how
+# to generate each one.
+#
+# Usage:
+#   cp .env.prod.example .env
+#   # edit .env: real secrets, real domains
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Startup ordering matches docker-compose.yml exactly (db healthy ->
+# backend healthy -> worker/frontend) -- see that file's own comments and
+# app.schema_migrations for why no separate migration step is needed.
+# Caddy has no depends_on: it can start before backend/frontend are ready
+# and will simply retry the upstream connection until they are.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-invoicing}"
+      POSTGRES_USER: "${POSTGRES_USER:-invoicing}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env -- see .env.prod.example}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No host port mapping -- unlike docker-compose.yml's local-dev
+    # convenience port, Postgres is never reachable from outside the
+    # Compose network here. Use `docker compose -f docker-compose.prod.yml
+    # exec db psql ...` for ad-hoc access, or scripts/backup_postgres.sh
+    # for backups (see docs/deployment.md's own Backup Strategy section).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-invoicing} -d ${POSTGRES_DB:-invoicing}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-invoicing}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-invoicing}"
+      ENVIRONMENT: production
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env -- generate with python -c 'import secrets; print(secrets.token_urlsafe(48))'}"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}"
+      # Caddy is the one reverse-proxy hop in front of this service (see
+      # Caddyfile) -- matches render.yaml's own TRUSTED_PROXY_HOPS=1 for
+      # exactly the same reason (see app/rate_limit.py's module
+      # docstring): only the LAST X-Forwarded-For entry, appended by
+      # Caddy itself, is trusted for rate-limiting's client-IP resolution.
+      TRUSTED_PROXY_HOPS: "1"
+      CORS_ALLOWED_ORIGINS: "https://${DOMAIN_FRONTEND:?Set DOMAIN_FRONTEND in .env}"
+      FRONTEND_BASE_URL: "https://${DOMAIN_FRONTEND:?Set DOMAIN_FRONTEND in .env}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      # Optional providers -- see .env.prod.example. Unset by default;
+      # the app starts fine and only 503s lazily if a route that needs
+      # one is actually called.
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-}"
+      AI_PROVIDER: "${AI_PROVIDER:-}"
+      AI_MODEL: "${AI_MODEL:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    # Overrides the Dockerfile's single-worker CMD -- WEB_CONCURRENCY
+    # (plain uvicorn worker processes, not gunicorn) lets this scale to
+    # the host's actual CPU count. Keep at 1 on a single-core host; 2-4
+    # is reasonable on anything larger. Every worker shares nothing (no
+    # in-process state this app depends on survives across workers --
+    # app.rate_limit's own in-memory counters are the one exception,
+    # see that module's own docstring on why that's an accepted
+    # single-Render-instance simplification; running more than 1 worker
+    # here means per-worker rate-limit counters, i.e. the effective
+    # limit is roughly (configured limit) x (worker count) -- acceptable
+    # for this app's own abuse-prevention goals, but worth knowing).
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --forwarded-allow-ips= --workers ${WEB_CONCURRENCY:-2}
+    healthcheck:
+      # Overrides the Dockerfile's own HEALTHCHECK (which only checks
+      # /health, plain liveness) with the readiness probe instead --
+      # depends_on: condition: service_healthy below should mean "the
+      # database is actually reachable through this service", not just
+      # "the process is up".
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # Durable background-job worker -- see docker-compose.yml's own comment
+  # on why this is a genuinely separate, always-on process from `backend`
+  # in every deployment of this app, not just this one.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.jobs.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-invoicing}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-invoicing}"
+      ENVIRONMENT: production
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}"
+      TRUSTED_PROXY_HOPS: "1"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      WORKER_QUEUE: "${WORKER_QUEUE:-default}"
+      WORKER_POLL_INTERVAL_SECONDS: "${WORKER_POLL_INTERVAL_SECONDS:-2}"
+      WORKER_IDLE_BACKOFF_MAX_SECONDS: "${WORKER_IDLE_BACKOFF_MAX_SECONDS:-30}"
+      WORKER_LEASE_DURATION_SECONDS: "${WORKER_LEASE_DURATION_SECONDS:-300}"
+      WORKER_BATCH_SIZE: "${WORKER_BATCH_SIZE:-5}"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked in at build time -- must be the PUBLIC URL the browser
+        # itself will call (through Caddy), never the Docker-internal
+        # "backend" hostname. Rebuild the frontend image if this changes.
+        NEXT_PUBLIC_API_URL: "https://${DOMAIN_API:?Set DOMAIN_API in .env}"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN_API: "${DOMAIN_API:?Set DOMAIN_API in .env -- must already point via DNS A/AAAA record at this host}"
+      DOMAIN_FRONTEND: "${DOMAIN_FRONTEND:?Set DOMAIN_FRONTEND in .env -- must already point via DNS A/AAAA record at this host}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

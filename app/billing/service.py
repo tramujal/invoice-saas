@@ -304,6 +304,7 @@ class BillingService:
         actor: User | None,
         event_type: SubscriptionEventType | None = None,
         require_sort_order: str | None = None,
+        sync_to_provider: bool = True,
     ) -> Subscription:
         current_plan = self.db.get(Plan, subscription.plan_id)
         if current_plan is None:
@@ -330,6 +331,22 @@ class BillingService:
             else:
                 resolved_event_type = SubscriptionEventType.manual_adjustment
 
+        # Phase SEC2 (C3): pushed to the provider first, before any local
+        # mutation -- see cancel_immediately's identical docstring.
+        # sync_from_webhook_event passes sync_to_provider=False for the
+        # checkout_completed event: the provider-side plan/price was
+        # already set by the tenant's own hosted checkout, so pushing a
+        # plan change back immediately after attaching would be
+        # redundant (and could target the wrong subscription item, since
+        # this call runs before any provider_reference-scoped item data
+        # has ever been read locally).
+        if sync_to_provider and subscription.provider_reference:
+            self.provider.change_subscription_plan(
+                provider_reference=subscription.provider_reference,
+                plan=new_plan,
+                billing_period=BillingPeriod(subscription.billing_period),
+            )
+
         old_plan_id = subscription.plan_id
         subscription.plan_id = new_plan.id
         self._record_event(
@@ -342,7 +359,12 @@ class BillingService:
         return self._commit(subscription)
 
     def upgrade_plan(
-        self, subscription: Subscription, new_plan: Plan, *, actor: User | None = None
+        self,
+        subscription: Subscription,
+        new_plan: Plan,
+        *,
+        actor: User | None = None,
+        sync_to_provider: bool = True,
     ) -> Subscription:
         """Moves to a plan with a HIGHER sort_order than the current one
         -- classified by that comparison alone, never by plan code/name
@@ -353,10 +375,16 @@ class BillingService:
             actor=actor,
             event_type=SubscriptionEventType.plan_upgraded,
             require_sort_order="higher",
+            sync_to_provider=sync_to_provider,
         )
 
     def downgrade_plan(
-        self, subscription: Subscription, new_plan: Plan, *, actor: User | None = None
+        self,
+        subscription: Subscription,
+        new_plan: Plan,
+        *,
+        actor: User | None = None,
+        sync_to_provider: bool = True,
     ) -> Subscription:
         """Moves to a plan with a LOWER sort_order than the current one."""
         return self._change_plan(
@@ -365,10 +393,16 @@ class BillingService:
             actor=actor,
             event_type=SubscriptionEventType.plan_downgraded,
             require_sort_order="lower",
+            sync_to_provider=sync_to_provider,
         )
 
     def change_plan(
-        self, subscription: Subscription, new_plan: Plan, *, actor: User | None = None
+        self,
+        subscription: Subscription,
+        new_plan: Plan,
+        *,
+        actor: User | None = None,
+        sync_to_provider: bool = True,
     ) -> Subscription:
         """Reassigns a subscription to any active plan regardless of
         sort_order direction -- the platform-admin "assign this plan"
@@ -379,7 +413,7 @@ class BillingService:
         those two methods, except a lateral move (equal sort_order,
         e.g. two custom plans an admin defined at the same tier) is
         recorded as manual_adjustment instead of raising."""
-        return self._change_plan(subscription, new_plan, actor=actor)
+        return self._change_plan(subscription, new_plan, actor=actor, sync_to_provider=sync_to_provider)
 
     def change_billing_period(
         self, subscription: Subscription, new_period: BillingPeriod, *, actor: User | None = None
@@ -425,12 +459,27 @@ class BillingService:
     # --- cancellation & resumption --------------------------------------
 
     def cancel_immediately(
-        self, subscription: Subscription, *, actor: User | None = None
+        self, subscription: Subscription, *, actor: User | None = None, sync_to_provider: bool = True
     ) -> Subscription:
         """Ends the subscription right now -- status=canceled,
         ended_at=now. Distinct from cancel_at_period_end below, which
         keeps the subscription active/trialing through its current
-        period and only stops it from renewing."""
+        period and only stops it from renewing.
+
+        Phase SEC2 (C3): when `sync_to_provider` (the default) and the
+        subscription is provider-attached, pushes the cancellation to
+        the provider FIRST, before any local mutation -- a failed
+        provider call (raises BillingProviderError) leaves local state
+        completely untouched, so local and provider state never diverge
+        on failure. `sync_from_webhook_event` passes sync_to_provider=
+        False for the subscription_canceled event: that event IS the
+        provider telling us this already happened on its side, so
+        pushing a cancellation back to the provider would be redundant
+        (and, since it's already canceled there, likely to error)."""
+        if sync_to_provider and subscription.provider_reference:
+            self.provider.cancel_subscription(
+                provider_reference=subscription.provider_reference, at_period_end=False
+            )
         now = datetime.now(timezone.utc)
         previous_status = subscription.status
         subscription.status = SubscriptionStatus.canceled.value
@@ -447,16 +496,26 @@ class BillingService:
         return self._commit(subscription)
 
     def cancel_at_period_end(
-        self, subscription: Subscription, *, actor: User | None = None
+        self, subscription: Subscription, *, actor: User | None = None, sync_to_provider: bool = True
     ) -> Subscription:
         """Flags the subscription to stop renewing once current_period_end
         is reached -- status/ended_at are untouched here (the
         organization keeps full access through the paid-for period); a
         future scheduled job (out of scope this phase) would be what
         actually calls cancel_immediately or expire_subscription once
-        that period arrives."""
+        that period arrives.
+
+        Phase SEC2 (C3): see cancel_immediately's identical docstring on
+        `sync_to_provider` -- pushed to the provider first, before any
+        local mutation, only when not already flagged (the existing
+        no-op guard below also protects against a redundant provider
+        call on an already-scheduled cancellation)."""
         if subscription.cancel_at_period_end:
             return subscription
+        if sync_to_provider and subscription.provider_reference:
+            self.provider.cancel_subscription(
+                provider_reference=subscription.provider_reference, at_period_end=True
+            )
         subscription.cancel_at_period_end = True
         subscription.canceled_at = datetime.now(timezone.utc)
         self._record_event(
@@ -468,13 +527,23 @@ class BillingService:
         )
         return self._commit(subscription)
 
-    def reactivate(self, subscription: Subscription, *, actor: User | None = None) -> Subscription:
+    def reactivate(
+        self, subscription: Subscription, *, actor: User | None = None, sync_to_provider: bool = True
+    ) -> Subscription:
         """Undoes a cancellation -- clears cancel_at_period_end, and if
         the subscription had already reached `canceled`, brings it back
         to `active`. Raises if the subscription was never canceled at
-        all, so a caller can't silently no-op on the wrong row."""
+        all, so a caller can't silently no-op on the wrong row.
+
+        Phase SEC2 (C3): see cancel_immediately's identical docstring on
+        `sync_to_provider` -- pushed to the provider first, before any
+        local mutation, and only after the precondition above already
+        confirmed there's actually something to reactivate."""
         if not subscription.cancel_at_period_end and subscription.status != SubscriptionStatus.canceled.value:
             raise InvalidSubscriptionStateError("Subscription is not canceled or pending cancellation")
+
+        if sync_to_provider and subscription.provider_reference:
+            self.provider.reactivate_subscription(provider_reference=subscription.provider_reference)
 
         previous_status = subscription.status
         subscription.cancel_at_period_end = False
@@ -793,7 +862,11 @@ class BillingService:
                 provider_reference=event.provider_reference,
                 actor=actor,
             )
-            subscription = self.change_plan(subscription, plan, actor=actor)
+            # sync_to_provider=False: the provider-side plan/price was
+            # already set by the tenant's own hosted checkout -- this
+            # call only reflects that choice locally, never pushes
+            # anything back. See _change_plan's own docstring.
+            subscription = self.change_plan(subscription, plan, actor=actor, sync_to_provider=False)
             if subscription.billing_period != billing_period_value:
                 subscription = self.change_billing_period(
                     subscription, BillingPeriod(billing_period_value), actor=actor
@@ -821,7 +894,11 @@ class BillingService:
                 actor=actor,
             )
         if event.event_type == BillingProviderEventType.subscription_canceled:
-            return self.cancel_immediately(subscription, actor=actor)
+            # sync_to_provider=False: this event IS the provider telling
+            # us the subscription was already canceled on its side --
+            # pushing a cancellation back would be redundant. See
+            # cancel_immediately's own docstring.
+            return self.cancel_immediately(subscription, actor=actor, sync_to_provider=False)
         if event.event_type == BillingProviderEventType.payment_failed:
             return self.mark_past_due(subscription, actor=actor)
 

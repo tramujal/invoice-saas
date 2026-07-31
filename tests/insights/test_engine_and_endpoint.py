@@ -2,7 +2,40 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.insights.engine import build_insights
-from tests.factories import make_customer, make_invoice, make_org_with_owner
+from tests.factories import (
+    make_customer,
+    make_invoice,
+    make_org_with_owner,
+    make_org_with_owner_on_plan,
+)
+
+
+def test_ai_available_is_false_when_plan_does_not_include_ai(client, db_session, monkeypatch):
+    # H3: is_ai_configured() alone used to decide ai_available, ignoring
+    # the org's own plan entitlement -- a plan with ai_enabled=False must
+    # never advertise (or actually invoke) AI narration, matching what
+    # app.routers.assistant already enforces via require_ai/can_use_ai.
+    monkeypatch.setattr("app.routers.insights.is_ai_configured", lambda: True)
+    owner = make_org_with_owner_on_plan(db_session, email="no-ai-plan@example.com", ai_enabled=False)
+
+    response = client.get(
+        f"/organizations/{owner.organization.id}/dashboard/insights", headers=owner.auth_headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ai_available"] is False
+    assert body["source"] == "deterministic"
+
+
+def test_ai_available_is_true_when_plan_includes_ai(client, db_session, monkeypatch):
+    monkeypatch.setattr("app.routers.insights.is_ai_configured", lambda: True)
+    owner = make_org_with_owner_on_plan(db_session, email="ai-plan@example.com", ai_enabled=True)
+
+    response = client.get(
+        f"/organizations/{owner.organization.id}/dashboard/insights", headers=owner.auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["ai_available"] is True
 
 
 def test_build_insights_on_empty_organization_does_not_crash(db_session):

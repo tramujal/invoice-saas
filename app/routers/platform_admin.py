@@ -30,10 +30,11 @@ from sqlalchemy.orm import Session
 
 from app.ai.factory import is_ai_configured
 from app.assistant_action_status import AssistantActionStatus
+from app.billing.provider_base import BillingProvider, BillingProviderError
 from app.billing.service import BillingService, InvalidSubscriptionStateError, SubscriptionConflictError
 from app.subscription_status import SubscriptionStatus
 from app.database import get_db
-from app.deps import get_current_user, require_platform_permission
+from app.deps import get_billing_provider_dependency, get_current_user, require_platform_permission
 from app.invoice_numbering import format_invoice_number
 from app.membership_role import MembershipRole
 from app.membership_status import MembershipStatus
@@ -660,6 +661,7 @@ def update_organization_plan(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    provider: BillingProvider = Depends(get_billing_provider_dependency),
 ) -> PlatformOrganizationDetail:
     """Assigns a different plan to an organization. Gated by the same
     platform.organizations.manage permission as suspend/reactivate --
@@ -696,10 +698,17 @@ def update_organization_plan(
     # A platform-admin reassignment accepts any active plan regardless of
     # sort_order direction -- see BillingService.change_plan's own
     # docstring for why this differs from upgrade_plan/downgrade_plan.
+    # C3: constructed with the real configured provider (not the
+    # NullBillingProvider default) so a provider-attached subscription's
+    # plan/price actually moves on Stripe's side too, not just locally.
     try:
-        BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+        BillingService(db, provider=provider).change_plan(subscription, new_plan, actor=current_user)
     except SubscriptionConflictError as exc:
         raise _subscription_conflict_response(exc.current_version) from exc
+    except BillingProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not update plan with provider: {exc}"
+        ) from exc
 
     organization.plan_id = new_plan.id
     record_organization_action(
@@ -893,6 +902,7 @@ def change_platform_subscription_plan(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    provider: BillingProvider = Depends(get_billing_provider_dependency),
 ) -> PlatformSubscriptionDetail:
     """Thin wrapper over BillingService.change_plan -- the same
     direction-agnostic admin reassignment update_organization_plan uses
@@ -918,9 +928,13 @@ def change_platform_subscription_plan(
     _check_subscription_version(subscription, body.expected_version)
 
     try:
-        BillingService(db).change_plan(subscription, new_plan, actor=current_user)
+        BillingService(db, provider=provider).change_plan(subscription, new_plan, actor=current_user)
     except SubscriptionConflictError as exc:
         raise _subscription_conflict_response(exc.current_version) from exc
+    except BillingProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not update plan with provider: {exc}"
+        ) from exc
     organization.plan_id = new_plan.id
     record_organization_action(
         db,
@@ -946,6 +960,7 @@ def cancel_platform_subscription(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    provider: BillingProvider = Depends(get_billing_provider_dependency),
 ) -> PlatformSubscriptionDetail:
     """Cancels immediately (BillingService.cancel_immediately) -- there is
     no scheduled job in this phase to later act on a cancel_at_period_end
@@ -957,9 +972,13 @@ def cancel_platform_subscription(
     _check_subscription_version(subscription, body.expected_version)
 
     try:
-        BillingService(db).cancel_immediately(subscription, actor=current_user)
+        BillingService(db, provider=provider).cancel_immediately(subscription, actor=current_user)
     except SubscriptionConflictError as exc:
         raise _subscription_conflict_response(exc.current_version) from exc
+    except BillingProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not cancel with provider: {exc}"
+        ) from exc
     record_organization_action(
         db,
         actor=current_user,
@@ -980,6 +999,7 @@ def reactivate_platform_subscription(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    provider: BillingProvider = Depends(get_billing_provider_dependency),
 ) -> PlatformSubscriptionDetail:
     require_platform_permission(current_user, PlatformPermission.organizations_manage)
     subscription = _subscription_or_404(db, subscription_id)
@@ -987,11 +1007,15 @@ def reactivate_platform_subscription(
     _check_subscription_version(subscription, body.expected_version)
 
     try:
-        BillingService(db).reactivate(subscription, actor=current_user)
+        BillingService(db, provider=provider).reactivate(subscription, actor=current_user)
     except InvalidSubscriptionStateError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "not_cancelable", "message": str(exc)},
+        ) from exc
+    except BillingProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not reactivate with provider: {exc}"
         ) from exc
     except SubscriptionConflictError as exc:
         raise _subscription_conflict_response(exc.current_version) from exc

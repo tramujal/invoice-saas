@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.ai.factory import is_ai_configured
+from app.billing.capabilities import can_use_ai, get_organization_capabilities
 from app.database import get_db
 from app.deps import get_current_user, require_permission
 from app.insights.cache import CacheEntry, fingerprint, get_cached, set_cached
@@ -121,7 +122,17 @@ def get_dashboard_insights(
 
     source = "deterministic"
     final_ordered = candidates
-    ai_available = INSIGHTS_AI_ENABLED and is_ai_configured()
+    # H3: must honor the same plan-level AI entitlement app.routers.assistant
+    # enforces (via app.billing.enforcement.require_ai) -- reusing can_use_ai
+    # directly rather than that raising wrapper, since this endpoint degrades
+    # softly to deterministic-only insights instead of rejecting the request
+    # (matching this module's own forecasting/analytics precedent), the same
+    # entitlement logic either way, never duplicated.
+    ai_available = (
+        INSIGHTS_AI_ENABLED
+        and is_ai_configured()
+        and can_use_ai(get_organization_capabilities(db, organization_id))
+    )
 
     if ai_available:
         if refresh:

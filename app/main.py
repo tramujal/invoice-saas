@@ -3,12 +3,16 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
 
 import app.jobs.bootstrap  # noqa: F401 -- populates the background-job registry
+from app.database import get_db
 from app.models import init_db
 from app.request_metrics import record_request
+from app.security_headers import apply_security_headers
 from app.routers import (
     analytics,
     api_key_management,
@@ -48,12 +52,21 @@ from app.routers.api_v1 import quotes as api_v1_quotes
 # Resend API call) wasn't showing up in Render's log stream — configuring
 # it here makes every `logging.getLogger(__name__)` call in the codebase
 # actually emit to stdout/stderr, which Render captures.
+#
+# LOG_LEVEL (env, default "INFO") — lets an operator turn verbosity up
+# (DEBUG, while chasing a production incident) or down (WARNING, to cut
+# log volume/cost) without a code change or redeploy of a different
+# image. An invalid value falls back to INFO rather than raising, since a
+# typo here should never prevent the app from starting.
+_LOG_LEVEL_NAME = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+_LOG_LEVEL = logging.getLevelNamesMapping().get(_LOG_LEVEL_NAME, logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
 _DEFAULT_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_PRODUCTION_ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").strip().lower() == "production"
 
 
 def _cors_origins() -> list[str]:
@@ -62,10 +75,28 @@ def _cors_origins() -> list[str]:
     Falls back to the local frontend dev origins when unset, so local
     development needs no configuration. In production, set this to the
     deployed frontend URL(s) (e.g. the Vercel domain).
-    """
+
+    Deliberately a warning, not a hard failure like app.security's own
+    JWT_SECRET_KEY check, when ENVIRONMENT=production and this is unset:
+    the practical effect of leaving it unset in production is that the
+    real frontend origin silently can't call the API (every request
+    fails CORS in the browser, immediately visible in any manual check
+    or smoke test) — annoying but self-evident and non-destructive,
+    unlike an insecure JWT secret, which fails silently and open. See
+    docs/deployment.md's own environment-variable checklist."""
     raw = os.environ.get("CORS_ALLOWED_ORIGINS", "")
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return origins or _DEFAULT_CORS_ORIGINS
+    if not origins:
+        if _PRODUCTION_ENVIRONMENT:
+            logging.getLogger(__name__).warning(
+                "CORS_ALLOWED_ORIGINS is not set while ENVIRONMENT=production -- "
+                "falling back to local dev origins (%s), which will reject every "
+                "real browser request from the deployed frontend. Set "
+                "CORS_ALLOWED_ORIGINS to the deployed frontend's URL(s).",
+                ", ".join(_DEFAULT_CORS_ORIGINS),
+            )
+        return _DEFAULT_CORS_ORIGINS
+    return origins
 
 
 @asynccontextmanager
@@ -138,8 +169,42 @@ async def _record_request_metrics(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def _add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    apply_security_headers(response)
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
+    """Liveness only -- process is up and serving requests. Never touches
+    the database, so it can't report unhealthy just because the DB is
+    briefly unreachable (that's what /health/ready is for) -- a
+    container orchestrator restarting this process wouldn't fix a DB
+    outage anyway."""
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Readiness -- process is up AND its database connection actually
+    works. Distinguishes "the app is running" from "the app can serve a
+    real request", the same liveness/readiness split Kubernetes (and any
+    other orchestrator with the same two probe types) expects. A cheap,
+    side-effect-free SELECT 1, not a real table query -- this only needs
+    to prove the connection/credentials/network path works, not that any
+    particular table exists yet.
+
+    503, not 200-with-an-error-body, on failure -- an orchestrator's
+    readiness probe checks the HTTP status code, not the response body;
+    returning 200 here regardless of outcome would make this endpoint
+    useless as an actual readiness gate."""
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:
+        logging.getLogger(__name__).error("health_ready: database check failed: %s", exc)
+        raise HTTPException(status_code=503, detail={"status": "unavailable", "reason": "database"}) from exc
     return {"status": "ok"}
 
 

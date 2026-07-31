@@ -131,15 +131,40 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     elements.append(Spacer(1, 20))
 
     elements.append(Paragraph(t(language, "bill_to_label").upper(), heading_style))
-    customer = invoice.customer
-    if customer is not None:
-        lines = [customer.name, customer.email]
-        if customer.phone:
-            lines.append(customer.phone)
-        if customer.address:
-            lines.append(customer.address)
+    # H6: reads the permanent snapshot taken at invoice-creation time
+    # (falling back to the live Customer row only for pre-migration
+    # invoices whose snapshot is still null) -- never invoice.customer
+    # directly, so editing the customer afterward can never change a
+    # previously issued PDF. Keyed on customer_id (not the live
+    # relationship) so "no customer at all" is judged correctly even
+    # when a snapshot exists but the live customer was since deleted.
+    if invoice.customer_id is not None:
+        customer = invoice.customer
+        lines = [
+            invoice.customer_name_snapshot
+            if invoice.customer_name_snapshot is not None
+            else (customer.name if customer is not None else None),
+            invoice.customer_email_snapshot
+            if invoice.customer_email_snapshot is not None
+            else (customer.email if customer is not None else None),
+        ]
+        phone = (
+            invoice.customer_phone_snapshot
+            if invoice.customer_phone_snapshot is not None
+            else (customer.phone if customer is not None else None)
+        )
+        address = (
+            invoice.customer_address_snapshot
+            if invoice.customer_address_snapshot is not None
+            else (customer.address if customer is not None else None)
+        )
+        if phone:
+            lines.append(phone)
+        if address:
+            lines.append(address)
         for line in lines:
-            elements.append(Paragraph(line, normal_style))
+            if line:
+                elements.append(Paragraph(line, normal_style))
     else:
         elements.append(Paragraph(t(language, "no_customer"), normal_style))
     elements.append(Spacer(1, 20))

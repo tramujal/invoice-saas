@@ -23,7 +23,12 @@ not "what can this role do in general":
    owner-vs-owner special case, since only an owner ever reaches that
    branch), and demoting or removing an owner additionally requires at
    least one *other* active owner to remain afterward
-   (CannotRemoveLastOwnerError otherwise).
+   (CannotRemoveLastOwnerError otherwise). This headcount check is
+   guarded by app.services.plan_limits._lock_organization (the same row
+   lock quota enforcement already uses) so two concurrent demote/remove
+   requests against the last two owners can't each read "one other owner
+   remains" before either commits -- see change_member_role_record/
+   remove_member_record.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -41,7 +46,7 @@ from app.membership_status import MembershipStatus
 from app.models import Organization, OrganizationInvitation, OrganizationMember, User
 from app.permissions import Permission, check_permission, roles_with_permission
 from app.role_hierarchy import can_assign_role, can_manage_member, parse_membership_role
-from app.services.plan_limits import LimitedResource, check_limit
+from app.services.plan_limits import LimitedResource, _lock_organization, check_limit
 
 
 class MembershipNotFoundError(Exception):
@@ -232,6 +237,14 @@ def change_member_role_record(
             raise InsufficientRoleAuthorityError(actor.id)
 
     if _grants_ownership(target_membership.role):
+        # C1: serializes concurrent demote/remove requests against the
+        # same organization's owner headcount -- the same row lock
+        # app.services.plan_limits.check_limit already uses for quota
+        # enforcement, reused as-is rather than duplicating a second
+        # locking mechanism. Without this, two concurrent demotions of
+        # the last two owners could each read "1 other owner remains"
+        # before either commits, leaving zero owners.
+        _lock_organization(db, organization_id)
         if (
             _count_members_with_permission(
                 db, organization_id, Permission.organization_manage, exclude_membership_id=target_membership.id
@@ -304,6 +317,9 @@ def remove_member_record(
     if target_membership.status == MembershipStatus.removed.value:
         raise MemberAlreadyRemovedError(target_membership.id)
     if _grants_ownership(target_membership.role):
+        # C1: see change_member_role_record's identical comment above --
+        # same reused lock, same race it closes.
+        _lock_organization(db, organization_id)
         if (
             _count_members_with_permission(
                 db, organization_id, Permission.organization_manage, exclude_membership_id=target_membership.id

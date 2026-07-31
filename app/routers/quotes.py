@@ -42,6 +42,7 @@ from app.services.quotes import (
     QuoteAlreadyRespondedError,
     QuoteNotAcceptedError,
     QuoteNotDraftError,
+    QuoteNotEditableError,
     QuoteNotFoundError,
     archive_quote_record,
     convert_quote_to_invoice,
@@ -304,6 +305,14 @@ def update_quote(
             detail={
                 "code": "expiry_date_before_issue_date",
                 "message": "Expiry date cannot be before today.",
+            },
+        )
+    except QuoteNotEditableError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "quote_not_editable",
+                "message": "Accepted, rejected, and converted quotes can no longer be edited.",
             },
         )
     except ProductNotFoundInOrgError:

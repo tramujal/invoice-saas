@@ -122,15 +122,35 @@ def render_quote_pdf(quote: Quote) -> bytes:
     elements.append(Spacer(1, 20))
 
     elements.append(Paragraph(t(language, "bill_to_label").upper(), heading_style))
-    customer = quote.customer
-    if customer is not None:
-        lines = [customer.name, customer.email]
-        if customer.phone:
-            lines.append(customer.phone)
-        if customer.address:
-            lines.append(customer.address)
+    # H6: see app.invoice_pdf's identical comment -- reads the permanent
+    # snapshot taken at quote-creation time, never the live Customer row.
+    if quote.customer_id is not None:
+        customer = quote.customer
+        lines = [
+            quote.customer_name_snapshot
+            if quote.customer_name_snapshot is not None
+            else (customer.name if customer is not None else None),
+            quote.customer_email_snapshot
+            if quote.customer_email_snapshot is not None
+            else (customer.email if customer is not None else None),
+        ]
+        phone = (
+            quote.customer_phone_snapshot
+            if quote.customer_phone_snapshot is not None
+            else (customer.phone if customer is not None else None)
+        )
+        address = (
+            quote.customer_address_snapshot
+            if quote.customer_address_snapshot is not None
+            else (customer.address if customer is not None else None)
+        )
+        if phone:
+            lines.append(phone)
+        if address:
+            lines.append(address)
         for line in lines:
-            elements.append(Paragraph(line, normal_style))
+            if line:
+                elements.append(Paragraph(line, normal_style))
     else:
         elements.append(Paragraph(t(language, "no_customer"), normal_style))
     elements.append(Spacer(1, 20))

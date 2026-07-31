@@ -48,6 +48,39 @@ def test_register_rejects_weak_password(client):
     assert response.status_code == 422
 
 
+def test_register_rejects_password_exceeding_utf8_byte_limit(client):
+    # 72 CHARACTERS (passes RegisterRequest's own max_length=72) but each
+    # "é" is 2 UTF-8 bytes, so this is 144 bytes -- well past bcrypt's
+    # 72-byte hard limit. Before the fix, this reached hash_password() and
+    # bcrypt.hashpw raised an uncaught ValueError -> 500; now it's rejected
+    # by the ordinary password-policy check, same as any other weak
+    # password.
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "multibyte@example.com",
+            "password": "Aa1" + "é" * 69,
+            "organization_name": "Acme Inc",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_register_accepts_multibyte_password_within_byte_limit(client):
+    # Well under 72 bytes even with multi-byte characters -- must still
+    # succeed; the byte-length check must never reject a genuinely valid
+    # password.
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "multibyte-ok@example.com",
+            "password": "Aa1" + "é" * 10,
+            "organization_name": "Acme Inc",
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 def test_register_never_stores_plaintext_password(client, db_session):
     client.post(
         "/auth/register",

@@ -78,12 +78,16 @@ def make_subscription(
     current_period_start=None,
     current_period_end=None,
     cancel_at_period_end: bool = False,
+    provider_name: str | None = None,
+    provider_reference: str | None = None,
 ) -> Subscription:
     """Creates (replacing any existing one -- an organization has at most
     one) a Subscription with the given fields, for tests that need a
     specific status/plan/trial/period state rather than the plain active-
     on-the-organization's-current-plan default make_organization() sets
-    up automatically."""
+    up automatically. provider_name/provider_reference default to None
+    (not provider-attached) -- pass both for tests exercising Phase SEC2
+    (C3)'s provider-sync behavior."""
     existing = db.scalar(
         select(Subscription).where(Subscription.organization_id == organization.id)
     )
@@ -102,6 +106,8 @@ def make_subscription(
         current_period_start=current_period_start or now,
         current_period_end=current_period_end or (now + timedelta(days=30)),
         cancel_at_period_end=cancel_at_period_end,
+        provider_name=provider_name,
+        provider_reference=provider_reference,
     )
     db.add(subscription)
     db.commit()

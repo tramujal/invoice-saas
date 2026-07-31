@@ -92,8 +92,14 @@ def update_product_record(
     (typically `ProductUpdateRequest.model_dump(exclude_unset=True,
     mode="json")` from the router) — enum/decimal values are expected to
     already be plain strings/numbers, matching how
-    app.routers.organizations's update endpoint applies its own PATCH."""
+    app.routers.organizations's update endpoint applies its own PATCH.
+    A field explicitly submitted as null is skipped rather than applied
+    -- every column here is NOT NULL, so setting one to None would only
+    ever surface as an uncaught IntegrityError at commit time; matches
+    update_customer_record's identical guard."""
     for key, value in changes.items():
+        if value is None:
+            continue
         setattr(product, key, value)
     emit_event(
         db,

@@ -68,6 +68,7 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_notification_preferences_table(engine)
     _add_audit_entries_table(engine)
     _add_high_priority_query_indexes(engine)
+    _add_document_customer_snapshots(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -1969,3 +1970,86 @@ def _add_high_priority_query_indexes(engine: Engine) -> None:
                     "ON assistant_actions (organization_id, created_at)"
                 )
             )
+
+
+def _add_document_customer_snapshots(engine: Engine) -> None:
+    """Phase SEC2 (H6) -- adds the 4 customer-field snapshot columns to
+    invoices and quotes (see Invoice/Quote's own docstrings in
+    app/models.py), then best-effort backfills existing rows.
+
+    IMPORTANT LIMITATION, documented here and in docs/deployment.md:
+    this app has never recorded a Customer row's field history, so the
+    backfill below can only copy each existing document's linked
+    customer's CURRENT name/email/phone/address into the new snapshot
+    columns -- it has no way to know what those fields actually were at
+    the moment the invoice/quote was originally issued. For any
+    pre-existing document whose customer was edited at any point between
+    original issuance and this migration running, the backfilled
+    snapshot is NOT guaranteed to match what was actually billed;
+    reconstructing that is genuinely impossible with the data this app
+    has ever stored. Only documents created AFTER this migration (via
+    app.services.invoices.create_invoice_record /
+    app.services.quotes.create_quote_record, both of which populate
+    these columns at creation time) get a guaranteed-accurate snapshot.
+
+    Runs on every startup (this file's own stated contract); the
+    backfill re-queries `WHERE customer_name_snapshot IS NULL` each time,
+    so it only ever touches rows that still need it -- a no-op update
+    pass once every document has a snapshot.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    _new_columns = {
+        "customer_name_snapshot": "VARCHAR(255) NULL",
+        "customer_email_snapshot": "VARCHAR(255) NULL",
+        "customer_phone_snapshot": "VARCHAR(64) NULL",
+        "customer_address_snapshot": "VARCHAR(512) NULL",
+    }
+
+    for table in ("invoices", "quotes"):
+        if table not in existing_tables:
+            continue
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        missing = {name: ddl for name, ddl in _new_columns.items() if name not in columns}
+        if missing:
+            with engine.begin() as conn:
+                for name, ddl in missing.items():
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+    for table in ("invoices", "quotes"):
+        if table not in existing_tables:
+            continue
+        # Re-inspect: the ALTER TABLE above (if it ran) isn't reflected
+        # in the `inspector` snapshot taken before this function started.
+        columns = {c["name"] for c in inspect(engine).get_columns(table)}
+        if "customer_name_snapshot" not in columns or "customer_id" not in columns:
+            continue
+
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    f"SELECT d.id AS doc_id, c.name AS name, c.email AS email, "
+                    f"c.phone AS phone, c.address AS address "
+                    f"FROM {table} d JOIN customers c ON d.customer_id = c.id "
+                    f"WHERE d.customer_id IS NOT NULL AND d.customer_name_snapshot IS NULL"
+                )
+            ).mappings().all()
+            for row in rows:
+                conn.execute(
+                    text(
+                        f"UPDATE {table} SET "
+                        f"customer_name_snapshot = :name, "
+                        f"customer_email_snapshot = :email, "
+                        f"customer_phone_snapshot = :phone, "
+                        f"customer_address_snapshot = :address "
+                        f"WHERE id = :doc_id"
+                    ),
+                    {
+                        "name": row["name"],
+                        "email": row["email"],
+                        "phone": row["phone"],
+                        "address": row["address"],
+                        "doc_id": row["doc_id"],
+                    },
+                )

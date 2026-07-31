@@ -1,0 +1,37 @@
+# Caddyfile for the self-hosted production stack (see docker-compose.prod.yml).
+#
+# Caddy terminates TLS for both domains below and reverse-proxies to the
+# `backend`/`frontend` containers over the internal Compose network —
+# neither of those containers is ever exposed to the host directly in
+# production (see docker-compose.prod.yml's own comments). Certificates
+# are obtained and renewed automatically via Let's Encrypt (ACME
+# HTTP-01/TLS-ALPN-01) the first time each domain is requested — this
+# requires both DOMAIN_API and DOMAIN_FRONTEND to already resolve (real
+# DNS A/AAAA records) to this host's public IP, and ports 80/443 to be
+# reachable from the internet, before starting this stack.
+#
+# DOMAIN_API / DOMAIN_FRONTEND come from the .env file docker-compose.prod.yml
+# reads (see .env.prod.example) — Caddy substitutes ${VAR}/{$VAR}-style
+# placeholders in its own config file natively, no template step needed.
+
+{$DOMAIN_API} {
+	reverse_proxy backend:8000
+
+	# Matches app.security_headers' own backend headers (see that
+	# module's docstring) -- FastAPI's own middleware already sets these
+	# on every response it produces, so this is redundant-but-harmless
+	# defense in depth for anything Caddy itself might answer directly
+	# (e.g. its own error pages) before a request ever reaches the app.
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	encode gzip
+}
+
+{$DOMAIN_FRONTEND} {
+	reverse_proxy frontend:3000
+	encode gzip
+}

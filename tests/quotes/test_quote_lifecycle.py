@@ -163,6 +163,146 @@ def test_convert_is_one_time_only(client, db_session):
     assert second.json()["detail"]["code"] == "quote_already_converted"
 
 
+def test_update_rejected_for_accepted_quote(client, db_session):
+    owner = make_org_with_owner(db_session, email="owner-immutable-accepted@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user, notes="Original notes")
+    _mark_sent(db_session, quote)
+    quote.status = QuoteStatus.accepted.value
+    db_session.commit()
+
+    response = client.patch(
+        f"/organizations/{owner.organization.id}/quotes/{quote.id}",
+        json={"notes": "Trying to sneak an edit in"},
+        headers=owner.auth_headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "quote_not_editable"
+
+    db_session.refresh(quote)
+    assert quote.notes == "Original notes"
+
+
+def test_update_rejected_for_rejected_quote(client, db_session):
+    owner = make_org_with_owner(db_session, email="owner-immutable-rejected@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user, notes="Original notes")
+    _mark_sent(db_session, quote)
+    quote.status = QuoteStatus.rejected.value
+    db_session.commit()
+
+    response = client.patch(
+        f"/organizations/{owner.organization.id}/quotes/{quote.id}",
+        json={"notes": "Trying to sneak an edit in"},
+        headers=owner.auth_headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "quote_not_editable"
+
+
+def test_update_rejected_for_converted_quote(client, db_session):
+    owner = make_org_with_owner(db_session, email="owner-immutable-converted@example.com")
+    quote = make_quote(db_session, owner.organization, owner.user, notes="Original notes")
+    _mark_sent(db_session, quote)
+    quote.status = QuoteStatus.accepted.value
+    db_session.commit()
+
+    convert = client.post(
+        f"/organizations/{owner.organization.id}/quotes/{quote.id}/convert",
+        headers=owner.auth_headers,
+    )
+    assert convert.status_code == 200
+
+    response = client.patch(
+        f"/organizations/{owner.organization.id}/quotes/{quote.id}",
+        json={"notes": "Trying to sneak an edit in"},
+        headers=owner.auth_headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "quote_not_editable"
+
+
+def test_update_still_allowed_for_draft_and_sent_quotes(client, db_session):
+    owner = make_org_with_owner(db_session, email="owner-still-editable@example.com")
+    draft_quote = make_quote(db_session, owner.organization, owner.user, notes="Draft notes")
+
+    draft_response = client.patch(
+        f"/organizations/{owner.organization.id}/quotes/{draft_quote.id}",
+        json={"notes": "Edited draft notes"},
+        headers=owner.auth_headers,
+    )
+    assert draft_response.status_code == 200
+    assert draft_response.json()["notes"] == "Edited draft notes"
+
+    sent_quote = make_quote(db_session, owner.organization, owner.user, notes="Sent notes")
+    _mark_sent(db_session, sent_quote)
+
+    sent_response = client.patch(
+        f"/organizations/{owner.organization.id}/quotes/{sent_quote.id}",
+        json={"notes": "Edited sent notes"},
+        headers=owner.auth_headers,
+    )
+    assert sent_response.status_code == 200
+    assert sent_response.json()["notes"] == "Edited sent notes"
+
+
+def test_quote_customer_snapshot_immune_to_later_customer_edits(client, db_session):
+    owner = make_org_with_owner(db_session, email="owner-quote-snapshot@example.com")
+    customer = make_customer(db_session, owner.organization, name="Original Name", email="original@example.com")
+    customer.phone = "555-0000"
+    customer.address = "1 Original St"
+    db_session.commit()
+
+    quote = make_quote(db_session, owner.organization, owner.user, customer=customer)
+
+    customer.name = "Renamed Customer"
+    customer.email = "renamed@example.com"
+    customer.phone = "555-9999"
+    customer.address = "2 Renamed Ave"
+    db_session.commit()
+
+    response = client.get(
+        f"/organizations/{owner.organization.id}/quotes/{quote.id}", headers=owner.auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["customer_name"] == "Original Name"
+
+    db_session.refresh(quote)
+    assert quote.customer_name_snapshot == "Original Name"
+    assert quote.customer_email_snapshot == "original@example.com"
+    assert quote.customer_phone_snapshot == "555-0000"
+    assert quote.customer_address_snapshot == "1 Original St"
+
+
+def test_converted_invoice_forwards_quotes_own_snapshot_not_customers_current_state(client, db_session):
+    """A customer edited AFTER a quote was created but BEFORE it's later
+    converted must still produce an invoice reflecting the quote's own
+    original snapshot -- not the customer's state at conversion time."""
+    owner = make_org_with_owner(db_session, email="owner-convert-snapshot@example.com")
+    customer = make_customer(db_session, owner.organization, name="Original Name", email="original@example.com")
+
+    quote = make_quote(db_session, owner.organization, owner.user, customer=customer)
+    _mark_sent(db_session, quote)
+    quote.status = QuoteStatus.accepted.value
+    db_session.commit()
+
+    # Customer edited between quote creation and conversion.
+    customer.name = "Edited Before Conversion"
+    customer.email = "edited@example.com"
+    db_session.commit()
+
+    response = client.post(
+        f"/organizations/{owner.organization.id}/quotes/{quote.id}/convert",
+        headers=owner.auth_headers,
+    )
+    assert response.status_code == 200
+    invoice_id = response.json()["invoice_id"]
+
+    from app.models import Invoice
+
+    invoice = db_session.query(Invoice).filter_by(id=invoice_id).one()
+    assert invoice.customer_name_snapshot == "Original Name"
+    assert invoice.customer_email_snapshot == "original@example.com"
+
+
 def test_quote_snapshot_immune_to_later_product_edits(client, db_session):
     """Editing a product after a quote referencing it was created must
     never change the quote's already-stored description/unit_price --

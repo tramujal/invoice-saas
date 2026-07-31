@@ -32,6 +32,17 @@ def test_reset_password_succeeds_with_valid_token(client, db_session, fake_email
     assert login.status_code == 200
 
 
+def test_reset_password_rejects_password_exceeding_utf8_byte_limit(client, db_session):
+    user = make_user(db_session, email="reset-multibyte@example.com")
+    raw_token = issue_password_reset(db_session, user)
+
+    response = client.post(
+        "/auth/reset-password",
+        json={"token": raw_token, "new_password": "Aa1" + "é" * 69},
+    )
+    assert response.status_code == 422
+
+
 def test_reset_password_token_is_single_use(client, db_session):
     user = make_user(db_session, email="reset2@example.com")
     raw_token = issue_password_reset(db_session, user)

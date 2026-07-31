@@ -215,6 +215,85 @@ def test_organization_plan_id_migration_is_idempotent_and_backfills_free(db_sess
     assert organization.plan_id == "plan_free"
 
 
+def test_document_customer_snapshot_migration_is_idempotent(db_session):
+    run_startup_migrations(engine)
+    run_startup_migrations(engine)
+
+    inspector = inspect(engine)
+    for table in ("invoices", "quotes"):
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        for snapshot_column in (
+            "customer_name_snapshot",
+            "customer_email_snapshot",
+            "customer_phone_snapshot",
+            "customer_address_snapshot",
+        ):
+            assert snapshot_column in columns
+
+
+def test_add_document_customer_snapshots_backfills_pre_existing_rows_on_sqlite():
+    """Builds the exact pre-migration shape by hand (see
+    test_add_organization_plan_id_alters_a_real_pre_existing_table_on_sqlite's
+    identical rationale): a fresh sqlite engine with "customers" and
+    "invoices"/"quotes" tables predating the 4 snapshot columns, one
+    customer, and one invoice/quote already linked to it -- so both the
+    ALTER TABLE path and the backfill UPDATE are actually exercised, not
+    just the ordinary create_all()-already-has-the-columns case every
+    other test in this module runs against."""
+    from sqlalchemy import create_engine
+
+    from app.schema_migrations import _add_document_customer_snapshots
+
+    throwaway = create_engine("sqlite:///:memory:")
+    with throwaway.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE customers (id CHAR(36) PRIMARY KEY, name VARCHAR(255), "
+                "email VARCHAR(255), phone VARCHAR(64), address VARCHAR(512))"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO customers (id, name, email, phone, address) VALUES "
+                "('cust-1', 'Jane Doe', 'jane@example.com', '555-1234', '1 Main St')"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE invoices (id CHAR(36) PRIMARY KEY, customer_id CHAR(36))"
+            )
+        )
+        conn.execute(text("INSERT INTO invoices (id, customer_id) VALUES ('inv-1', 'cust-1')"))
+        conn.execute(
+            text("CREATE TABLE quotes (id CHAR(36) PRIMARY KEY, customer_id CHAR(36))")
+        )
+        conn.execute(text("INSERT INTO quotes (id, customer_id) VALUES ('quote-1', 'cust-1')"))
+
+    _add_document_customer_snapshots(throwaway)
+
+    with throwaway.begin() as conn:
+        invoice_row = conn.execute(
+            text("SELECT customer_name_snapshot, customer_email_snapshot, "
+                 "customer_phone_snapshot, customer_address_snapshot FROM invoices WHERE id = 'inv-1'")
+        ).one()
+        quote_row = conn.execute(
+            text("SELECT customer_name_snapshot, customer_email_snapshot, "
+                 "customer_phone_snapshot, customer_address_snapshot FROM quotes WHERE id = 'quote-1'")
+        ).one()
+
+    assert invoice_row == ("Jane Doe", "jane@example.com", "555-1234", "1 Main St")
+    assert quote_row == ("Jane Doe", "jane@example.com", "555-1234", "1 Main St")
+
+    # Re-running must not error and must not clobber an already-backfilled
+    # row -- the WHERE customer_name_snapshot IS NULL guard skips it.
+    _add_document_customer_snapshots(throwaway)
+    with throwaway.begin() as conn:
+        invoice_row_again = conn.execute(
+            text("SELECT customer_name_snapshot FROM invoices WHERE id = 'inv-1'")
+        ).scalar()
+    assert invoice_row_again == "Jane Doe"
+
+
 def test_add_organization_plan_id_alters_a_real_pre_existing_table_on_sqlite():
     # The main engine's "organizations" table already has plan_id by the
     # time any test runs (init_db()'s create_all() creates it fresh, from

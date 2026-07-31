@@ -180,6 +180,7 @@ def create_invoice_record(
     due_date: date | None = None,
     *,
     commit: bool = True,
+    customer_snapshot_override: dict[str, str | None] | None = None,
 ) -> Invoice:
     """The actual DB write: numbering-locked, currency/language pinned at
     creation time. Totals are always recomputed here from `line_items` --
@@ -210,7 +211,17 @@ def create_invoice_record(
     retry would create a SECOND invoice since the QuoteAlreadyConvertedError
     guard never saw the first one). When commit=False, the caller owns
     calling db.commit()/db.refresh(invoice) itself once its own
-    additional writes are also ready."""
+    additional writes are also ready.
+
+    customer_snapshot_override (Phase SEC2, H6) lets a caller supply the
+    4 customer_*_snapshot values directly instead of deriving them from
+    `customer`'s current live fields -- the ONE caller that uses this is
+    app.services.quotes.convert_quote_to_invoice, which forwards the
+    QUOTE's own already-stored snapshot rather than re-reading the
+    customer's current state, so a customer edited between quote
+    creation and later conversion still can't retroactively alter what
+    either document displays. Every other caller leaves this None and
+    gets the ordinary "snapshot `customer` as given, right now" behavior."""
     check_limit(db, organization_id, LimitedResource.invoices)
     # A line's product_id is purely an analytics tag (see
     # InvoiceLineItem.product_id's docstring) -- validated to resolve
@@ -263,6 +274,23 @@ def create_invoice_record(
     )
     language = organization.language
 
+    if customer_snapshot_override is not None:
+        snapshot = customer_snapshot_override
+    elif customer is not None:
+        snapshot = {
+            "customer_name_snapshot": customer.name,
+            "customer_email_snapshot": customer.email,
+            "customer_phone_snapshot": customer.phone,
+            "customer_address_snapshot": customer.address,
+        }
+    else:
+        snapshot = {
+            "customer_name_snapshot": None,
+            "customer_email_snapshot": None,
+            "customer_phone_snapshot": None,
+            "customer_address_snapshot": None,
+        }
+
     invoice = Invoice(
         organization_id=organization_id,
         invoice_number=invoice_number,
@@ -275,6 +303,7 @@ def create_invoice_record(
         language=language,
         due_date=due_date,
         line_items=line_models,
+        **snapshot,
     )
     db.add(invoice)
     db.flush()

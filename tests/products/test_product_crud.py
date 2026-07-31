@@ -62,6 +62,27 @@ def test_update_product(client, db_session):
     assert response.json()["name"] == "Renamed"
 
 
+def test_update_product_ignores_explicit_null_fields(client, db_session):
+    # Every Product column is NOT NULL -- submitting an explicit null for
+    # one used to reach setattr(product, key, None) and raise an
+    # uncaught IntegrityError at commit (500). It must now be skipped,
+    # leaving the existing value untouched, exactly like
+    # update_customer_record already does for Customer.
+    owner = make_org_with_owner(db_session, email="owner-null-patch@example.com")
+    product = make_product(db_session, owner.organization)
+    original_currency = product.currency_code
+
+    response = client.patch(
+        f"/organizations/{owner.organization.id}/products/{product.id}",
+        json={"currency_code": None, "name": "Still Renamed"},
+        headers=owner.auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["name"] == "Still Renamed"
+    assert body["currency_code"] == original_currency
+
+
 def test_viewer_cannot_create_product(client, db_session):
     from app.membership_role import MembershipRole
     from tests.factories import make_member_in_org

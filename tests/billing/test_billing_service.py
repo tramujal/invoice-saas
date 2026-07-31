@@ -9,11 +9,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
+from app.billing.provider_base import BillingProviderError
 from app.billing.service import BillingService, InvalidPlanChangeError, InvalidSubscriptionStateError
 from app.billing_period import BillingPeriod
 from app.models import Organization, SubscriptionEvent
 from app.subscription_event_type import SubscriptionEventType
 from app.subscription_status import SubscriptionStatus
+from tests.billing.fakes import FakeBillingProvider
 from tests.factories import make_organization, make_plan, make_subscription, make_user
 
 
@@ -331,6 +333,202 @@ def test_reactivate_rejects_a_subscription_that_was_never_canceled(db_session):
 
     with pytest.raises(InvalidSubscriptionStateError):
         BillingService(db_session).reactivate(subscription)
+
+
+def test_cancel_immediately_pushes_to_provider_when_attached(db_session):
+    organization = make_organization(db_session, name="Provider Cancel Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        status=SubscriptionStatus.active,
+        provider_name="fake",
+        provider_reference="sub_123",
+    )
+    provider = FakeBillingProvider()
+
+    BillingService(db_session, provider=provider).cancel_immediately(subscription)
+
+    assert provider.cancel_subscription_calls == [
+        {"provider_reference": "sub_123", "at_period_end": False}
+    ]
+
+
+def test_cancel_immediately_skips_provider_when_not_attached(db_session):
+    organization = make_organization(db_session, name="No Provider Cancel Co")
+    subscription = make_subscription(db_session, organization, status=SubscriptionStatus.active)
+    provider = FakeBillingProvider()
+
+    BillingService(db_session, provider=provider).cancel_immediately(subscription)
+
+    assert provider.cancel_subscription_calls == []
+
+
+def test_cancel_immediately_leaves_local_state_untouched_on_provider_failure(db_session):
+    organization = make_organization(db_session, name="Provider Failure Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        status=SubscriptionStatus.active,
+        provider_name="fake",
+        provider_reference="sub_fail",
+    )
+
+    class FailingProvider(FakeBillingProvider):
+        def cancel_subscription(self, *, provider_reference: str, at_period_end: bool) -> None:
+            raise BillingProviderError("stripe is down")
+
+    with pytest.raises(BillingProviderError):
+        BillingService(db_session, provider=FailingProvider()).cancel_immediately(subscription)
+
+    db_session.refresh(subscription)
+    assert subscription.status == SubscriptionStatus.active.value
+    assert subscription.canceled_at is None
+    assert _events(db_session, subscription) == []
+
+
+def test_sync_from_webhook_event_cancellation_never_pushes_back_to_provider(db_session):
+    """The subscription_canceled webhook event IS the provider telling us
+    this already happened -- sync_from_webhook_event must never re-push a
+    cancellation back (sync_to_provider=False internally)."""
+    from app.billing.provider_base import BillingProviderEventType, ProviderWebhookEvent
+
+    organization = make_organization(db_session, name="Webhook Cancel Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        status=SubscriptionStatus.active,
+        provider_name="fake",
+        provider_reference="sub_webhook",
+    )
+    provider = FakeBillingProvider()
+    event = ProviderWebhookEvent(
+        provider_name="fake",
+        event_id="evt_1",
+        event_type=BillingProviderEventType.subscription_canceled,
+        provider_reference="sub_webhook",
+    )
+
+    BillingService(db_session, provider=provider).sync_from_webhook_event(event)
+
+    assert provider.cancel_subscription_calls == []
+
+
+def test_cancel_at_period_end_pushes_to_provider_when_attached(db_session):
+    organization = make_organization(db_session, name="Provider Cancel Later Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        status=SubscriptionStatus.active,
+        provider_name="fake",
+        provider_reference="sub_later",
+    )
+    provider = FakeBillingProvider()
+
+    BillingService(db_session, provider=provider).cancel_at_period_end(subscription)
+
+    assert provider.cancel_subscription_calls == [
+        {"provider_reference": "sub_later", "at_period_end": True}
+    ]
+
+
+def test_cancel_at_period_end_already_flagged_skips_provider_call(db_session):
+    organization = make_organization(db_session, name="Already Flagged Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        cancel_at_period_end=True,
+        provider_name="fake",
+        provider_reference="sub_flagged",
+    )
+    provider = FakeBillingProvider()
+
+    BillingService(db_session, provider=provider).cancel_at_period_end(subscription)
+
+    assert provider.cancel_subscription_calls == []
+
+
+def test_reactivate_pushes_to_provider_when_attached(db_session):
+    organization = make_organization(db_session, name="Provider Reactivate Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        cancel_at_period_end=True,
+        provider_name="fake",
+        provider_reference="sub_reactivate",
+    )
+    provider = FakeBillingProvider()
+
+    BillingService(db_session, provider=provider).reactivate(subscription)
+
+    assert provider.reactivate_subscription_calls == ["sub_reactivate"]
+
+
+def test_reactivate_rejected_state_never_reaches_provider(db_session):
+    organization = make_organization(db_session, name="Reactivate Rejected Co")
+    subscription = make_subscription(
+        db_session,
+        organization,
+        status=SubscriptionStatus.active,
+        provider_name="fake",
+        provider_reference="sub_never",
+    )
+    provider = FakeBillingProvider()
+
+    with pytest.raises(InvalidSubscriptionStateError):
+        BillingService(db_session, provider=provider).reactivate(subscription)
+
+    assert provider.reactivate_subscription_calls == []
+
+
+def test_change_plan_pushes_to_provider_when_attached(db_session):
+    organization = make_organization(db_session, name="Provider Plan Change Co")
+    plan_a = make_plan(db_session, code="provider-plan-a", sort_order=1)
+    plan_b = make_plan(db_session, code="provider-plan-b", sort_order=2)
+    subscription = make_subscription(
+        db_session,
+        organization,
+        plan=plan_a,
+        provider_name="fake",
+        provider_reference="sub_plan_change",
+    )
+    provider = FakeBillingProvider()
+
+    BillingService(db_session, provider=provider).change_plan(subscription, plan_b)
+
+    assert provider.change_subscription_plan_calls == [
+        {
+            "provider_reference": "sub_plan_change",
+            "plan_id": plan_b.id,
+            "billing_period": subscription.billing_period,
+        }
+    ]
+
+
+def test_sync_from_webhook_event_checkout_completed_never_pushes_plan_change_to_provider(db_session):
+    """checkout_completed reflects a plan the tenant's own hosted checkout
+    already set on the provider's side -- attaching + recording that
+    locally must never push a redundant change_subscription_plan call."""
+    from app.billing.provider_base import BillingProviderEventType, ProviderWebhookEvent
+
+    organization = make_organization(db_session, name="Webhook Checkout Co")
+    plan = make_plan(db_session, code="webhook-checkout-plan", sort_order=1)
+    subscription = make_subscription(db_session, organization)
+    provider = FakeBillingProvider()
+    event = ProviderWebhookEvent(
+        provider_name="fake",
+        event_id="evt_checkout",
+        event_type=BillingProviderEventType.checkout_completed,
+        provider_reference="sub_checkout",
+        metadata={
+            "organization_id": organization.id,
+            "plan_id": plan.id,
+            "billing_period": subscription.billing_period,
+        },
+    )
+
+    BillingService(db_session, provider=provider).sync_from_webhook_event(event)
+
+    assert provider.change_subscription_plan_calls == []
 
 
 def test_resume_moves_paused_subscription_to_active(db_session):

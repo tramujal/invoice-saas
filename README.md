@@ -342,7 +342,7 @@ to resolve — never a silent last-write-wins.
 | Frontend | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS |
 | Charts | Recharts |
 | Testing | pytest (567 backend tests) · Vitest + Testing Library (185 frontend tests) |
-| Infra | Docker Compose (web + worker + Postgres), Neon (Postgres), Render (API + worker), Vercel (frontend), GitHub Actions (scheduled jobs) |
+| Infra | Docker Compose (dev, and prod via `docker-compose.prod.yml` + Caddy), Neon (Postgres), Render (API + worker), Vercel (frontend), GitHub Actions (scheduled jobs) |
 
 ## Project Structure
 
@@ -484,6 +484,16 @@ double-claim a row — not just the happy path.
 
 ## Deployment
 
+> For the full production release-readiness reference (environment
+> variable checklist, health endpoints, logging, backup strategy,
+> security headers, CORS/rate-limiting verification, monitoring hooks,
+> and a release checklist) see [`docs/deployment.md`](docs/deployment.md).
+> The walkthrough below covers only the managed Render+Vercel+Neon path;
+> `docs/deployment.md` also documents a self-hosted alternative using
+> [`docker-compose.prod.yml`](docker-compose.prod.yml) (Postgres + backend
+> + worker + frontend + Caddy for automatic HTTPS) for deploying to your
+> own server instead.
+
 This application runs as **two cooperating backend processes**, not one:
 the **web API** (handles requests, enqueues work, never executes it) and
 the **background worker** (claims and executes durable jobs — currently,
@@ -559,6 +569,19 @@ Wiring it up requires three repo secrets: `DATABASE_URL`,
   confirms — see [Architecture](#architecture).
 - Secrets are never committed — `.env*` is gitignored, and
   [`.env.example`](.env.example) documents every variable without values.
+- Standard security response headers (`X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`,
+  `Strict-Transport-Security`) are applied to every backend response
+  (`app/security_headers.py`) and every frontend route
+  (`frontend/next.config.mjs`).
+- `GET /health/ready` verifies real database connectivity (distinct from
+  `GET /health`'s plain liveness check) — see
+  [`docs/deployment.md`](docs/deployment.md#health-endpoints).
+- Backup strategy documented for both deployment paths — Neon's
+  automatic continuous backup, or
+  [`scripts/backup_postgres.sh`](scripts/backup_postgres.sh) for the
+  self-hosted Docker path — see
+  [`docs/deployment.md`](docs/deployment.md#backup-strategy).
 
 ## Roadmap
 

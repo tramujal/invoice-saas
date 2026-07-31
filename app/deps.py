@@ -133,6 +133,7 @@ def require_org_member(user: User, organization_id: str, db: Session) -> None:
         select(OrganizationMember).where(
             OrganizationMember.user_id == user.id,
             OrganizationMember.organization_id == organization_id,
+            OrganizationMember.status == MembershipStatus.active.value,
         )
     )
     if member is None:
@@ -149,12 +150,11 @@ def require_permission(
 ) -> OrganizationMember:
     """Supersedes a bare require_org_member call wherever a specific
     capability (not just membership) is needed. Internally re-does
-    require_org_member's exact membership query, additionally filtered to
-    status == active -- so this never weakens today's check, it
-    strengthens it (a soft-removed member, which couldn't exist before
-    this feature, now correctly fails here too). Returns the caller's own
-    membership row so call sites that also need the role (e.g. the team
-    management endpoints) get it for free, with no second query.
+    require_org_member's exact membership query (both now filter to
+    status == active, see that function above), only adding the
+    permission check on top. Returns the caller's own membership row so
+    call sites that also need the role (e.g. the team management
+    endpoints) get it for free, with no second query.
 
     Two things this single check can't express -- granting/revoking the
     "owner" role, and the "at least one other active owner must remain"

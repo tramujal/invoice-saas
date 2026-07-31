@@ -841,6 +841,24 @@ class Invoice(Base):
     # A plain calendar date -- no time-of-day component, so comparisons
     # against "today" are never ambiguous the way a datetime would be.
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Snapshot of the billed customer's own fields, taken at creation time
+    # (app.services.invoices.create_invoice_record) -- mirrors
+    # InvoiceLineItem's own description/unit_price snapshot exactly:
+    # editing (or even deleting) the Customer row afterward must never
+    # alter what a previously issued invoice displays. Nullable because
+    # (a) an invoice may have no customer at all, and (b) rows created
+    # before this column existed can only be best-effort backfilled from
+    # the customer's CURRENT data (see app.schema_migrations
+    # ._add_document_customer_snapshots) -- there is no history of a
+    # customer's past field values anywhere in this app, so a pre-
+    # existing invoice whose customer was edited since it was issued can
+    # never be perfectly reconstructed. customer_name/customer_phone
+    # below read these first, falling back to the live relationship only
+    # when the snapshot itself is still null.
+    customer_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_phone_snapshot: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    customer_address_snapshot: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="invoices")
     customer: Mapped["Customer | None"] = relationship(back_populates="invoices")
@@ -853,10 +871,14 @@ class Invoice(Base):
 
     @property
     def customer_name(self) -> str | None:
+        if self.customer_name_snapshot is not None:
+            return self.customer_name_snapshot
         return self.customer.name if self.customer is not None else None
 
     @property
     def customer_phone(self) -> str | None:
+        if self.customer_phone_snapshot is not None:
+            return self.customer_phone_snapshot
         return self.customer.phone if self.customer is not None else None
 
     @property
@@ -1127,6 +1149,17 @@ class Quote(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    # Snapshot of the billed customer's own fields, taken at creation time
+    # (app.services.quotes.create_quote_record) -- see Invoice's
+    # identical columns for the full rationale; a quote later converted
+    # into an invoice forwards THIS snapshot into the new invoice (see
+    # convert_quote_to_invoice), never a fresh live read of the customer,
+    # so a customer edited between quote creation and conversion still
+    # can't retroactively alter either document.
+    customer_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_phone_snapshot: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    customer_address_snapshot: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="quotes")
     customer: Mapped["Customer | None"] = relationship()
@@ -1141,10 +1174,14 @@ class Quote(Base):
 
     @property
     def customer_name(self) -> str | None:
+        if self.customer_name_snapshot is not None:
+            return self.customer_name_snapshot
         return self.customer.name if self.customer is not None else None
 
     @property
     def customer_phone(self) -> str | None:
+        if self.customer_phone_snapshot is not None:
+            return self.customer_phone_snapshot
         return self.customer.phone if self.customer is not None else None
 
     @property
