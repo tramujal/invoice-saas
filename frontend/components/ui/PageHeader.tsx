@@ -16,9 +16,21 @@ export function PageHeader({ title, subtitle, icon, actions }: PageHeaderProps) 
             {icon}
           </span>
         ) : null}
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
-          {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+        {/* min-w-0 lets this title block shrink below its own content's
+            natural width -- needed because `title` is sometimes an
+            unbroken string with no natural wrap point (e.g. a user's
+            email address on the platform-admin user detail page), which
+            would otherwise force this flex item (and the page) wider
+            than the viewport on mobile. break-words/[overflow-wrap:anywhere]
+            on the heading itself is what actually lets it wrap once it
+            can shrink. */}
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-semibold tracking-tight text-slate-900 [overflow-wrap:anywhere]">
+            {title}
+          </h1>
+          {subtitle ? (
+            <p className="mt-1 break-words text-sm text-slate-500 [overflow-wrap:anywhere]">{subtitle}</p>
+          ) : null}
         </div>
       </div>
       {actions ? (

@@ -321,3 +321,19 @@ describe("PlatformOrganizationDetailPage usage", () => {
     await waitFor(() => expect(screen.getByText("Almost full")).toBeInTheDocument());
   });
 });
+
+describe("PlatformOrganizationDetailPage mobile layout", () => {
+  it("lets a long owner email wrap instead of forcing the info row wider than the viewport", async () => {
+    apiFetchMock.mockResolvedValue({
+      ...activeOrg,
+      owner_email: "a-very-long-unbroken-owner-email-address-with-no-spaces@example-corp.com",
+    } satisfies PlatformOrganizationDetail);
+    renderWithProviders(<PlatformOrganizationDetailPage />);
+
+    const value = await screen.findByText(
+      "a-very-long-unbroken-owner-email-address-with-no-spaces@example-corp.com"
+    );
+    expect(value).toHaveClass("min-w-0");
+    expect(value).toHaveClass("break-words");
+  });
+});

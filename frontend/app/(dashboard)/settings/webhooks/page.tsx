@@ -426,7 +426,7 @@ function DeliveryDetailDialog({ deliveryId, onClose }: { deliveryId: string; onC
         role="dialog"
         aria-modal="true"
         aria-label={t("webhooks.deliveryDetailTitle")}
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">{t("webhooks.deliveryDetailTitle")}</h2>
@@ -443,7 +443,9 @@ function DeliveryDetailDialog({ deliveryId, onClose }: { deliveryId: string; onC
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {t("webhooks.detailEventType")}
               </p>
-              <p className="mt-1 font-mono text-xs text-slate-800">{detail.event.event_type}</p>
+              <p className="mt-1 break-words font-mono text-xs text-slate-800 [overflow-wrap:anywhere]">
+                {detail.event.event_type}
+              </p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -455,7 +457,7 @@ function DeliveryDetailDialog({ deliveryId, onClose }: { deliveryId: string; onC
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {t("webhooks.detailResponse")}
               </p>
-              <p className="mt-1 text-slate-800">
+              <p className="mt-1 break-words text-slate-800 [overflow-wrap:anywhere]">
                 {detail.response_status_code ?? "—"} {detail.error_message ? `— ${detail.error_message}` : ""}
               </p>
               {detail.response_body_snippet ? (

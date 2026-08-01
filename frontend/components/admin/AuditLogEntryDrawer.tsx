@@ -65,7 +65,7 @@ export function AuditLogEntryDrawer({ entry, onClose, actionLabel, formatTimesta
         role="dialog"
         aria-modal="true"
         aria-label={t("auditLog.detailsTitle")}
-        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-4">
           <h2 className="text-sm font-semibold text-slate-900">{t("auditLog.detailsTitle")}</h2>
@@ -98,23 +98,25 @@ export function AuditLogEntryDrawer({ entry, onClose, actionLabel, formatTimesta
             <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
               {t("auditLog.colActor")}
             </dt>
-            <dd className="text-slate-900">{entry.actor_email}</dd>
+            <dd className="break-words text-slate-900 [overflow-wrap:anywhere]">{entry.actor_email}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
               {t("auditLog.colTarget")}
             </dt>
-            <dd className="text-slate-900">{targetLabel}</dd>
+            <dd className="break-words text-slate-900 [overflow-wrap:anywhere]">{targetLabel}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
               {t("auditLog.colReason")}
             </dt>
-            <dd className="whitespace-pre-wrap text-slate-900">{entry.reason}</dd>
+            <dd className="whitespace-pre-wrap break-words text-slate-900 [overflow-wrap:anywhere]">
+              {entry.reason}
+            </dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{t("auditLog.colIp")}</dt>
-            <dd className="text-slate-900">{entry.client_ip ?? "—"}</dd>
+            <dd className="break-words text-slate-900 [overflow-wrap:anywhere]">{entry.client_ip ?? "—"}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -127,8 +129,16 @@ export function AuditLogEntryDrawer({ entry, onClose, actionLabel, formatTimesta
                 <ul className="mt-1 space-y-1 rounded-lg bg-surface-muted p-3">
                   {detailEntries.map(([key, value]) => (
                     <li key={key} className="flex justify-between gap-4 text-xs">
-                      <span className="font-medium text-slate-600">{key}</span>
-                      <span className="text-right text-slate-900">{renderDetailValue(value)}</span>
+                      <span className="shrink-0 font-medium text-slate-600">{key}</span>
+                      {/* Arbitrary JSON-stringified blob/URL/id with no
+                          spaces to break at -- min-w-0 lets this flex
+                          item shrink below its content's natural width,
+                          break-words/[overflow-wrap:anywhere] let long
+                          unbroken runs actually wrap. Mirrors
+                          AuditEntryDetailsDrawer.tsx's identical fix. */}
+                      <span className="min-w-0 flex-1 break-words text-right text-slate-900 [overflow-wrap:anywhere]">
+                        {renderDetailValue(value)}
+                      </span>
                     </li>
                   ))}
                 </ul>

@@ -462,10 +462,13 @@ function InfoRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-4 px-5 py-3">
-      <dt className="text-sm font-medium text-slate-700" title={hint}>
+      <dt className="shrink-0 text-sm font-medium text-slate-700" title={hint}>
         {label}
       </dt>
-      <dd className="text-sm text-slate-900">
+      {/* min-w-0 + break-words: `value` can be an owner's email address
+          (no natural wrap point) -- without this, a long one forces this
+          flex row (and the page) wider than the viewport on mobile. */}
+      <dd className="min-w-0 break-words text-right text-sm text-slate-900 [overflow-wrap:anywhere]">
         {loading ? <span className="inline-flex h-4 w-24 animate-pulse rounded bg-slate-100" aria-hidden /> : value}
       </dd>
     </div>

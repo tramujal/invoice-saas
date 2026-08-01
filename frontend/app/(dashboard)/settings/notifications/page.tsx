@@ -117,8 +117,8 @@ export default function NotificationsSettingsPage() {
       <SettingsSubNav />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-900">
               {t("notificationsPage.emailPreferenceTitle")}
             </h2>
@@ -140,8 +140,8 @@ export default function NotificationsSettingsPage() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <h2 className="min-w-0 text-sm font-semibold text-slate-900">
             {t("notificationsPage.inboxTitle")}
             {unreadCount > 0 ? (
               <Badge className="ml-2 bg-slate-900 text-white ring-slate-900">{unreadCount}</Badge>
@@ -183,8 +183,12 @@ export default function NotificationsSettingsPage() {
                 }`}
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{notification.title}</p>
-                  <p className="mt-0.5 text-sm text-slate-600">{notification.body}</p>
+                  <p className="break-words text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">
+                    {notification.title}
+                  </p>
+                  <p className="mt-0.5 break-words text-sm text-slate-600 [overflow-wrap:anywhere]">
+                    {notification.body}
+                  </p>
                   <p className="mt-1 text-xs text-slate-400">
                     {new Date(notification.created_at).toLocaleString()}
                   </p>

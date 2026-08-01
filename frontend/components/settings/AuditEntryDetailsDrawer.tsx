@@ -64,7 +64,7 @@ export function AuditEntryDetailsDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={t("settingsAuditLog.detailsTitle")}
-        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-4">
           <h2 className="text-sm font-semibold text-slate-900">{t("settingsAuditLog.detailsTitle")}</h2>
@@ -118,8 +118,18 @@ export function AuditEntryDetailsDrawer({
                 <ul className="mt-1 space-y-1 rounded-lg bg-surface-muted p-3">
                   {metadataEntries.map(([key, value]) => (
                     <li key={key} className="flex justify-between gap-4 text-xs">
-                      <span className="font-medium text-slate-600">{key}</span>
-                      <span className="text-right text-slate-900">{renderMetadataValue(value)}</span>
+                      <span className="shrink-0 font-medium text-slate-600">{key}</span>
+                      {/* A metadata value can be an arbitrary JSON-
+                          stringified blob, URL, or id with no spaces to
+                          break at -- min-w-0 lets this flex item shrink
+                          below its content's natural width, and
+                          break-words/[overflow-wrap:anywhere] let long
+                          unbroken runs actually wrap instead of forcing
+                          this dialog (and everything behind it) wider
+                          than the viewport. */}
+                      <span className="min-w-0 flex-1 break-words text-right text-slate-900 [overflow-wrap:anywhere]">
+                        {renderMetadataValue(value)}
+                      </span>
                     </li>
                   ))}
                 </ul>

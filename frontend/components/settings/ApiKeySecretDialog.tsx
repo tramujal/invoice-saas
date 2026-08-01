@@ -57,7 +57,7 @@ export function ApiKeySecretDialog({ apiKey, onClose }: ApiKeySecretDialogProps)
         role="alertdialog"
         aria-modal="true"
         aria-label={t("apiKeys.secretDialogTitle")}
-        className="w-full max-w-lg rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
       >
         <h2 className="text-sm font-semibold text-slate-900">{t("apiKeys.secretDialogTitle")}</h2>
         <p className="mt-2 text-sm text-slate-600">{t("apiKeys.secretDialogMessage")}</p>

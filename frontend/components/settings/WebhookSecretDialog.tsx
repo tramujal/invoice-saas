@@ -59,7 +59,7 @@ export function WebhookSecretDialog({ secret, onClose }: WebhookSecretDialogProp
         role="alertdialog"
         aria-modal="true"
         aria-label={t("webhooks.secretDialogTitle")}
-        className="w-full max-w-lg rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
       >
         <h2 className="text-sm font-semibold text-slate-900">{t("webhooks.secretDialogTitle")}</h2>
         <p className="mt-2 text-sm text-slate-600">{t("webhooks.secretDialogMessage")}</p>

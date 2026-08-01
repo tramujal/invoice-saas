@@ -59,7 +59,7 @@ export function JobDetailDrawer({ job, onClose, formatTimestamp }: JobDetailDraw
         role="dialog"
         aria-modal="true"
         aria-label={t("jobs.detailsTitle")}
-        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-4">
           <h2 className="text-sm font-semibold text-slate-900">{t("jobs.detailsTitle")}</h2>
@@ -130,8 +130,8 @@ export function JobDetailDrawer({ job, onClose, formatTimestamp }: JobDetailDraw
                   <span className="text-right text-slate-900">{formatTimestamp(job.claimed_at)}</span>
                 </li>
                 <li className="flex justify-between gap-4">
-                  <span className="font-medium text-slate-600">{t("jobs.fieldClaimedBy")}</span>
-                  <span className="break-all text-right text-slate-900">{job.claimed_by ?? "—"}</span>
+                  <span className="shrink-0 font-medium text-slate-600">{t("jobs.fieldClaimedBy")}</span>
+                  <span className="min-w-0 flex-1 break-all text-right text-slate-900">{job.claimed_by ?? "—"}</span>
                 </li>
                 <li className="flex justify-between gap-4">
                   <span className="font-medium text-slate-600">{t("jobs.fieldLeaseExpiresAt")}</span>
@@ -192,8 +192,10 @@ export function JobDetailDrawer({ job, onClose, formatTimestamp }: JobDetailDraw
                 <ul className="mt-1 space-y-1 rounded-lg bg-surface-muted p-3">
                   {payloadEntries.map(([key, value]) => (
                     <li key={key} className="flex justify-between gap-4 text-xs">
-                      <span className="font-medium text-slate-600">{key}</span>
-                      <span className="break-all text-right text-slate-900">{renderValue(value)}</span>
+                      <span className="shrink-0 font-medium text-slate-600">{key}</span>
+                      <span className="min-w-0 flex-1 break-all text-right text-slate-900">
+                        {renderValue(value)}
+                      </span>
                     </li>
                   ))}
                 </ul>

@@ -11,8 +11,14 @@ import type {
  * focus-visible: like Button.tsx. Color/radius/ring language was already
  * consistent app-wide (rounded-lg, slate-200 border, slate-400 ring). */
 
+// max-w-full (Phase UX1) guards the `fullWidth={false}` case -- a native
+// <select> otherwise sizes itself to its widest <option> text (e.g. a
+// long member email in an actor filter), which can exceed a narrow
+// mobile viewport even though the element has no explicit width of its
+// own. Harmless for the ordinary fullWidth=true case, since w-full
+// already caps it at 100% of its container.
 const FIELD_BASE_CLASS =
-  "rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:bg-slate-50";
+  "max-w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:bg-slate-50";
 
 // fullWidth is a boolean prop (not baked into the base string) rather than
 // relying on a caller's className to "override" w-full -- Tailwind classes
