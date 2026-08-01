@@ -221,12 +221,27 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
     );
   }
 
+  // The "Invoicing" wordmark always represents the *product*, not the
+  // current admin module -- clicking it returns to the tenant app the
+  // same way it would from anywhere in AppShell. The one edge case: a
+  // platform-admin-only account with zero organization memberships has
+  // nowhere in the tenant app to land (AppShell's isAuthenticated() gate
+  // requires an active organization id), so the logo stays a same-page,
+  // no-op link to /admin for that account rather than bouncing them to a
+  // broken/blank destination.
+  const logoHref = hasOrganizations ? "/dashboard" : "/admin";
+
   return (
     <div className="flex min-h-dvh flex-col bg-surface md:flex-row">
       <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
-        <Link href="/admin" className="text-lg font-semibold text-slate-900">
-          {t("adminNav.badge")}
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href={logoHref} className="text-lg font-semibold text-slate-900">
+            Invoicing
+          </Link>
+          <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+            {t("adminNav.badge")}
+          </span>
+        </div>
         <button
           ref={hamburgerButtonRef}
           type="button"
@@ -293,7 +308,7 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
 
       <aside className="hidden shrink-0 flex-col border-slate-200 bg-white md:flex md:w-56 md:border-r">
         <div className="px-6 pt-6">
-          <Link href="/admin" className="text-lg font-semibold text-slate-900">
+          <Link href={logoHref} className="text-lg font-semibold text-slate-900">
             Invoicing
           </Link>
         </div>

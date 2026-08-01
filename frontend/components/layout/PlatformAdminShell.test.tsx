@@ -94,6 +94,37 @@ describe("PlatformAdminShell", () => {
     await waitFor(() => expect(screen.getAllByText("Return to organization").length).toBeGreaterThan(0));
   });
 
+  it("points the Invoicing logo at the tenant dashboard when the admin has an organization", async () => {
+    setAuthSession({
+      token: "test-token",
+      apiBaseUrl: "http://localhost:8000",
+      organizationId: "org-1",
+      platformRole: "super_admin",
+    });
+    apiFetchMock.mockResolvedValue(meWithOneOrganization);
+
+    renderWithProviders(<PlatformAdminShell>content</PlatformAdminShell>);
+
+    const logoLinks = await screen.findAllByRole("link", { name: "Invoicing" });
+    expect(logoLinks.length).toBeGreaterThan(0);
+    for (const link of logoLinks) {
+      expect(link).toHaveAttribute("href", "/dashboard");
+    }
+  });
+
+  it("keeps the Invoicing logo pointed at /admin for a platform admin with zero organizations", async () => {
+    setAuthSession({ token: "test-token", apiBaseUrl: "http://localhost:8000", platformRole: "super_admin" });
+    apiFetchMock.mockResolvedValue(meWithNoOrganizations);
+
+    renderWithProviders(<PlatformAdminShell>content</PlatformAdminShell>);
+
+    const logoLinks = await screen.findAllByRole("link", { name: "Invoicing" });
+    expect(logoLinks.length).toBeGreaterThan(0);
+    for (const link of logoLinks) {
+      expect(link).toHaveAttribute("href", "/admin");
+    }
+  });
+
   it("redirects to /dashboard if the platform role was revoked server-side", async () => {
     setAuthSession({ token: "test-token", apiBaseUrl: "http://localhost:8000", platformRole: "super_admin" });
     apiFetchMock.mockResolvedValue({
