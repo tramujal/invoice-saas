@@ -55,7 +55,7 @@ export function AuditEntryDetailsDrawer({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-slate-900/40 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -64,7 +64,7 @@ export function AuditEntryDetailsDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={t("settingsAuditLog.detailsTitle")}
-        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg animate-modal-in rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-4">
           <h2 className="text-sm font-semibold text-slate-900">{t("settingsAuditLog.detailsTitle")}</h2>

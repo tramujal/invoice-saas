@@ -89,7 +89,7 @@ export function PlanActionDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-slate-900/40 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !submitting) onClose();
       }}
@@ -98,7 +98,7 @@ export function PlanActionDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="w-full max-w-md animate-modal-in rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
         <p className="mt-1 text-xs text-slate-500">{description}</p>

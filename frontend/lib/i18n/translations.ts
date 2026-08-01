@@ -469,7 +469,11 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "notificationBell.label": "Notifications",
     "notificationBell.title": "Notifications",
     "notificationBell.empty": "You're all caught up.",
+    "notificationBell.emptyDescription": "New activity in your organization will show up here.",
     "notificationBell.viewAll": "View all notifications",
+    "notificationBell.loading": "Loading notifications…",
+    "notificationBell.unreadCount": "{count} unread",
+    "notificationBell.close": "Close notifications",
 
     "notificationsPage.title": "Notifications",
     "notificationsPage.subtitle": "Your in-app inbox and email preference for this organization.",
@@ -2270,7 +2274,11 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     "notificationBell.label": "Notificaciones",
     "notificationBell.title": "Notificaciones",
     "notificationBell.empty": "Estás al día.",
+    "notificationBell.emptyDescription": "La nueva actividad de tu organización aparecerá aquí.",
     "notificationBell.viewAll": "Ver todas las notificaciones",
+    "notificationBell.loading": "Cargando notificaciones…",
+    "notificationBell.unreadCount": "{count} sin leer",
+    "notificationBell.close": "Cerrar notificaciones",
 
     "notificationsPage.title": "Notificaciones",
     "notificationsPage.subtitle": "Tu bandeja de entrada y preferencia de correo para esta organización.",

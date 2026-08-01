@@ -421,12 +421,12 @@ function DeliveryDetailDialog({ deliveryId, onClose }: { deliveryId: string; onC
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-slate-900/40 p-4">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={t("webhooks.deliveryDetailTitle")}
-        className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-2xl animate-modal-in overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">{t("webhooks.deliveryDetailTitle")}</h2>

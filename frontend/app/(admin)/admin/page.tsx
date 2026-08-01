@@ -85,7 +85,7 @@ export default function PlatformAdminDashboardPage() {
         title={t("admin.dashboardTitle")}
         subtitle={t("admin.dashboardSubtitle")}
         actions={
-          <Button type="button" variant="secondary" size="sm" onClick={reloadAll} disabled={anyLoading}>
+          <Button type="button" variant="secondary" size="sm" onClick={reloadAll} loading={anyLoading}>
             {anyLoading ? t("common.refreshing") : t("common.refresh")}
           </Button>
         }
@@ -101,6 +101,7 @@ export default function PlatformAdminDashboardPage() {
               : undefined
           }
           loading={overview.loading}
+          href="/admin/organizations"
         />
         <DashboardCard
           title={t("admin.usersTotal")}
@@ -109,6 +110,7 @@ export default function PlatformAdminDashboardPage() {
             overview.data ? t("admin.new7d30d", { d7: overview.data.users_new_7d, d30: overview.data.users_new_30d }) : undefined
           }
           loading={overview.loading}
+          href="/admin/users"
         />
         <DashboardCard title={t("admin.invoicesTotal")} value={overview.data ? String(overview.data.invoices_total) : "—"} loading={overview.loading} />
         <DashboardCard title={t("admin.quotesTotal")} value={overview.data ? String(overview.data.quotes_total) : "—"} loading={overview.loading} />
@@ -132,10 +134,34 @@ export default function PlatformAdminDashboardPage() {
           </div>
         ) : null}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <DashboardCard title={t("opsDashboard.mrr")} value={business.data ? formatCurrency(business.data.mrr, business.data.currency) : "—"} loading={business.loading} tone="success" />
-          <DashboardCard title={t("opsDashboard.arr")} value={business.data ? formatCurrency(business.data.arr, business.data.currency) : "—"} loading={business.loading} tone="success" />
-          <DashboardCard title={t("opsDashboard.payingOrganizations")} value={business.data ? String(business.data.paying_organizations) : "—"} loading={business.loading} />
-          <DashboardCard title={t("opsDashboard.trialOrganizations")} value={business.data ? String(business.data.trial_organizations) : "—"} loading={business.loading} />
+          {/* Phase UX4: a $0 MRR/ARR in a green card reads as "this is
+              good news," which is misleading for an org with no paying
+              customers yet -- green is earned by an actual positive
+              value, not just by being a revenue metric. */}
+          <DashboardCard
+            title={t("opsDashboard.mrr")}
+            value={business.data ? formatCurrency(business.data.mrr, business.data.currency) : "—"}
+            loading={business.loading}
+            tone={business.data && Number.parseFloat(business.data.mrr) > 0 ? "success" : "neutral"}
+          />
+          <DashboardCard
+            title={t("opsDashboard.arr")}
+            value={business.data ? formatCurrency(business.data.arr, business.data.currency) : "—"}
+            loading={business.loading}
+            tone={business.data && Number.parseFloat(business.data.arr) > 0 ? "success" : "neutral"}
+          />
+          <DashboardCard
+            title={t("opsDashboard.payingOrganizations")}
+            value={business.data ? String(business.data.paying_organizations) : "—"}
+            loading={business.loading}
+            href="/admin/subscriptions"
+          />
+          <DashboardCard
+            title={t("opsDashboard.trialOrganizations")}
+            value={business.data ? String(business.data.trial_organizations) : "—"}
+            loading={business.loading}
+            href="/admin/subscriptions"
+          />
           <DashboardCard title={t("opsDashboard.activeUsers")} value={business.data ? String(business.data.active_users_total) : "—"} loading={business.loading} />
           <DashboardCard title={t("opsDashboard.churnRate")} value={business.data ? `${business.data.churn_rate_30d}%` : "—"} loading={business.loading} />
           <DashboardCard title={t("opsDashboard.conversionRate")} value={business.data ? `${business.data.conversion_rate_30d}%` : "—"} loading={business.loading} />
@@ -161,7 +187,7 @@ export default function PlatformAdminDashboardPage() {
             loading={usage.loading}
           />
           <DashboardCard title={t("opsDashboard.webhookDeliveries")} value={usage.data ? String(usage.data.webhook_deliveries_30d) : "—"} loading={usage.loading} />
-          <DashboardCard title={t("opsDashboard.backgroundJobs")} value={usage.data ? String(usage.data.background_jobs_30d) : "—"} loading={usage.loading} />
+          <DashboardCard title={t("opsDashboard.backgroundJobs")} value={usage.data ? String(usage.data.background_jobs_30d) : "—"} loading={usage.loading} href="/admin/jobs" />
           <DashboardCard title={t("opsDashboard.emailsSent")} value={usage.data ? String(usage.data.emails_sent_30d) : "—"} loading={usage.loading} />
           <DashboardCard title={t("opsDashboard.notificationsCreated")} value={usage.data ? String(usage.data.notifications_created_30d) : "—"} loading={usage.loading} />
         </div>
@@ -184,10 +210,10 @@ export default function PlatformAdminDashboardPage() {
           </div>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <DashboardCard title={t("opsDashboard.queuePending")} value={health.data ? String(health.data.queue_pending) : "—"} loading={health.loading} />
-          <DashboardCard title={t("opsDashboard.queueRunning")} value={health.data ? String(health.data.queue_running) : "—"} loading={health.loading} />
-          <DashboardCard title={t("opsDashboard.jobsFailed")} value={health.data ? String(health.data.jobs_failed_total) : "—"} loading={health.loading} tone={health.data && health.data.jobs_failed_total > 0 ? "info" : "neutral"} />
-          <DashboardCard title={t("opsDashboard.retryScheduled")} value={health.data ? String(health.data.queue_retry_scheduled) : "—"} loading={health.loading} />
+          <DashboardCard title={t("opsDashboard.queuePending")} value={health.data ? String(health.data.queue_pending) : "—"} loading={health.loading} href="/admin/jobs" />
+          <DashboardCard title={t("opsDashboard.queueRunning")} value={health.data ? String(health.data.queue_running) : "—"} loading={health.loading} href="/admin/jobs" />
+          <DashboardCard title={t("opsDashboard.jobsFailed")} value={health.data ? String(health.data.jobs_failed_total) : "—"} loading={health.loading} tone={health.data && health.data.jobs_failed_total > 0 ? "danger" : "neutral"} href="/admin/jobs" />
+          <DashboardCard title={t("opsDashboard.retryScheduled")} value={health.data ? String(health.data.queue_retry_scheduled) : "—"} loading={health.loading} href="/admin/jobs" />
           <DashboardCard title={t("opsDashboard.storageUsed")} value={health.data ? `${health.data.storage_used_mb} MB` : "—"} loading={health.loading} />
           <DashboardCard title={t("opsDashboard.databaseSize")} value={health.data?.database_size_mb != null ? `${health.data.database_size_mb} MB` : t("opsDashboard.unavailable")} loading={health.loading} />
           <DashboardCard
@@ -209,7 +235,21 @@ export default function PlatformAdminDashboardPage() {
           </div>
         ) : null}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <DashboardCard title={t("opsDashboard.monthlyGrowth")} value={growth.data ? `${growth.data.monthly_growth_percent}%` : "—"} loading={growth.loading} />
+          {/* Phase UX4: this one genuinely is a trend (can go negative),
+              unlike MRR/ARR above -- green for growth, red for decline,
+              neutral only at exactly 0. */}
+          <DashboardCard
+            title={t("opsDashboard.monthlyGrowth")}
+            value={growth.data ? `${growth.data.monthly_growth_percent}%` : "—"}
+            loading={growth.loading}
+            tone={
+              !growth.data || growth.data.monthly_growth_percent === 0
+                ? "neutral"
+                : growth.data.monthly_growth_percent > 0
+                  ? "success"
+                  : "danger"
+            }
+          />
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <DailySignupsChart data={growth.data?.daily_signups ?? []} loading={growth.loading} />

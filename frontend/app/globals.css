@@ -25,8 +25,84 @@ body {
   animation: toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Phase UX4 -- shared microinteraction keyframes. Every dialog/drawer/
+   popover in the app pops in with one of these three, instead of the
+   zero-animation "just appears" every one of them had before -- a small,
+   consistent bit of motion is one of the cheapest, highest-leverage ways
+   to make a UI read as "product-made," and putting it here (not
+   per-component) means it stays visually identical everywhere it's used. */
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-backdrop-in {
+  animation: backdrop-in 150ms ease-out both;
+}
+
+/* Dialogs (centered, role="dialog"/"alertdialog") -- a small scale+fade,
+   the same "settling into place" motion most polished SaaS modals use. */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-modal-in {
+  animation: modal-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Anchored popovers (notification center, row-action menus) -- a smaller,
+   faster version of modal-in; these open from a specific trigger point,
+   not the center of the screen, so a large motion would feel disconnected
+   from the element that opened them. */
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-dropdown-in {
+  animation: dropdown-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Mobile bottom sheets -- slides up from off-screen rather than fading,
+   matching the native bottom-sheet convention this app's existing mobile
+   off-canvas nav (AppShell) already established. */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-sheet-in {
+  animation: sheet-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-toast-in {
+  .animate-toast-in,
+  .animate-backdrop-in,
+  .animate-modal-in,
+  .animate-dropdown-in,
+  .animate-sheet-in {
     animation: none !important;
     opacity: 1;
     transform: none;

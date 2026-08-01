@@ -222,6 +222,7 @@ export default function DashboardPage() {
           description={t("dashboard.totalInvoicesDescription")}
           loading={loading}
           tone="info"
+          href="/invoices"
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -248,6 +249,7 @@ export default function DashboardPage() {
           description={t("dashboard.totalCustomersDescription")}
           loading={loading}
           tone="info"
+          href="/customers"
           icon={
             <svg
               xmlns="http://www.w3.org/2000/svg"

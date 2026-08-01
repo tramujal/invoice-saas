@@ -179,7 +179,7 @@ export function PlanFormDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-slate-900/40 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !submitting) onClose();
       }}
@@ -188,7 +188,7 @@ export function PlanFormDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
+        className="max-h-[90vh] w-full max-w-lg animate-modal-in overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
       >
         <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
 

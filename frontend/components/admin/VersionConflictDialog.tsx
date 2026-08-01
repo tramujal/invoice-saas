@@ -58,12 +58,12 @@ export function VersionConflictDialog({
   if (!open || !mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-slate-900/40 p-4">
       <div
         role="alertdialog"
         aria-modal="true"
         aria-label={t(titleKey)}
-        className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
+        className="w-full max-w-md animate-modal-in rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
       >
         <h2 className="text-sm font-semibold text-slate-900">{t(titleKey)}</h2>
         <p className="mt-2 text-sm text-slate-600">{t(messageKey)}</p>

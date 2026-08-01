@@ -248,7 +248,7 @@ export function RowActionsMenu({ label, children }: RowActionsMenuProps) {
                 left: placement?.left ?? -9999,
                 visibility: placement ? "visible" : "hidden",
               }}
-              className="z-50 min-w-[180px] rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg ring-1 ring-black/5"
+              className="z-50 min-w-[180px] animate-dropdown-in rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg ring-1 ring-black/5"
             >
               <MenuContext.Provider value={{ close }}>{children}</MenuContext.Provider>
             </div>,
@@ -270,7 +270,7 @@ type RowActionsMenuItemProps = {
 };
 
 function itemClassName(destructive?: boolean): string {
-  return `block w-full px-3 py-2 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+  return `block w-full px-3 py-2 text-left text-sm outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
     destructive
       ? "text-red-700 hover:bg-red-50 focus:bg-red-50"
       : "text-slate-800 hover:bg-slate-50 focus:bg-slate-50"

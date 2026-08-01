@@ -96,6 +96,52 @@ describe("NotificationBell", () => {
     expect(await screen.findByText("You're all caught up.")).toBeInTheDocument();
   });
 
+  it("shows a loading skeleton instead of the empty message while the fetch is in flight", async () => {
+    // Phase UX4 regression: `items` starts null, and the pre-redesign
+    // component treated null identically to "loaded, and it's empty" --
+    // every open flashed "You're all caught up." before real data
+    // arrived. A never-resolving promise keeps the component in its
+    // loading state indefinitely so this is actually observable.
+    apiFetchMock.mockImplementation(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationBell />);
+
+    await user.click(screen.getByRole("button", { name: "Notifications" }));
+
+    expect(screen.getByText("Loading notifications…")).toBeInTheDocument();
+    expect(screen.queryByText("You're all caught up.")).not.toBeInTheDocument();
+  });
+
+  it("renders a relative timestamp for each notification", async () => {
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+    apiFetchMock.mockResolvedValue({
+      total: 1,
+      unread_count: 1,
+      items: [makeNotification({ created_at: recent })],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationBell />);
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: "Notifications" }));
+
+    expect(await screen.findByText("5m ago")).toBeInTheDocument();
+  });
+
+  it("renders the panel as a dialog with a close button", async () => {
+    apiFetchMock.mockResolvedValue({ total: 0, unread_count: 0, items: [] });
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationBell />);
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: "Notifications" }));
+
+    const panel = await screen.findByRole("dialog", { name: "Notifications" });
+    expect(panel).toHaveClass("md:w-[400px]");
+    await user.click(screen.getByRole("button", { name: "Close notifications" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("marks a notification read on click and decrements the badge", async () => {
     const initial: PaginatedNotificationsResponse = {
       total: 1,

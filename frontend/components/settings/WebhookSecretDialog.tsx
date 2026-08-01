@@ -54,12 +54,12 @@ export function WebhookSecretDialog({ secret, onClose }: WebhookSecretDialogProp
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex animate-backdrop-in items-center justify-center bg-slate-900/40 p-4">
       <div
         role="alertdialog"
         aria-modal="true"
         aria-label={t("webhooks.secretDialogTitle")}
-        className="w-[calc(100vw-2rem)] max-w-lg rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
+        className="w-[calc(100vw-2rem)] max-w-lg animate-modal-in rounded-2xl border border-amber-200 bg-white p-5 shadow-xl"
       >
         <h2 className="text-sm font-semibold text-slate-900">{t("webhooks.secretDialogTitle")}</h2>
         <p className="mt-2 text-sm text-slate-600">{t("webhooks.secretDialogMessage")}</p>
