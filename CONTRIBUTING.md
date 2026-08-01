@@ -11,8 +11,9 @@ not a bureaucracy — read it once and you're set.
 
 ## Running tests locally
 
-There's no CI yet (see the [Roadmap](README.md#roadmap)), so running these
-yourself before opening a PR is what stands in for it:
+CI (`.github/workflows/ci.yml`) runs these same checks automatically and
+blocks merging on failure — see [`docs/ci.md`](docs/ci.md). Run them
+yourself before opening a PR so you're not waiting on CI to find out:
 
 ```bash
 # Backend

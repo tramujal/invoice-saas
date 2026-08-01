@@ -2,14 +2,13 @@
 window-parameterized snapshot of the core KPI-engine metrics
 (app.analytics.calculators), assembled entirely by AnalyticsService.
 
-Deliberately the only route in this router for now: Phase 16A's job is
-the analytics DOMAIN (AnalyticsService, calculators, time windows), not a
-new dashboard UI -- see that phase's own completion report for the full
-rationale. Every metric this endpoint returns is already independently
-callable through AnalyticsService; adding a second, more specific route
-later (e.g. a dedicated top-customers or revenue-trend endpoint) is a
-router-only change, never a recomputation -- exactly the point of
-building the calculator layer first.
+GET .../analytics/trends (added after this router's first route) is the
+second, more specific route the module originally anticipated: forecast
+and period-comparison data, built the same way -- assembled entirely by
+AnalyticsService/calculators, never recomputed here. Every metric either
+route returns is already independently callable through AnalyticsService;
+this file stays router-only, translating query params to service calls
+and service results to response schemas.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status

@@ -1,6 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MarkdownMessage } from "@/components/assistant/MarkdownMessage";
 import { ApiError } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth-storage";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
@@ -13,6 +14,26 @@ const searchParamsGet = vi.fn().mockReturnValue(null);
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
   useSearchParams: () => ({ get: searchParamsGet }),
+}));
+
+// The page renders assistant replies through next/dynamic(..., { ssr:
+// false }) purely as a production bundle-size optimization (see
+// MarkdownMessage.tsx's own docstring) -- in a real browser that's an
+// async chunk load, but it has no bearing on this page's actual
+// behavior, which is what these tests care about. Left un-mocked, that
+// async boundary sits between a message being added to state and its
+// text actually landing in the DOM, racing against every `waitFor`
+// below; under normal load the gap is imperceptible, but under a fully
+// parallel test-suite run (49 files' worth of concurrent module
+// transforms competing for the same event loop) it occasionally
+// outlasted `waitFor`'s timeout -- a real, if rare, flake, not a bug in
+// the component. Mocking next/dynamic to return the already-imported
+// component directly removes the async boundary entirely rather than
+// papering over it with a longer timeout: every assertion below is now
+// synchronized on this page's own state updates only, never on a
+// module-loading race.
+vi.mock("next/dynamic", () => ({
+  default: () => MarkdownMessage,
 }));
 
 const apiFetchStreamMock = vi.fn();

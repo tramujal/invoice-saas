@@ -33,18 +33,30 @@ class TestGetRevenueTrend:
         assert get_revenue_trend(db_session, org.organization.id, current=current, previous=previous) == {}
 
     def test_growth_between_two_months(self, db_session):
+        # A fixed reference instant, never datetime.now(): calendar months
+        # vary from 28 to 31 days, so a hardcoded day-count offset (e.g.
+        # "45 days ago") lands in the previous calendar month on some
+        # real-world dates and two months back on others -- exactly what
+        # made this test date-dependent (it failed in practice on dates
+        # where the two preceding months summed to fewer than 45 days).
+        # Pinning `now` removes that dependency; the window boundaries
+        # are still resolved by the real resolve_time_window() production
+        # code, and the fixture timestamps are placed unambiguously
+        # inside those resolved boundaries rather than guessed at via a
+        # day-count offset.
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         org = make_org_with_owner(db_session, email="rt-growth@example.com")
-        now = datetime.now(timezone.utc)
+        current, previous = _windows(now)
+
         old = make_invoice(db_session, org.organization, org.user)
-        old.created_at = now - timedelta(days=45)
+        old.created_at = previous.start + timedelta(days=1)
         db_session.commit()
         new_1 = make_invoice(db_session, org.organization, org.user)
         new_2 = make_invoice(db_session, org.organization, org.user)
         for inv in (new_1, new_2):
-            inv.created_at = now
+            inv.created_at = current.start + timedelta(days=1)
         db_session.commit()
 
-        current, previous = _windows(now)
         result = get_revenue_trend(db_session, org.organization.id, current=current, previous=previous)
         usd = result["USD"]
         assert usd.current == Decimal("200.00")
@@ -105,15 +117,23 @@ class TestGetInvoiceCountTrend:
 
 class TestGetCustomerGrowthTrend:
     def test_counts_customers_created_in_each_window(self, db_session):
+        # Fixed reference instant -- see test_growth_between_two_months's
+        # identical rationale above for why a hardcoded day-count offset
+        # (the previous "45 days ago") is date-dependent and a
+        # window-derived timestamp isn't.
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         org = make_org_with_owner(db_session, email="cgt@example.com")
-        now = datetime.now(timezone.utc)
-        old_customer = make_customer(db_session, org.organization, email="old@example.com")
-        old_customer.created_at = now - timedelta(days=45)
-        db_session.commit()
-        make_customer(db_session, org.organization, email="new1@example.com")
-        make_customer(db_session, org.organization, email="new2@example.com")
-
         current, previous = _windows(now)
+
+        old_customer = make_customer(db_session, org.organization, email="old@example.com")
+        old_customer.created_at = previous.start + timedelta(days=1)
+        db_session.commit()
+        new1 = make_customer(db_session, org.organization, email="new1@example.com")
+        new2 = make_customer(db_session, org.organization, email="new2@example.com")
+        for customer in (new1, new2):
+            customer.created_at = current.start + timedelta(days=1)
+        db_session.commit()
+
         result = get_customer_growth_trend(db_session, org.organization.id, current=current, previous=previous)
         assert result.current == Decimal("2")
         assert result.previous == Decimal("1")

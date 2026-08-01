@@ -112,19 +112,32 @@ class TestGetRevenueBreakdown:
 
 class TestGetRevenueGrowth:
     def test_positive_growth_between_windows(self, db_session):
+        # A fixed reference instant, never datetime.now(): calendar months
+        # vary from 28 to 31 days, so a hardcoded day-count offset (e.g.
+        # "45 days ago") lands in the previous calendar month on some
+        # real-world dates and two months back on others (e.g. any date
+        # in the first half of a month whose two preceding months include
+        # a short February) -- which is exactly what made this test
+        # date-dependent. Pinning `now` removes that dependency; the
+        # window boundaries themselves are still resolved by the real
+        # resolve_time_window() production code, never recomputed by hand
+        # here, and the fixture timestamps are placed unambiguously
+        # inside those resolved boundaries rather than guessed at via a
+        # day-count offset.
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         org = make_org_with_owner(db_session, email="growth@example.com")
-        now = datetime.now(timezone.utc)
+        this_month = resolve_time_window(TimeWindowKind.current_month, now=now)
+        last_month = resolve_time_window(TimeWindowKind.previous_month, now=now)
+
         old = make_invoice(db_session, org.organization, org.user)
-        old.created_at = now - timedelta(days=45)
+        old.created_at = last_month.start + timedelta(days=1)
         db_session.commit()
         new_1 = make_invoice(db_session, org.organization, org.user)
         new_2 = make_invoice(db_session, org.organization, org.user)
         for inv in (new_1, new_2):
-            inv.created_at = now
+            inv.created_at = this_month.start + timedelta(days=1)
         db_session.commit()
 
-        this_month = resolve_time_window(TimeWindowKind.current_month, now=now)
-        last_month = resolve_time_window(TimeWindowKind.previous_month, now=now)
         growth = get_revenue_growth(db_session, org.organization.id, current=this_month, previous=last_month)
         assert growth["USD"] == Decimal("100.00")  # 200 vs 100 = +100%
 
