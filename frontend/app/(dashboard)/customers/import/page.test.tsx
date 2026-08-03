@@ -28,6 +28,8 @@ function makeRows(count: number): ImportPreviewRowResult[] {
     status: "valid" as const,
     reason_code: null,
     values: { name: `Person ${i + 1}`, email: `person${i + 1}@example.com` },
+    duplicate_customer_id: null,
+    duplicate_customer_name: null,
   }));
 }
 

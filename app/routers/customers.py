@@ -2,12 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session
 
+from app.customer_duplicates import check_customer_duplicates
 from app.database import get_db
 from app.deps import get_current_user, require_permission, require_verified_email
 from app.models import Customer, User
 from app.permissions import Permission
 from app.schemas import (
     CustomerCreateRequest,
+    CustomerDuplicateCheckRequest,
+    CustomerDuplicateCheckResponse,
+    CustomerDuplicateMatchResponse,
     CustomerResponse,
     CustomerSortField,
     CustomerUpdateRequest,
@@ -15,6 +19,7 @@ from app.schemas import (
 )
 from app.services.customers import (
     CustomerNotFoundError,
+    TaxIdDuplicateError,
     create_customer_record,
     delete_customer_record,
     get_customer_in_org,
@@ -62,9 +67,38 @@ def create_customer(
             body.address,
             body.tax_id,
             actor_user_id=current_user.id,
+            duplicate_warning_acknowledged=body.duplicate_warning_acknowledged,
         )
     except PlanLimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
+    except TaxIdDuplicateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
+
+
+@router.post("/check-duplicates", response_model=CustomerDuplicateCheckResponse)
+def check_duplicates(
+    organization_id: str,
+    body: CustomerDuplicateCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CustomerDuplicateCheckResponse:
+    # Read-only lookup, gated on customer_read (not customer_write): it
+    # never mutates anything and returns nothing a customer_read holder
+    # couldn't already see via GET .../customers.
+    require_permission(current_user, organization_id, Permission.customer_read, db)
+    result = check_customer_duplicates(
+        db,
+        organization_id,
+        name=body.name,
+        email=body.email,
+        phone=body.phone,
+        tax_id=body.tax_id,
+        exclude_customer_id=body.exclude_customer_id,
+    )
+    return CustomerDuplicateCheckResponse(
+        severity=result.severity.value,
+        matches=[CustomerDuplicateMatchResponse.model_validate(m) for m in result.matches],
+    )
 
 
 @router.get("", response_model=list[CustomerResponse])
@@ -107,9 +141,19 @@ def update_customer(
     require_permission(current_user, organization_id, Permission.customer_write, db)
     require_verified_email(current_user)
     customer = _customer_or_404(db, organization_id, customer_id)
-    return update_customer_record(
-        db, customer, body.model_dump(exclude_unset=True), actor_user_id=current_user.id
+    changes = body.model_dump(
+        exclude_unset=True, exclude={"duplicate_warning_acknowledged"}
     )
+    try:
+        return update_customer_record(
+            db,
+            customer,
+            changes,
+            actor_user_id=current_user.id,
+            duplicate_warning_acknowledged=body.duplicate_warning_acknowledged,
+        )
+    except TaxIdDuplicateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
 
 @router.delete("/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)

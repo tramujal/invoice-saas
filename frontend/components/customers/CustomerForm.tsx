@@ -2,15 +2,21 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+import { CustomerDuplicateDialog } from "@/components/customers/CustomerDuplicateDialog";
 import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
 import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
-import { formatApiError, getPlanLimitReachedDetail, isEmailNotVerifiedError } from "@/lib/format-api-error";
+import {
+  formatApiError,
+  getPlanLimitReachedDetail,
+  getTaxIdDuplicateDetail,
+  isEmailNotVerifiedError,
+} from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import type { TranslateFn } from "@/lib/i18n/useTranslation";
-import type { Customer, PlanLimitReachedDetail } from "@/lib/types";
+import type { Customer, CustomerDuplicateCheckResponse, PlanLimitReachedDetail } from "@/lib/types";
 
 const LIMITS = {
   name: 255,
@@ -77,9 +83,13 @@ type CustomerFormProps = {
   customer?: Customer | null;
   onSaved: () => void | Promise<void>;
   onCancel?: () => void;
+  /** Phase UX5 -- called when the user picks "Open existing customer"
+   * from the duplicate dialog. Optional so CustomerForm stays usable
+   * anywhere a caller doesn't need that shortcut. */
+  onOpenExisting?: (customerId: string) => void;
 };
 
-export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps) {
+export function CustomerForm({ customer, onSaved, onCancel, onOpenExisting }: CustomerFormProps) {
   const toast = useToast();
   const { t } = useTranslation();
   const isEditing = Boolean(customer);
@@ -91,7 +101,13 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
   const [taxId, setTaxId] = useState(customer?.tax_id ?? "");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
   const [planLimitDetail, setPlanLimitDetail] = useState<PlanLimitReachedDetail | null>(null);
+  // Phase UX5 -- Level 2/3 (warning) or Level 1 (blocking) duplicate
+  // match, opens CustomerDuplicateDialog. Level 4 (name-only) never sets
+  // this -- it's a lightweight toast instead, fired directly from
+  // handleSubmit (see there for why it isn't tied to component state).
+  const [duplicateResult, setDuplicateResult] = useState<CustomerDuplicateCheckResponse | null>(null);
 
   useEffect(() => {
     setName(customer?.name ?? "");
@@ -100,6 +116,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
     setAddress(customer?.address ?? "");
     setTaxId(customer?.tax_id ?? "");
     setFieldErrors({});
+    setDuplicateResult(null);
   }, [customer]);
 
   function resetForm() {
@@ -111,22 +128,36 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
     setFieldErrors({});
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  /** Phase UX5: what to send to POST .../customers/check-duplicates. On
+   * create, every trimmed field is checked as-is. On edit, a field is
+   * sent blank ("don't check this field") whenever it's unchanged from
+   * the original customer -- so editing one field never re-surfaces a
+   * warning about a pre-existing collision on a field the user isn't
+   * touching (required behavior, not an optimization). */
+  function duplicateCheckPayload() {
+    const trimmed = { name: name.trim(), email: email.trim(), phone: phone.trim(), tax_id: taxId.trim() };
+    if (!isEditing || !customer) return trimmed;
+    return {
+      name: trimmed.name !== customer.name ? trimmed.name : "",
+      email: trimmed.email !== customer.email ? trimmed.email : "",
+      phone: trimmed.phone !== customer.phone ? trimmed.phone : "",
+      tax_id: trimmed.tax_id !== customer.tax_id ? trimmed.tax_id : "",
+      exclude_customer_id: customer.id,
+    };
+  }
 
-    const errs = validate(t, { name, email, phone, address, taxId });
-    if (errs) {
-      setFieldErrors(errs);
-      return;
-    }
-    setFieldErrors({});
-
+  /** The actual create/update call -- shared by the normal submit path
+   * (no duplicate found, or the user already saw & dismissed a Level 4
+   * suggestion) and the duplicate dialog's "Create anyway"/"Save anyway"
+   * button (duplicateWarningAcknowledged=true). */
+  async function submitCustomer(duplicateWarningAcknowledged: boolean) {
     const payload = {
       name: name.trim(),
       email: email.trim(),
       phone: phone.trim(),
       address: address.trim(),
       tax_id: taxId.trim(),
+      duplicate_warning_acknowledged: duplicateWarningAcknowledged,
     };
 
     const loadingId = toast.loading(
@@ -150,12 +181,33 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
         toast.success(t("customers.toastCreated"));
         resetForm();
       }
+      setDuplicateResult(null);
       await onSaved();
     } catch (err) {
       toast.dismiss(loadingId);
       const planLimit = getPlanLimitReachedDetail(err);
+      const taxIdDuplicate = getTaxIdDuplicateDetail(err);
       if (planLimit) {
         setPlanLimitDetail(planLimit);
+      } else if (taxIdDuplicate) {
+        // Defense-in-depth fallback: the backend blocks tax_id
+        // unconditionally (see TaxIdDuplicateError), independent of
+        // whether the pre-submit check-duplicates call ran or somehow
+        // missed this (e.g. a race with a concurrent create). Shows the
+        // exact same blocking dialog the pre-check would have shown.
+        setDuplicateResult({
+          severity: "blocking",
+          matches: [
+            {
+              customer_id: taxIdDuplicate.customer_id,
+              customer_name: taxIdDuplicate.customer_name,
+              email: "",
+              phone: "",
+              tax_id: taxId.trim(),
+              reasons: ["tax_id"],
+            },
+          ],
+        });
       } else {
         toast.error(
           isEmailNotVerifiedError(err)
@@ -171,7 +223,65 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
     }
   }
 
-  const disabled = isSubmitting;
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+
+    const errs = validate(t, { name, email, phone, address, taxId });
+    if (errs) {
+      setFieldErrors(errs);
+      return;
+    }
+    setFieldErrors({});
+
+    setIsCheckingDuplicates(true);
+    let duplicateCheck: CustomerDuplicateCheckResponse | null = null;
+    try {
+      duplicateCheck = await apiFetch<CustomerDuplicateCheckResponse>(
+        orgPath("customers/check-duplicates"),
+        { method: "POST", body: JSON.stringify(duplicateCheckPayload()) }
+      );
+    } catch {
+      // The advisory check itself failing (e.g. a transient network
+      // error) must never block the user from creating/saving -- fall
+      // through exactly as if severity had been "none". Tax_id is still
+      // enforced server-side regardless (see submitCustomer's
+      // taxIdDuplicate fallback above).
+      duplicateCheck = null;
+    } finally {
+      setIsCheckingDuplicates(false);
+    }
+
+    if (duplicateCheck && (duplicateCheck.severity === "warning" || duplicateCheck.severity === "blocking")) {
+      setDuplicateResult(duplicateCheck);
+      return;
+    }
+
+    // Level 4 (name-only, "suggestion"): a lightweight, non-blocking
+    // heads-up shown as its own toast -- deliberately NOT tied to the
+    // form's own field state, since the create path resets every field
+    // right after this on success (see resetForm() in submitCustomer),
+    // which would otherwise wipe an inline hint before anyone could read
+    // it. Shown as its own toast, alongside (not instead of) the
+    // create/save success toast, and never gates the submit that follows.
+    if (duplicateCheck?.severity === "suggestion" && duplicateCheck.matches[0]) {
+      toast.success(
+        t("customerDuplicate.suggestionText", { name: duplicateCheck.matches[0].customer_name })
+      );
+    }
+
+    await submitCustomer(false);
+  }
+
+  function handleCancelDuplicate() {
+    setDuplicateResult(null);
+  }
+
+  function handleOpenExistingDuplicate(customerId: string) {
+    setDuplicateResult(null);
+    onOpenExisting?.(customerId);
+  }
+
+  const disabled = isSubmitting || isCheckingDuplicates;
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
@@ -315,7 +425,7 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
             {isEditing ? t("common.cancel") : t("common.clear")}
           </Button>
           <Button type="submit" disabled={disabled}>
-            {isSubmitting ? (
+            {isSubmitting || isCheckingDuplicates ? (
               <>
                 <svg
                   className="h-4 w-4 shrink-0 animate-spin"
@@ -350,6 +460,14 @@ export function CustomerForm({ customer, onSaved, onCancel }: CustomerFormProps)
       </form>
 
       <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
+      <CustomerDuplicateDialog
+        result={duplicateResult}
+        submitting={isSubmitting}
+        onCancel={handleCancelDuplicate}
+        onCreateAnyway={() => void submitCustomer(true)}
+        onOpenExisting={handleOpenExistingDuplicate}
+        createAnywayLabel={isEditing ? t("customerDuplicate.saveAnywayButton") : undefined}
+      />
     </section>
   );
 }

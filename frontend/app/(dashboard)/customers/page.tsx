@@ -103,6 +103,11 @@ export default function CustomersPage() {
   const debouncedSearch = useDebouncedValue(search, 300);
   const [sortBy, setSortBy] = useState<CustomerSortBy>("created_at");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
+  // Phase UX5 -- set only when "Open existing customer" (from the
+  // duplicate dialog) targets a customer not present in the currently
+  // loaded/filtered `items` (e.g. an active search hid it). Cleared once
+  // the id is found after the filter-reset-triggered reload below.
+  const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
 
   const sortFields: { value: CustomerSortBy; label: string }[] = [
     { value: "created_at", label: t("invoices.sortCreatedDate") },
@@ -162,6 +167,33 @@ export default function CustomersPage() {
     setSortBy("created_at");
     setSortDir("desc");
   }
+
+  /** Phase UX5 -- "Open existing customer" from CustomerDuplicateDialog.
+   * There is no /customers/[id] route in this app (customers are edited
+   * inline at the top of this same page, via editingCustomer) -- this
+   * reuses that exact existing mechanism rather than inventing a new one.
+   * The matched customer is almost always already in `items` (the org's
+   * customer list has no pagination), so this resolves instantly in the
+   * common case; the pendingOpenId fallback below only matters when an
+   * active search filter happens to be hiding it. */
+  function openExistingCustomer(customerId: string) {
+    const existing = items?.find((c) => c.id === customerId);
+    if (existing) {
+      setEditingCustomer(existing);
+      return;
+    }
+    setPendingOpenId(customerId);
+    resetFilters();
+  }
+
+  useEffect(() => {
+    if (!pendingOpenId || !items) return;
+    const found = items.find((c) => c.id === pendingOpenId);
+    if (found) {
+      setEditingCustomer(found);
+      setPendingOpenId(null);
+    }
+  }, [pendingOpenId, items]);
 
   async function downloadTemplate(format: "csv" | "xlsx") {
     try {
@@ -247,9 +279,10 @@ export default function CustomersPage() {
             await load({ silent: true });
           }}
           onCancel={() => setEditingCustomer(null)}
+          onOpenExisting={openExistingCustomer}
         />
       ) : (
-        <CustomerForm onSaved={() => load({ silent: true })} />
+        <CustomerForm onSaved={() => load({ silent: true })} onOpenExisting={openExistingCustomer} />
       )}
 
       <FilterToolbar

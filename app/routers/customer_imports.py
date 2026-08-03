@@ -13,12 +13,15 @@ import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.customer_validation import normalize_customer_email, normalize_tax_id
 from app.database import get_db
 from app.deps import get_current_user, require_permission, require_verified_email
 from app.imports.base import build_confirm, build_preview
 from app.imports.column_mapping import ImportMappingError
 from app.imports.customers import (
     CUSTOMER_FIELD_SPECS,
+    REASON_DUPLICATE_EMAIL,
+    REASON_DUPLICATE_TAX_ID,
     build_template_labels_and_example,
     fetch_existing_keys,
     make_persist_fn,
@@ -27,7 +30,12 @@ from app.imports.customers import (
 from app.imports.limits import IMPORT_MAX_FILE_SIZE_BYTES, IMPORT_MAX_PREVIEW_ROWS, IMPORT_MAX_ROWS
 from app.imports.parsers import ImportFileError, parse_upload
 from app.imports.templates import build_csv_template, build_xlsx_template
-from app.imports.types import REASON_FILE_TOO_LARGE, REASON_UNSUPPORTED_FILE_TYPE
+from app.imports.types import (
+    REASON_FILE_TOO_LARGE,
+    REASON_UNSUPPORTED_FILE_TYPE,
+    ConfirmRow,
+    PreviewRow,
+)
 from app.models import Organization, User
 from app.permissions import Permission
 from app.rate_limit import (
@@ -51,6 +59,43 @@ def _hash(value: str) -> str:
     """Never logs a raw organization/user id — only a short, stable,
     non-reversible fingerprint, matching app.rate_limit's own convention."""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _duplicate_customer_match(
+    reason_code: str | None,
+    values: dict[str, str | None],
+    existing_emails: dict[str, tuple[str, str]],
+    existing_tax_ids: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    """The (id, name) of the existing DB customer a duplicate row
+    collided with, or None -- including for a row flagged duplicate only
+    against an earlier row in the SAME file (existing_* only knows about
+    the database, so an in-file-only collision correctly resolves to
+    None: there's no real customer yet to link to, just another pending
+    row)."""
+    if reason_code == REASON_DUPLICATE_EMAIL:
+        email = values.get("email") or ""
+        return existing_emails.get(normalize_customer_email(email)) if email else None
+    if reason_code == REASON_DUPLICATE_TAX_ID:
+        tax_id = values.get("tax_id") or ""
+        return existing_tax_ids.get(normalize_tax_id(tax_id)) if tax_id else None
+    return None
+
+
+def _row_result_dict(
+    row: PreviewRow | ConfirmRow,
+    existing_emails: dict[str, tuple[str, str]],
+    existing_tax_ids: dict[str, tuple[str, str]],
+) -> dict:
+    match = _duplicate_customer_match(row.reason_code, row.values, existing_emails, existing_tax_ids)
+    return {
+        "row_number": row.row_number,
+        "status": row.status.value,
+        "reason_code": row.reason_code,
+        "values": row.values,
+        "duplicate_customer_id": match[0] if match else None,
+        "duplicate_customer_name": match[1] if match else None,
+    }
 
 
 def _organization_or_404(db: Session, organization_id: str) -> Organization:
@@ -170,15 +215,7 @@ def preview_customer_import(
         requires_manual_mapping=mapping_result.requires_manual_mapping,
         missing_required_fields=mapping_result.missing_required_fields,
         total_rows=preview.total_rows,
-        preview_rows=[
-            {
-                "row_number": row.row_number,
-                "status": row.status.value,
-                "reason_code": row.reason_code,
-                "values": row.values,
-            }
-            for row in preview.rows
-        ],
+        preview_rows=[_row_result_dict(row, existing_emails, existing_tax_ids) for row in preview.rows],
         valid_count=preview.valid_count,
         warning_count=preview.warning_count,
         invalid_count=preview.invalid_count,
@@ -258,15 +295,7 @@ def confirm_customer_import(
         skipped_duplicate_count=result.skipped_duplicate_count,
         failed_count=result.failed_count,
         total_processed=result.total_processed,
-        row_results=[
-            {
-                "row_number": row.row_number,
-                "status": row.status.value,
-                "reason_code": row.reason_code,
-                "values": row.values,
-            }
-            for row in result.rows
-        ],
+        row_results=[_row_result_dict(row, existing_emails, existing_tax_ids) for row in result.rows],
     )
 
 

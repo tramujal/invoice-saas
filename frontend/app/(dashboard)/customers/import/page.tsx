@@ -649,6 +649,11 @@ export default function CustomerImportPage() {
                       </td>
                       <td className="px-4 py-2 text-xs text-slate-500">
                         {reasonLabel(t, row.reason_code)}
+                        {row.duplicate_customer_name ? (
+                          <span className="block text-slate-400">
+                            {t("import.duplicateMatchesCustomer", { name: row.duplicate_customer_name })}
+                          </span>
+                        ) : null}
                       </td>
                     </tr>
                   ))}

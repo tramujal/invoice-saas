@@ -790,6 +790,14 @@ class CustomerCreateRequest(BaseModel):
     phone: str = Field(default="", max_length=64)
     address: str = Field(default="", max_length=512)
     tax_id: str = Field(default="", max_length=64)
+    # True when the caller already saw a Level 2/3 (warning) duplicate
+    # dialog and explicitly chose "Create anyway" -- never required, and
+    # never itself a way to bypass the Level 1 (tax_id) block, which is
+    # enforced unconditionally in app.services.customers regardless of
+    # this flag. Recorded on the emitted event's payload only when True
+    # (see create_customer_record) -- purely an audit detail, not part of
+    # the persisted Customer row.
+    duplicate_warning_acknowledged: bool = False
 
     @field_validator("email")
     @classmethod
@@ -803,6 +811,7 @@ class CustomerUpdateRequest(BaseModel):
     phone: str | None = Field(default=None, max_length=64)
     address: str | None = Field(default=None, max_length=512)
     tax_id: str | None = Field(default=None, max_length=64)
+    duplicate_warning_acknowledged: bool = False
 
     @field_validator("email")
     @classmethod
@@ -810,6 +819,37 @@ class CustomerUpdateRequest(BaseModel):
         if value is None:
             return value
         return _check_customer_email_format(value)
+
+
+class CustomerDuplicateCheckRequest(BaseModel):
+    """Body for POST .../customers/check-duplicates. Every field is
+    optional and an empty string means "don't check this field" (see
+    app.customer_duplicates.check_customer_duplicates) -- the edit flow
+    relies on this to skip fields the user didn't change."""
+
+    name: str = Field(default="", max_length=255)
+    email: str = Field(default="", max_length=255)
+    phone: str = Field(default="", max_length=64)
+    tax_id: str = Field(default="", max_length=64)
+    # Excludes this customer from the candidate pool -- always the id of
+    # the customer currently being edited, never set on create.
+    exclude_customer_id: str | None = None
+
+
+class CustomerDuplicateMatchResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    customer_id: str
+    customer_name: str
+    email: str
+    phone: str
+    tax_id: str
+    reasons: list[str]
+
+
+class CustomerDuplicateCheckResponse(BaseModel):
+    severity: Literal["none", "suggestion", "warning", "blocking"]
+    matches: list[CustomerDuplicateMatchResponse]
 
 
 class ProductCreateRequest(BaseModel):
@@ -1278,6 +1318,12 @@ class ImportPreviewRowResult(BaseModel):
     status: Literal["valid", "warning", "invalid", "duplicate"]
     reason_code: str | None
     values: dict[str, str | None]
+    # Set only when reason_code is a duplicate-against-the-database reason
+    # (e.g. duplicate_email/duplicate_tax_id) -- None for an in-file-only
+    # duplicate (the earlier occurrence is just another row, not yet a
+    # real customer to link to) and for every non-duplicate row.
+    duplicate_customer_id: str | None = None
+    duplicate_customer_name: str | None = None
 
 
 class ImportPreviewResponse(BaseModel):
@@ -1303,6 +1349,8 @@ class ImportConfirmRowResult(BaseModel):
     status: Literal["imported", "skipped", "failed"]
     reason_code: str | None
     values: dict[str, str | None]
+    duplicate_customer_id: str | None = None
+    duplicate_customer_name: str | None = None
 
 
 class ImportConfirmResponse(BaseModel):

@@ -1,5 +1,5 @@
 import { ApiError } from "@/lib/api";
-import type { CapabilityDeniedDetail, PlanLimitReachedDetail } from "@/lib/types";
+import type { CapabilityDeniedDetail, PlanLimitReachedDetail, TaxIdDuplicateDetail } from "@/lib/types";
 
 /** Shared shape check behind isEmailNotVerifiedError/isRateLimitedError:
  * both recognize a structured `detail: {code, message}` object (rather
@@ -67,6 +67,16 @@ export function getPlanLimitReachedDetail(err: unknown): PlanLimitReachedDetail 
 export function getCapabilityDeniedDetail(err: unknown): CapabilityDeniedDetail | null {
   if (!hasDetailCode(err, 403, "feature_not_available")) return null;
   const body = (err as ApiError).body as { detail: CapabilityDeniedDetail };
+  return body.detail;
+}
+
+/** Recognizes the structured 409 duplicate_tax_id (see
+ * app.services.customers.TaxIdDuplicateError) and returns its full detail
+ * payload -- Phase UX5's server-side, defense-in-depth tax-id block.
+ * Returns null for any other error shape. */
+export function getTaxIdDuplicateDetail(err: unknown): TaxIdDuplicateDetail | null {
+  if (!hasDetailCode(err, 409, "duplicate_tax_id")) return null;
+  const body = (err as ApiError).body as { detail: TaxIdDuplicateDetail };
   return body.detail;
 }
 

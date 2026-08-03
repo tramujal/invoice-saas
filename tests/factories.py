@@ -209,8 +209,12 @@ def make_customer(
     *,
     name: str = "Test Customer",
     email: str = "customer@example.com",
+    phone: str = "",
+    tax_id: str = "",
 ) -> Customer:
-    customer = Customer(organization_id=organization.id, name=name, email=email)
+    customer = Customer(
+        organization_id=organization.id, name=name, email=email, phone=phone, tax_id=tax_id
+    )
     db.add(customer)
     db.commit()
     db.refresh(customer)

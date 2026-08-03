@@ -118,22 +118,33 @@ def _email_validator(value: str) -> str | None:
 _CUSTOM_VALIDATORS: dict[str, Callable[[str], str | None]] = {"email": _email_validator}
 
 
-def fetch_existing_keys(db: Session, organization_id: str) -> tuple[set[str], set[str]]:
+def fetch_existing_keys(
+    db: Session, organization_id: str
+) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
     """One combined, bounded query for the whole import — never one query
-    per row. Returns (normalized_emails, normalized_tax_ids) for every
-    existing customer already in this organization."""
+    per row. Returns (normalized_email -> (customer_id, customer_name),
+    normalized_tax_id -> (customer_id, customer_name)) for every existing
+    customer already in this organization. Callers that only need
+    membership (e.g. `norm_email in existing_emails`) can keep treating
+    these as sets -- `in` on a dict already checks its keys -- while
+    app.routers.customer_imports also uses the id/name to report *which*
+    customer a duplicate row collided with (Phase UX5)."""
     rows = db.execute(
-        select(Customer.email, Customer.tax_id).where(
+        select(Customer.id, Customer.name, Customer.email, Customer.tax_id).where(
             Customer.organization_id == organization_id
         )
     ).all()
-    emails = {normalize_customer_email(email) for email, _tax_id in rows if email}
-    tax_ids = {normalize_tax_id(tax_id) for _email, tax_id in rows if tax_id}
+    emails = {
+        normalize_customer_email(email): (id_, name) for id_, name, email, _tax_id in rows if email
+    }
+    tax_ids = {
+        normalize_tax_id(tax_id): (id_, name) for id_, name, _email, tax_id in rows if tax_id
+    }
     return emails, tax_ids
 
 
 def make_row_processor(
-    existing_emails: set[str], existing_tax_ids: set[str]
+    existing_emails: dict[str, tuple[str, str]], existing_tax_ids: dict[str, tuple[str, str]]
 ) -> Callable[[dict[str, str]], tuple[PreviewRowStatus, str | None]]:
     """Builds a stateful per-row processor: field validation first (name
     required + format/length rules), then duplicate detection against

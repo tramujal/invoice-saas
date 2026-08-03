@@ -51,6 +51,34 @@ export type Customer = {
   updated_at: string;
 };
 
+// Phase UX5 -- tiered customer duplicate detection. Mirrors
+// app.customer_duplicates.DuplicateSeverity exactly.
+export type CustomerDuplicateSeverity = "none" | "suggestion" | "warning" | "blocking";
+
+export type CustomerDuplicateMatch = {
+  customer_id: string;
+  customer_name: string;
+  email: string;
+  phone: string;
+  tax_id: string;
+  reasons: string[];
+};
+
+export type CustomerDuplicateCheckResponse = {
+  severity: CustomerDuplicateSeverity;
+  matches: CustomerDuplicateMatch[];
+};
+
+// Structured 409 body from POST/PATCH .../customers when a tax_id already
+// belongs to another customer (see
+// app.services.customers.TaxIdDuplicateError.to_error_detail).
+export type TaxIdDuplicateDetail = {
+  code: "duplicate_tax_id";
+  message: string;
+  customer_id: string;
+  customer_name: string;
+};
+
 export type ImportTargetField = "name" | "email" | "phone" | "address" | "tax_id" | "ignore";
 
 export type ImportPreviewRowStatus = "valid" | "warning" | "invalid" | "duplicate";
@@ -61,6 +89,11 @@ export type ImportPreviewRowResult = {
   status: ImportPreviewRowStatus;
   reason_code: string | null;
   values: Record<string, string | null>;
+  // Set only for a duplicate row that collided with a real, existing
+  // database customer -- null for an in-file-only duplicate (see
+  // app.routers.customer_imports._duplicate_customer_match).
+  duplicate_customer_id: string | null;
+  duplicate_customer_name: string | null;
 };
 
 export type ImportPreviewResponse = {
@@ -83,6 +116,8 @@ export type ImportConfirmRowResult = {
   status: ImportConfirmRowStatus;
   reason_code: string | null;
   values: Record<string, string | null>;
+  duplicate_customer_id: string | null;
+  duplicate_customer_name: string | null;
 };
 
 export type ImportConfirmResponse = {

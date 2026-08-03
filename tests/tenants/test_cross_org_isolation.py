@@ -46,6 +46,18 @@ def test_unauthenticated_request_is_rejected(client, db_session, path_template):
     assert response.status_code == 401
 
 
+def test_foreign_user_cannot_check_customer_duplicates(client, db_session):
+    org_a = make_org_with_owner(db_session, email="owner-f@example.com", org_name="Org F")
+    org_b = make_org_with_owner(db_session, email="owner-g@example.com", org_name="Org G")
+
+    response = client.post(
+        f"/organizations/{org_a.organization.id}/customers/check-duplicates",
+        json={"email": "probe@example.com"},
+        headers=org_b.auth_headers,
+    )
+    assert response.status_code == 403
+
+
 def test_foreign_user_cannot_post_customer(client, db_session):
     org_a = make_org_with_owner(db_session, email="owner-d@example.com", org_name="Org D")
     org_b = make_org_with_owner(db_session, email="owner-e@example.com", org_name="Org E")
