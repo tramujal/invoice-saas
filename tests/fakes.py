@@ -11,6 +11,13 @@ from collections.abc import Iterator
 
 from app.ai.base import AIProvider, AIProviderError, ChatMessage, StreamEvent, ToolDefinition
 from app.email.base import EmailMessage, EmailSendError, EmailSender
+from app.whatsapp.provider_base import (
+    WhatsAppConnectionState,
+    WhatsAppConnectionStatus,
+    WhatsAppProvider,
+    WhatsAppProviderError,
+    WhatsAppQrCode,
+)
 
 
 class FakeAIProvider(AIProvider):
@@ -69,3 +76,51 @@ class FakeEmailSender(EmailSender):
             self.fail_next_n -= 1
             raise EmailSendError("simulated provider failure")
         self.sent.append(message)
+
+
+class FakeWhatsAppProvider(WhatsAppProvider):
+    """Controllable WhatsAppProvider for tests -- Phase 23. Records every
+    call so a test can assert exactly what text/document was sent to which
+    phone number, and can be pre-configured to fail (via `.fail_next_send`)
+    to exercise error/retry paths without a real bridge."""
+
+    def __init__(self) -> None:
+        self.state = WhatsAppConnectionState.connected
+        self.connected_phone_number: str | None = "+15550000000"
+        self.sent_text: list[tuple[str, str]] = []
+        self.sent_documents: list[tuple[str, str, bytes, str]] = []
+        self.fail_next_send = False
+        self.qr_requested = 0
+        self.reconnect_calls = 0
+        self.disconnect_calls = 0
+        self.delete_session_calls = 0
+
+    def get_connection_status(self) -> WhatsAppConnectionStatus:
+        return WhatsAppConnectionStatus(
+            state=self.state, connected_phone_number=self.connected_phone_number, last_heartbeat_at=None
+        )
+
+    def request_qr_code(self) -> WhatsAppQrCode:
+        self.qr_requested += 1
+        return WhatsAppQrCode(qr_data_base64="ZmFrZS1xcg==", expires_at="2026-01-01T00:00:00Z")
+
+    def send_text_message(self, phone_number: str, text: str) -> None:
+        if self.fail_next_send:
+            self.fail_next_send = False
+            raise WhatsAppProviderError("simulated send failure")
+        self.sent_text.append((phone_number, text))
+
+    def send_document(self, phone_number: str, filename: str, content: bytes, mime_type: str) -> None:
+        if self.fail_next_send:
+            self.fail_next_send = False
+            raise WhatsAppProviderError("simulated send failure")
+        self.sent_documents.append((phone_number, filename, content, mime_type))
+
+    def reconnect(self) -> None:
+        self.reconnect_calls += 1
+
+    def disconnect(self) -> None:
+        self.disconnect_calls += 1
+
+    def delete_session(self) -> None:
+        self.delete_session_calls += 1

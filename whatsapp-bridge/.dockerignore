@@ -1,0 +1,11 @@
+node_modules
+dist
+.wwebjs_auth
+.wwebjs_cache
+session
+sessions
+*.log
+tests
+.git
+.env
+.env.local

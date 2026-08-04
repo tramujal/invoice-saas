@@ -3,28 +3,23 @@ import json
 import logging
 import time
 from collections.abc import Iterator
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.ai.base import AIProviderError, AIProviderTimeoutError, ChatMessage, TextDelta, ToolInvocation
+from app.ai.base import AIProviderError, AIProviderTimeoutError, ChatMessage
+from app.ai.engine import ActionProposalEvent, ClarificationEvent, ErrorEvent, TextDeltaEvent, run_chat_turn
 from app.ai.factory import get_ai_provider
-from app.ai.limits import ASSISTANT_ACTION_TTL_SECONDS
 from app.ai.prompts import ASSISTANT_SYSTEM_PROMPT
-from app.ai.tools.registry import TOOL_PERMISSIONS, TOOL_REGISTRY, tool_definitions
-from app.ai.tools.types import ActionToolError, AmbiguousCustomerError, AmbiguousProductError
-from app.assistant_action_status import AssistantActionStatus
+from app.ai.tools.registry import tool_definitions
 from app.assistant_context import build_business_context, format_business_context_as_text
 from app.database import get_db
 from app.deps import get_current_user, require_permission, require_verified_email
 from app.membership_role import MembershipRole
-from app.models import AssistantAction, User
-from app.permissions import ROLE_PERMISSIONS, Permission, check_permission
+from app.models import User
+from app.permissions import ROLE_PERMISSIONS, Permission
 from app.rate_limit import (
-    RATE_LIMIT_CODE,
     RateLimitCheck,
     RateLimitRule,
     enforce_rate_limit,
@@ -33,7 +28,6 @@ from app.rate_limit import (
 )
 from app.billing.enforcement import CapabilityDeniedError, require_ai
 from app.schemas import AssistantChatRequest
-from app.services.plan_limits import LimitedResource, PlanLimitExceededError, check_limit
 
 logger = logging.getLogger(__name__)
 
@@ -179,174 +173,62 @@ def assistant_chat(
             detail={"code": "ai_provider_error", "message": GENERIC_PROVIDER_ERROR_MESSAGE},
         )
 
-    def _handle_tool_invocation(event: ToolInvocation) -> Iterator[bytes]:
-        """Turns a single ToolInvocation into either an action_proposal, a
-        clarification_needed, or an error NDJSON event. Never executes
-        anything -- only ever inserts a `proposed` AssistantAction row.
-        Provider output (event.arguments) is treated as fully untrusted
-        until the tool's own Pydantic input_schema validates it."""
-        tool = TOOL_REGISTRY.get(event.name)
-        if tool is None:
-            logger.warning(
-                "assistant_chat: model called unknown tool=%s org_hash=%s user_hash=%s",
-                event.name,
-                org_hash,
-                user_hash,
-            )
-            yield _ndjson({"type": "error", "code": "assistant_action_invalid"})
-            return
-
-        # Re-checked here even though tool_definitions() already filtered
-        # by role above -- that filtering is only UX (don't offer actions
-        # the model can't use), never the actual security boundary. A
-        # malformed or replayed client request could still name a tool
-        # that was never offered, so this is the real enforcement point.
-        required_permission = TOOL_PERMISSIONS.get(tool.name)
-        if required_permission is not None and not check_permission(caller_role, required_permission):
-            logger.warning(
-                "assistant_chat: permission denied tool=%s role=%s org_hash=%s user_hash=%s",
-                event.name,
-                caller_role.value,
-                org_hash,
-                user_hash,
-            )
-            yield _ndjson({"type": "error", "code": "permission_denied"})
-            return
-
-        # Only ever consumed on this branch (an actual tool call), never
-        # for plain-text turns -- see ASSISTANT_ACTION_PROPOSE_RULES.
-        try:
-            enforce_rate_limit(
-                [
-                    RateLimitCheck(
-                        scope="assistant:action_propose:user",
-                        identity=user_identity(current_user.id),
-                        rules=ASSISTANT_ACTION_PROPOSE_RULES,
-                    ),
-                    RateLimitCheck(
-                        scope="assistant:action_propose:user_ip",
-                        identity=user_ip_identity(request, current_user.id),
-                        rules=ASSISTANT_ACTION_PROPOSE_RULES,
-                    ),
-                ]
-            )
-        except HTTPException as exc:
-            # enforce_rate_limit normally raises before any response has
-            # been sent; here we're already mid-stream, so a 429 can't be
-            # sent as a fresh HTTP status -- surface it as an error event
-            # instead, using the same stable code.
-            detail = exc.detail if isinstance(exc.detail, dict) else {}
-            yield _ndjson({"type": "error", "code": detail.get("code", RATE_LIMIT_CODE)})
-            return
-
-        try:
-            proposal = tool.build_proposal(db, organization_id, current_user, event.arguments)
-        except AmbiguousCustomerError as exc:
-            yield _ndjson(
+    def _turn_event_to_ndjson(turn_event) -> bytes:
+        """Translates a channel-agnostic app.ai.engine.TurnEvent into this
+        endpoint's NDJSON wire format -- the only thing that changed when
+        the tool-call loop moved to app.ai.engine (Phase 23, for the
+        WhatsApp channel to reuse): this function, not the loop itself."""
+        if isinstance(turn_event, TextDeltaEvent):
+            return _ndjson({"type": "text_delta", "text": turn_event.text})
+        if isinstance(turn_event, ActionProposalEvent):
+            return _ndjson(
                 {
-                    "type": "clarification_needed",
-                    "code": exc.code,
-                    "candidates": exc.candidate_names,
+                    "type": "action_proposal",
+                    "proposal_id": turn_event.proposal_id,
+                    "action": turn_event.action,
+                    "summary": turn_event.summary,
+                    "expires_at": turn_event.expires_at,
                 }
             )
-            return
-        except AmbiguousProductError as exc:
-            yield _ndjson(
-                {
-                    "type": "clarification_needed",
-                    "code": exc.code,
-                    "candidates": exc.candidate_names,
-                }
+        if isinstance(turn_event, ClarificationEvent):
+            return _ndjson(
+                {"type": "clarification_needed", "code": turn_event.code, "candidates": turn_event.candidates}
             )
-            return
-        except ActionToolError as exc:
-            yield _ndjson({"type": "error", "code": exc.code})
-            return
-        except ValidationError:
-            # The model's tool call didn't match the tool's own input
-            # schema -- never executed, never persisted.
-            logger.warning(
-                "assistant_chat: invalid tool arguments for tool=%s org_hash=%s user_hash=%s",
-                tool.name,
-                org_hash,
-                user_hash,
-            )
-            yield _ndjson({"type": "error", "code": "assistant_action_invalid"})
-            return
+        # ErrorEvent
+        return _ndjson({"type": "error", "code": turn_event.code})
 
-        # Checked right before the insert, after the (possibly slow)
-        # provider round-trip and build_proposal() have already
-        # completed -- never held across the external AI call itself
-        # (see app.services.plan_limits._lock_organization's own
-        # docstring on why that lock's held duration matters). This is a
-        # streaming NDJSON response, not an ordinary JSON endpoint, so a
-        # 409 can't be raised as a fresh HTTP status here -- surfaced as
-        # an error event instead, same as the rate-limit check above.
-        try:
-            check_limit(db, organization_id, LimitedResource.ai_actions)
-        except PlanLimitExceededError as exc:
-            yield _ndjson({"type": "error", **exc.to_error_detail()})
-            return
-
-        now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(seconds=ASSISTANT_ACTION_TTL_SECONDS)
-        action = AssistantAction(
-            organization_id=organization_id,
-            user_id=current_user.id,
-            action_name=tool.name,
-            input_payload=json.dumps(proposal.resolved_input),
-            summary=json.dumps(proposal.summary),
-            status=AssistantActionStatus.proposed.value,
-            expires_at=expires_at,
-        )
-        db.add(action)
-        db.commit()
-        db.refresh(action)
-
-        logger.info(
-            "assistant_chat: proposal created action_id=%s action_name=%s "
-            "org_hash=%s user_hash=%s",
-            action.id,
-            tool.name,
-            org_hash,
-            user_hash,
-        )
-        yield _ndjson(
-            {
-                "type": "action_proposal",
-                "proposal_id": action.id,
-                "action": tool.name,
-                "summary": proposal.summary,
-                "expires_at": expires_at.isoformat(),
-            }
-        )
+    # Only ever consumed on the branch where the model actually calls a
+    # tool (see app.ai.engine._handle_tool_invocation), never for plain-
+    # text turns -- see ASSISTANT_ACTION_PROPOSE_RULES.
+    propose_rate_limit_checks = [
+        RateLimitCheck(
+            scope="assistant:action_propose:user",
+            identity=user_identity(current_user.id),
+            rules=ASSISTANT_ACTION_PROPOSE_RULES,
+        ),
+        RateLimitCheck(
+            scope="assistant:action_propose:user_ip",
+            identity=user_ip_identity(request, current_user.id),
+            rules=ASSISTANT_ACTION_PROPOSE_RULES,
+        ),
+    ]
 
     def generate() -> Iterator[bytes]:
         # Never logs prompts, business context, or conversation content --
         # only identity hashes, provider/model, duration, success/failure,
         # and token usage if the provider returned it.
-        tool_call_handled = False
         try:
-            for event in stream_iterator:
-                if isinstance(event, TextDelta):
-                    if event.text:
-                        yield _ndjson({"type": "text_delta", "text": event.text})
-                elif isinstance(event, ToolInvocation):
-                    if tool_call_handled:
-                        # At most one proposal per user turn -- a model
-                        # that calls more than one tool in the same reply
-                        # has any call after the first logged and dropped,
-                        # never turned into a second proposal.
-                        logger.warning(
-                            "assistant_chat: dropping extra tool call=%s in same turn "
-                            "org_hash=%s user_hash=%s",
-                            event.name,
-                            org_hash,
-                            user_hash,
-                        )
-                        continue
-                    tool_call_handled = True
-                    yield from _handle_tool_invocation(event)
+            for turn_event in run_chat_turn(
+                db,
+                organization_id,
+                current_user,
+                caller_role,
+                stream_iterator,
+                propose_rate_limit_checks,
+                org_hash,
+                user_hash,
+            ):
+                yield _turn_event_to_ndjson(turn_event)
 
             duration = time.monotonic() - start
             usage = getattr(ai_provider, "last_usage", None)

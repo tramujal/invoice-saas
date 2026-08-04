@@ -33,6 +33,7 @@ from app.billing_period import BillingPeriod
 from app.subscription_event_type import SubscriptionEventType
 from app.subscription_status import SubscriptionStatus
 from app.user_status import UserStatus
+from app.whatsapp_identity_status import WhatsAppIdentityStatus
 from app.schema_migrations import run_startup_migrations
 
 
@@ -155,6 +156,29 @@ class Plan(Base):
     background_jobs_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    # Phase 23 additions -- the experimental WhatsApp assistant. Same
+    # NULL=unlimited/0=unavailable convention as every other limit column
+    # above, and the same "commercial entitlement only, not itself
+    # enforcement" rule as every other *_enabled flag. whatsapp_enabled
+    # gates the feature as a whole (checked via app.billing.enforcement
+    # .require_whatsapp before ANY inbound message is processed);
+    # voice_messages_enabled is a separate, narrower flag so a plan can
+    # allow text commands without allowing (costlier, transcription-
+    # dependent) voice notes. max_whatsapp_users caps how many
+    # WhatsAppIdentity rows may be `verified` at once per organization;
+    # monthly_whatsapp_actions is a distinct quota from
+    # max_ai_actions_per_month -- see app.services.organization_usage
+    # .count_whatsapp_actions_current_month for why this counts every
+    # processed inbound WhatsApp message (read-only queries included),
+    # not just the subset that also creates an AssistantAction.
+    whatsapp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    voice_messages_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    max_whatsapp_users: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    monthly_whatsapp_actions: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Phase 17A pricing -- informational only. No checkout, no charging,
     # no provider anywhere reads these yet; they exist so a future
@@ -1313,6 +1337,132 @@ class AssistantAction(Base):
     executed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class WhatsAppIdentity(Base):
+    """Links one real WhatsApp phone number to exactly one (organization,
+    user) pair -- see docs/whatsapp.md's "Phone identity and linking"
+    section for the full security rationale. A phone number is NEVER
+    itself authentication: every inbound message is only ever attributed
+    to `user_id` after this row is found with status == verified, and
+    every other check (active user, active membership, active
+    organization, RBAC, plan capability) still runs on top, exactly as it
+    would for a browser request from that same user.
+
+    `(provider, normalized_phone_number)` is globally unique, not scoped
+    to organization_id -- this experimental phase runs exactly one shared
+    WhatsApp Web session for the whole deployment (see
+    app.whatsapp.provider_base's own module docstring), so one physical
+    phone number can only ever correspond to one (organization, user) pair
+    system-wide. A person who is a member of two organizations needs two
+    separate WhatsApp-capable numbers to link both -- a documented,
+    deliberate limitation of this MVP, not an oversight.
+
+    A row is never deleted: revoking access flips `status` to `disabled`
+    (see WhatsAppIdentityStatus), preserving the historical fact that this
+    phone was once linked, for audit purposes.
+    """
+
+    __tablename__ = "whatsapp_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "normalized_phone_number", name="uq_whatsapp_identity_phone"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # E.164-ish normalized form (see app.whatsapp.security.normalize_phone_number)
+    # -- the raw, as-entered value is never stored; only ever the normalized
+    # comparison key, so two differently-formatted entries of the same real
+    # number can never create two rows.
+    normalized_phone_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=WhatsAppIdentityStatus.pending.value,
+        server_default=WhatsAppIdentityStatus.pending.value,
+    )
+    # Hash only -- the raw one-time code is never persisted anywhere (see
+    # app.whatsapp.security.hash_verification_code), same principle as
+    # app.tokens for password-reset/email-verification tokens.
+    verification_code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Wrong-code guesses against the current pending code, reset to 0 every
+    # time a fresh code is issued -- capped by WHATSAPP_MAX_VERIFY_ATTEMPTS
+    # (see app.whatsapp.service), never allowed to grow unbounded.
+    verification_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+    user: Mapped["User"] = relationship()
+
+
+class WhatsAppInboundMessage(Base):
+    """Idempotency ledger + safe audit metadata for every inbound WhatsApp
+    message the bridge forwards to FastAPI (Phase 23). Two distinct jobs,
+    one row each:
+
+    1. Idempotency/replay protection: `(provider, message_id)` is unique,
+       checked BEFORE any processing -- a message the bridge (or a
+       misbehaving/duplicate WhatsApp delivery) posts twice is processed
+       at most once. Never trusts the bridge alone to dedupe.
+    2. Safe channel metadata (never message content): provider, which
+       identity/org/user handled it, what kind of command it resolved to,
+       and whether it succeeded -- exactly the fields docs/whatsapp.md's
+       "Event and audit integration" section calls for. Deliberately
+       excludes raw message text, transcribed voice text, and any AI
+       provider output -- this table is metadata-only, never a
+       conversation transcript.
+
+    Also the source of the `monthly_whatsapp_actions` quota (see
+    app.services.organization_usage.count_whatsapp_actions_current_month):
+    every row with status='processed' counts, regardless of whether the
+    command was read-only or went on to create an AssistantAction (that
+    narrower AI-specific quota is max_ai_actions_per_month, unchanged).
+    """
+
+    __tablename__ = "whatsapp_inbound_messages"
+    __table_args__ = (
+        UniqueConstraint("provider", "message_id", name="uq_whatsapp_inbound_message"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    organization_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    whatsapp_identity_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("whatsapp_identities.id", ondelete="SET NULL"), nullable=True
+    )
+    message_type: Mapped[str] = mapped_column(String(16), nullable=False)  # text|audio
+    # A safe, closed-vocabulary label -- e.g. "list_invoices", "create_invoice",
+    # "confirm", "cancel", "link_verify", "help" -- never the raw message text.
+    command_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization | None"] = relationship()
+    user: Mapped["User | None"] = relationship()
+    whatsapp_identity: Mapped["WhatsAppIdentity | None"] = relationship()
 
 
 class PlatformAuditLog(Base):

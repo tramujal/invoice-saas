@@ -128,7 +128,7 @@ def fake_email_sender(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def fake_ai_provider(monkeypatch):
-    """Patches both confirmed get_ai_provider call sites, same rationale
+    """Patches every confirmed get_ai_provider call site, same rationale
     as fake_email_sender above -- a developer's ambient shell may well
     have a real ANTHROPIC_API_KEY/GEMINI_API_KEY set, so clearing env
     vars alone wouldn't be enough; the call sites themselves must be
@@ -139,4 +139,33 @@ def fake_ai_provider(monkeypatch):
     provider = FakeAIProvider()
     monkeypatch.setattr("app.routers.assistant.get_ai_provider", lambda *a, **kw: provider)
     monkeypatch.setattr("app.insights.narration.get_ai_provider", lambda *a, **kw: provider)
+    monkeypatch.setattr("app.whatsapp.service.get_ai_provider", lambda *a, **kw: provider)
+    return provider
+
+
+@pytest.fixture(autouse=True)
+def fake_whatsapp_provider(monkeypatch):
+    """Patches every confirmed get_whatsapp_provider call site (Phase 23)
+    -- the WhatsApp bridge is never reached in the test suite. Tests read
+    `.sent_text`/`.sent_documents` off the returned fake, or set
+    `.fail_next_send`/`.state` to exercise error paths."""
+    from tests.fakes import FakeWhatsAppProvider
+
+    provider = FakeWhatsAppProvider()
+    monkeypatch.setattr("app.whatsapp.service.get_whatsapp_provider", lambda: provider)
+    monkeypatch.setattr("app.routers.whatsapp.get_whatsapp_provider", lambda: provider)
+    monkeypatch.setattr("app.jobs.handlers.whatsapp.get_whatsapp_provider", lambda: provider)
+    return provider
+
+
+@pytest.fixture(autouse=True)
+def fake_transcription_provider(monkeypatch):
+    """Patches the one confirmed get_transcription_provider call site
+    (Phase 23) with a scriptable fake -- no test ever depends on
+    TRANSCRIPTION_PROVIDER env config. Tests set `.transcript` or
+    `.error` before exercising a voice-note flow."""
+    from app.transcription.fake_provider import FakeTranscriptionProvider
+
+    provider = FakeTranscriptionProvider()
+    monkeypatch.setattr("app.whatsapp.service.get_transcription_provider", lambda: provider)
     return provider

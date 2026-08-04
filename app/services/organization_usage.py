@@ -37,7 +37,10 @@ from app.models import (
     Product,
     Quote,
     WebhookEndpoint,
+    WhatsAppIdentity,
+    WhatsAppInboundMessage,
 )
+from app.whatsapp_identity_status import WhatsAppIdentityStatus
 from app.services.entitlements import Entitlements, PlanLimit, get_limit, get_organization_entitlements
 
 
@@ -222,6 +225,51 @@ def count_webhooks(db: Session, organization_id: str) -> int:
             .where(
                 WebhookEndpoint.organization_id == organization_id,
                 WebhookEndpoint.active.is_(True),
+            )
+        )
+        or 0
+    )
+
+
+def count_whatsapp_users(db: Session, organization_id: str) -> int:
+    """Verified WhatsAppIdentity rows only (Phase 23) -- a `pending` link
+    (code issued, not yet confirmed) doesn't consume a seat, and a
+    `disabled` (revoked) one no longer does either, mirroring
+    count_api_keys'/count_webhooks' "hide, never destroy, only the
+    currently-active state counts" convention."""
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(WhatsAppIdentity)
+            .where(
+                WhatsAppIdentity.organization_id == organization_id,
+                WhatsAppIdentity.status == WhatsAppIdentityStatus.verified.value,
+            )
+        )
+        or 0
+    )
+
+
+def count_whatsapp_actions_current_month(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> int:
+    """Counts WhatsAppInboundMessage rows with status='processed' created
+    since the start of the current UTC calendar month (Phase 23) --
+    deliberately every successfully-processed inbound message, including
+    plain read-only queries, not just the subset that went on to create
+    an AssistantAction (that narrower quota is
+    count_ai_actions_current_month, unchanged). See that table's own
+    docstring in app/models.py for why this is the one persisted record
+    of WhatsApp channel activity."""
+    month_start = _current_month_start_utc(now)
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(WhatsAppInboundMessage)
+            .where(
+                WhatsAppInboundMessage.organization_id == organization_id,
+                WhatsAppInboundMessage.status == "processed",
+                WhatsAppInboundMessage.created_at >= month_start,
             )
         )
         or 0

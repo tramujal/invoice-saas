@@ -27,6 +27,8 @@ from app.billing.capabilities import (
     OrganizationCapabilities,
     can_use_ai,
     can_use_analytics,
+    can_use_whatsapp,
+    can_use_whatsapp_voice_messages,
     get_organization_capabilities,
 )
 
@@ -86,3 +88,23 @@ def require_analytics(db: Session, organization_id: str) -> OrganizationCapabili
     to every plan)."""
     caps = get_organization_capabilities(db, organization_id)
     return _require(caps, feature="analytics", allowed=can_use_analytics(caps))
+
+
+def require_whatsapp(db: Session, organization_id: str) -> OrganizationCapabilities:
+    """Phase 23 -- raises CapabilityDeniedError if the organization's plan
+    doesn't include the experimental WhatsApp assistant at all. Checked by
+    app.whatsapp.service before processing ANY inbound message (in
+    addition to, and before, WHATSAPP_ENABLED/the bridge's own connection
+    state -- see docs/whatsapp.md's "Plans and quotas" section for the
+    three distinct states this app can be in: transport disabled,
+    transport unconfigured, or plan-restricted)."""
+    caps = get_organization_capabilities(db, organization_id)
+    return _require(caps, feature="whatsapp", allowed=can_use_whatsapp(caps))
+
+
+def require_whatsapp_voice_messages(db: Session, organization_id: str) -> OrganizationCapabilities:
+    """Narrower than require_whatsapp above -- a plan can have WhatsApp
+    text commands without voice notes. Callers check require_whatsapp
+    first; this is only reached for an inbound `type: audio` message."""
+    caps = get_organization_capabilities(db, organization_id)
+    return _require(caps, feature="whatsapp_voice_messages", allowed=can_use_whatsapp_voice_messages(caps))

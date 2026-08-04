@@ -151,6 +151,12 @@ technical interview, not a changelog), see
   navigation strip, and modal is built to never force a horizontal page
   scroll, down to a 320px viewport; verified in-browser at five widths,
   not just assumed from a CSS framework's defaults.
+- **WhatsApp Assistant** *(experimental, unofficial, disabled by default —
+  see [`docs/whatsapp.md`](docs/whatsapp.md))* — the same AI Business
+  Assistant above, reachable over WhatsApp text and voice messages, behind
+  a separate transport bridge, phone-number verification, and the
+  identical propose/confirm lifecycle every other AI action already uses.
+  Not an official WhatsApp Business/Meta Cloud API integration.
 
 ![Invoices list](docs/screenshots/invoices-list.png)
 
@@ -374,6 +380,10 @@ named volume. To enable real email or the AI assistant locally, copy
 [`.env.docker.example`](.env.docker.example) to `.env` and fill in the
 keys you want, then rerun the command above.
 
+The experimental WhatsApp bridge is **not** part of this default stack —
+it's an opt-in Compose profile (`docker compose --profile whatsapp up
+--build`); see [`docs/whatsapp.md`](docs/whatsapp.md).
+
 ### Manual setup
 
 ```bash
@@ -504,23 +514,31 @@ something already done for you in those configs.
 | `FRONTEND_BASE_URL` | local dev origin | Used to build links in outbound emails and public quote share links. |
 | `WORKER_*` (several) | conservative defaults | Poll interval, batch size, lease duration, and other background-worker tuning — every one optional, read only by the worker process. See `app/job_config.py`. |
 | `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | Frontend-side API base URL. |
+| `WHATSAPP_ENABLED`, `WHATSAPP_PROVIDER`, `WHATSAPP_BRIDGE_URL`, `WHATSAPP_BRIDGE_SECRET`, `WHATSAPP_*` (several) | disabled (`WHATSAPP_ENABLED=false`) | Experimental, unofficial WhatsApp assistant transport — the app is fully unaffected with these unset. See [`docs/whatsapp.md`](docs/whatsapp.md) and `.env.example`. |
 
 ## Testing
 
 ```bash
-# Backend — 985 tests across auth, tenant isolation, permissions/rate
+# Backend — 1057 tests across auth, tenant isolation, permissions/rate
 # limits, team/invitations (including a genuine two-thread last-owner
 # race test), quotes, invoices/reminders, products/imports, API keys,
 # the public API, outbound webhooks, the durable background job queue,
 # billing/Stripe (including subscription-conflict races), platform
-# administration, plans/entitlements, usage tracking, and the AI
-# assistant + insights engine.
+# administration, plans/entitlements, usage tracking, the AI assistant +
+# insights engine, and the experimental WhatsApp assistant (identity
+# linking, HMAC/replay, confirmation, context, voice, PDF send — see
+# docs/whatsapp.md).
 pytest
 
-# Frontend — 285 tests across components and lib helpers, including
+# Frontend — 322 tests across components and lib helpers, including
 # responsive-layout regression coverage (mobile nav, table overflow
 # containment, dialog width).
 cd frontend && npm test
+
+# whatsapp-bridge (Node) — 23 tests: HMAC signing/verification, inbound
+# media normalization, the Null provider contract, and signature
+# enforcement on every outbound HTTP route.
+cd whatsapp-bridge && npm test
 ```
 
 Tenant isolation and AI-agent permission enforcement are each covered by
@@ -617,6 +635,7 @@ both CI jobs locally before opening a PR.
 | [`docs/audit_timeline.md`](docs/audit_timeline.md) | The tenant-facing audit timeline: what it is, how it differs from the platform audit log, and its write path. |
 | [`docs/platform_operations_dashboard.md`](docs/platform_operations_dashboard.md) | Route-by-route reference for the platform-admin console. |
 | [`docs/ci.md`](docs/ci.md) | What CI runs and how to reproduce it locally. |
+| [`docs/whatsapp.md`](docs/whatsapp.md) | The experimental, unofficial WhatsApp assistant: architecture, bridge↔backend security model, identity linking, confirmation/context/voice/PDF handling, plans/quotas, Docker setup, and its migration path to the official Meta Cloud API. |
 | [`docs/demo.md`](docs/demo.md) | Demo account, demo workflow, and a scripted 3–5 minute live walkthrough. |
 | [`docs/screenshots.md`](docs/screenshots.md) | Every recommended screenshot for this README/portfolio — page, viewport, purpose. |
 | [`docs/portfolio.md`](docs/portfolio.md) | The engineering story for technical interviews: hardest problems, architectural decisions, testing/security strategy, lessons learned. |
@@ -638,6 +657,16 @@ both CI jobs locally before opening a PR.
   organization — see [`docs/demo.md`](docs/demo.md) for the current,
   manual workaround.
 - `npm audit` / `pip-audit` as a documented, blocking CI gate.
+- Wire `whatsapp-bridge`'s test/typecheck/lint/build into
+  `.github/workflows/ci.yml` as a third CI job — run manually today, not
+  yet a merge-blocking gate the way the backend/frontend jobs are.
+- A real `TranscriptionProvider` vendor adapter for WhatsApp voice notes
+  (today: `NullTranscriptionProvider` and a test-only
+  `FakeTranscriptionProvider` — see [`docs/whatsapp.md`](docs/whatsapp.md#voice-messages)).
+- The official Meta Cloud API as a second `WhatsAppProvider`, replacing
+  the experimental, unofficial `whatsapp-web.js` bridge for any real
+  deployment — see [`docs/whatsapp.md`](docs/whatsapp.md#migration-path-to-the-meta-cloud-api)
+  for the concrete migration path.
 
 ## Contributing
 

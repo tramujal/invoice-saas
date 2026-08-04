@@ -36,6 +36,8 @@ from app.services.organization_usage import (
     count_quotes_current_month,
     count_users,
     count_webhooks,
+    count_whatsapp_actions_current_month,
+    count_whatsapp_users,
 )
 
 
@@ -58,6 +60,11 @@ class OrganizationCapabilities:
     usage_ai_actions: int
     usage_api_keys: int
     usage_webhooks: int
+    # Phase 23 additions -- see app.services.organization_usage's
+    # count_whatsapp_users/count_whatsapp_actions_current_month for what
+    # each actually counts.
+    usage_whatsapp_users: int
+    usage_whatsapp_actions: int
 
 
 def get_organization_capabilities(db: Session, organization_id: str) -> OrganizationCapabilities:
@@ -77,6 +84,8 @@ def get_organization_capabilities(db: Session, organization_id: str) -> Organiza
         usage_ai_actions=count_ai_actions_current_month(db, organization_id),
         usage_api_keys=count_api_keys(db, organization_id),
         usage_webhooks=count_webhooks(db, organization_id),
+        usage_whatsapp_users=count_whatsapp_users(db, organization_id),
+        usage_whatsapp_actions=count_whatsapp_actions_current_month(db, organization_id),
     )
 
 
@@ -106,6 +115,17 @@ def can_use_forecasting(caps: OrganizationCapabilities) -> bool:
 
 def can_use_background_jobs(caps: OrganizationCapabilities) -> bool:
     return caps.entitlements.background_jobs_enabled
+
+
+def can_use_whatsapp(caps: OrganizationCapabilities) -> bool:
+    """Phase 23 -- the experimental WhatsApp assistant's all-or-nothing
+    feature flag. Deliberately separate from can_use_whatsapp_voice_messages
+    below: a plan can allow text commands without allowing voice notes."""
+    return caps.entitlements.whatsapp_enabled
+
+
+def can_use_whatsapp_voice_messages(caps: OrganizationCapabilities) -> bool:
+    return caps.entitlements.voice_messages_enabled
 
 
 # --- remaining quotas -----------------------------------------------------
@@ -148,6 +168,14 @@ def remaining_webhooks(caps: OrganizationCapabilities) -> int | None:
     return _remaining(caps.entitlements.max_webhooks, caps.usage_webhooks)
 
 
+def remaining_whatsapp_users(caps: OrganizationCapabilities) -> int | None:
+    return _remaining(caps.entitlements.max_whatsapp_users, caps.usage_whatsapp_users)
+
+
+def remaining_whatsapp_actions_quota(caps: OrganizationCapabilities) -> int | None:
+    return _remaining(caps.entitlements.monthly_whatsapp_actions, caps.usage_whatsapp_actions)
+
+
 # --- creation capabilities (derived from the quotas above) -----------------
 
 
@@ -178,4 +206,9 @@ def can_create_api_key(caps: OrganizationCapabilities) -> bool:
 
 def can_create_webhook(caps: OrganizationCapabilities) -> bool:
     remaining = remaining_webhooks(caps)
+    return remaining is None or remaining > 0
+
+
+def can_link_whatsapp_user(caps: OrganizationCapabilities) -> bool:
+    remaining = remaining_whatsapp_users(caps)
     return remaining is None or remaining > 0

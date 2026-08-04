@@ -1659,6 +1659,8 @@ def _build_plan_response(plan: Plan) -> PlanResponse:
             storage_limit_mb=plan.storage_limit_mb,
             max_api_keys=plan.max_api_keys,
             max_webhooks=plan.max_webhooks,
+            max_whatsapp_users=plan.max_whatsapp_users,
+            monthly_whatsapp_actions=plan.monthly_whatsapp_actions,
         ),
         features=PlanFeatures(
             custom_branding_enabled=plan.custom_branding_enabled,
@@ -1668,6 +1670,8 @@ def _build_plan_response(plan: Plan) -> PlanResponse:
             forecasting_enabled=plan.forecasting_enabled,
             ai_enabled=plan.ai_enabled,
             background_jobs_enabled=plan.background_jobs_enabled,
+            whatsapp_enabled=plan.whatsapp_enabled,
+            voice_messages_enabled=plan.voice_messages_enabled,
         ),
         version=plan.version,
         created_at=plan.created_at,
@@ -1729,6 +1733,8 @@ def create_platform_plan(
         storage_limit_mb=body.storage_limit_mb,
         max_api_keys=body.max_api_keys,
         max_webhooks=body.max_webhooks,
+        max_whatsapp_users=body.max_whatsapp_users,
+        monthly_whatsapp_actions=body.monthly_whatsapp_actions,
         custom_branding_enabled=body.custom_branding_enabled,
         api_access_enabled=body.api_access_enabled,
         advanced_reports_enabled=body.advanced_reports_enabled,
@@ -1736,6 +1742,8 @@ def create_platform_plan(
         forecasting_enabled=body.forecasting_enabled,
         ai_enabled=body.ai_enabled,
         background_jobs_enabled=body.background_jobs_enabled,
+        whatsapp_enabled=body.whatsapp_enabled,
+        voice_messages_enabled=body.voice_messages_enabled,
     )
     db.add(plan)
     db.flush()

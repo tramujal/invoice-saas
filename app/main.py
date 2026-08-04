@@ -39,6 +39,8 @@ from app.routers import (
     quotes,
     team,
     webhooks,
+    whatsapp,
+    whatsapp_bridge,
 )
 from app.routers.api_v1 import customers as api_v1_customers
 from app.routers.api_v1 import invoices as api_v1_invoices
@@ -233,6 +235,8 @@ app.include_router(public_config.router)
 app.include_router(api_key_management.router)
 app.include_router(webhooks.router)
 app.include_router(audit.router)
+app.include_router(whatsapp.router)
+app.include_router(whatsapp_bridge.router)
 app.include_router(api_v1_customers.router)
 app.include_router(api_v1_products.router)
 app.include_router(api_v1_quotes.router)

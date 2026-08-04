@@ -12,6 +12,7 @@ const TABS = [
   { href: "/settings/plan", labelKey: "settingsNav.plan" },
   { href: "/settings/api-keys", labelKey: "settingsNav.apiKeys" },
   { href: "/settings/webhooks", labelKey: "settingsNav.webhooks" },
+  { href: "/settings/whatsapp", labelKey: "settingsNav.whatsapp" },
   { href: "/settings/notifications", labelKey: "settingsNav.notifications" },
   { href: "/settings/audit-log", labelKey: "settingsNav.auditLog" },
 ] as const;

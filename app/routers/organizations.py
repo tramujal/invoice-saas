@@ -84,6 +84,8 @@ def get_organization_entitlements_endpoint(
             storage_limit_mb=entitlements.storage_limit_mb,
             max_api_keys=entitlements.max_api_keys,
             max_webhooks=entitlements.max_webhooks,
+            max_whatsapp_users=entitlements.max_whatsapp_users,
+            monthly_whatsapp_actions=entitlements.monthly_whatsapp_actions,
         ),
         features=PlanFeatures(
             custom_branding_enabled=entitlements.custom_branding_enabled,
@@ -93,6 +95,8 @@ def get_organization_entitlements_endpoint(
             forecasting_enabled=entitlements.forecasting_enabled,
             ai_enabled=entitlements.ai_enabled,
             background_jobs_enabled=entitlements.background_jobs_enabled,
+            whatsapp_enabled=entitlements.whatsapp_enabled,
+            voice_messages_enabled=entitlements.voice_messages_enabled,
         ),
     )
 

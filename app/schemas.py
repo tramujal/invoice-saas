@@ -1564,6 +1564,8 @@ _PLAN_LIMIT_FIELD_NAMES = (
     "storage_limit_mb",
     "max_api_keys",
     "max_webhooks",
+    "max_whatsapp_users",
+    "monthly_whatsapp_actions",
 )
 _PLAN_FEATURE_FIELD_NAMES = (
     "custom_branding_enabled",
@@ -1573,6 +1575,8 @@ _PLAN_FEATURE_FIELD_NAMES = (
     "forecasting_enabled",
     "ai_enabled",
     "background_jobs_enabled",
+    "whatsapp_enabled",
+    "voice_messages_enabled",
 )
 
 
@@ -1591,13 +1595,16 @@ class PlanLimits(BaseModel):
     storage_limit_mb: int | None
     max_api_keys: int | None
     max_webhooks: int | None
+    max_whatsapp_users: int | None
+    monthly_whatsapp_actions: int | None
 
 
 class PlanFeatures(BaseModel):
     """Commercial entitlement only -- whether the plan is *supposed* to
     allow the capability, not whether it's actually wired up and
     enforced anywhere yet (enforcement is a later phase). The last four
-    were added in Phase 17A alongside the billing/subscription domain."""
+    were added in Phase 17A alongside the billing/subscription domain;
+    the last two (Phase 23) gate the experimental WhatsApp assistant."""
 
     custom_branding_enabled: bool
     api_access_enabled: bool
@@ -1606,6 +1613,8 @@ class PlanFeatures(BaseModel):
     forecasting_enabled: bool
     ai_enabled: bool
     background_jobs_enabled: bool
+    whatsapp_enabled: bool
+    voice_messages_enabled: bool
 
 
 class PlanResponse(BaseModel):
@@ -1681,6 +1690,8 @@ class PlanCreateRequest(BaseModel):
     storage_limit_mb: int | None = None
     max_api_keys: int | None = None
     max_webhooks: int | None = None
+    max_whatsapp_users: int | None = None
+    monthly_whatsapp_actions: int | None = None
     custom_branding_enabled: bool = False
     api_access_enabled: bool = False
     advanced_reports_enabled: bool = False
@@ -1688,6 +1699,8 @@ class PlanCreateRequest(BaseModel):
     forecasting_enabled: bool = False
     ai_enabled: bool = False
     background_jobs_enabled: bool = False
+    whatsapp_enabled: bool = False
+    voice_messages_enabled: bool = False
     reason: str = Field(min_length=1, max_length=1000)
 
     @field_validator("code")
@@ -1744,6 +1757,8 @@ class PlanUpdateRequest(BaseModel):
     storage_limit_mb: int | None = None
     max_api_keys: int | None = None
     max_webhooks: int | None = None
+    max_whatsapp_users: int | None = None
+    monthly_whatsapp_actions: int | None = None
     custom_branding_enabled: bool | None = None
     api_access_enabled: bool | None = None
     advanced_reports_enabled: bool | None = None
@@ -1751,6 +1766,8 @@ class PlanUpdateRequest(BaseModel):
     forecasting_enabled: bool | None = None
     ai_enabled: bool | None = None
     background_jobs_enabled: bool | None = None
+    whatsapp_enabled: bool | None = None
+    voice_messages_enabled: bool | None = None
 
     @field_validator("reason")
     @classmethod

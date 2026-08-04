@@ -379,6 +379,52 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_team_recent_members_heading": "Recent Team Members",
         "assistant_no_recent_members": "No members have joined recently.",
         "assistant_invited_by_label": "invited by",
+
+        # Phase 23 -- the experimental WhatsApp assistant's channel-
+        # specific reply text (app.whatsapp.service). Kept alongside the
+        # existing assistant_* context strings above since both are
+        # organization-language-aware backend copy, distinct from the
+        # frontend's own translations.ts.
+        "whatsapp_help_message": (
+            "Available commands:\n"
+            "- Search customer/product/quote/invoice\n"
+            "- List pending/overdue invoices\n"
+            "- Check invoice status\n"
+            "- Show this month's sales/revenue\n"
+            "- Show business summary\n"
+            "- \"Send invoice INV-...\" / \"Send quote QUO-...\"\n"
+            "- Create customer/product/quote/invoice\n"
+            "- Mark invoice as paid\n"
+            "- Send quote/invoice\n\n"
+            "Reply CONFIRM to approve a pending action, CANCEL to stop it, "
+            "or \"forget context\" to start a new conversation."
+        ),
+        "whatsapp_context_forgotten": "Okay, I've forgotten our previous conversation.",
+        "whatsapp_not_linked": (
+            "This number isn't linked to an account yet. Open Settings -> WhatsApp "
+            "in the app to link it."
+        ),
+        "whatsapp_link_expired_or_invalid": (
+            "That code isn't valid or has expired. Request a new one from Settings -> WhatsApp."
+        ),
+        "whatsapp_link_too_many_attempts": (
+            "Too many incorrect codes. Request a new one from Settings -> WhatsApp."
+        ),
+        "whatsapp_link_confirmed": "Your number is linked. You can now use the assistant here.",
+        "whatsapp_access_revoked": "You no longer have access to this organization from WhatsApp.",
+        "whatsapp_transport_disabled": "The WhatsApp assistant is currently unavailable.",
+        "whatsapp_plan_restricted": "WhatsApp isn't included in your organization's current plan.",
+        "whatsapp_voice_plan_restricted": "Voice messages aren't included in your organization's current plan.",
+        "whatsapp_quota_exceeded": "This organization has reached its monthly WhatsApp usage limit.",
+        "whatsapp_no_pending_action": "There's no pending action to confirm or cancel.",
+        "whatsapp_action_cancelled": "Cancelled.",
+        "whatsapp_transcription_unavailable": "Voice transcription isn't configured yet. Please type your message instead.",
+        "whatsapp_audio_too_large": "That voice message is too long or too large. Please send a shorter one.",
+        "whatsapp_audio_invalid_format": "That audio format isn't supported.",
+        "whatsapp_transcript_prefix": "I heard:",
+        "whatsapp_document_not_found": "I couldn't find that invoice or quote.",
+        "whatsapp_document_sent": "Sending it now — you'll receive it here shortly.",
+        "whatsapp_generic_error": "Something went wrong processing that. Please try again.",
     },
     "es": {
         "invoice_title": "Factura",
@@ -748,6 +794,47 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "assistant_team_recent_members_heading": "Miembros Recientes del Equipo",
         "assistant_no_recent_members": "Ningún miembro se ha unido recientemente.",
         "assistant_invited_by_label": "invitado por",
+
+        "whatsapp_help_message": (
+            "Comandos disponibles:\n"
+            "- Buscar cliente/producto/presupuesto/factura\n"
+            "- Listar facturas pendientes/vencidas\n"
+            "- Consultar estado de factura\n"
+            "- Mostrar ventas/ingresos del mes\n"
+            "- Mostrar resumen del negocio\n"
+            "- \"Mandame la factura INV-...\" / \"Mandame el presupuesto QUO-...\"\n"
+            "- Crear cliente/producto/presupuesto/factura\n"
+            "- Marcar factura como pagada\n"
+            "- Enviar presupuesto/factura\n\n"
+            "Respondé CONFIRMAR para aprobar una acción pendiente, CANCELAR para detenerla, "
+            "o \"olvidar contexto\" para empezar una conversación nueva."
+        ),
+        "whatsapp_context_forgotten": "Listo, olvidé nuestra conversación anterior.",
+        "whatsapp_not_linked": (
+            "Este número todavía no está vinculado a ninguna cuenta. Abrí Configuración -> "
+            "WhatsApp en la aplicación para vincularlo."
+        ),
+        "whatsapp_link_expired_or_invalid": (
+            "Ese código no es válido o ya venció. Solicitá uno nuevo desde Configuración -> WhatsApp."
+        ),
+        "whatsapp_link_too_many_attempts": (
+            "Demasiados códigos incorrectos. Solicitá uno nuevo desde Configuración -> WhatsApp."
+        ),
+        "whatsapp_link_confirmed": "Tu número quedó vinculado. Ya podés usar el asistente desde acá.",
+        "whatsapp_access_revoked": "Ya no tenés acceso a esta organización desde WhatsApp.",
+        "whatsapp_transport_disabled": "El asistente de WhatsApp no está disponible en este momento.",
+        "whatsapp_plan_restricted": "WhatsApp no está incluido en el plan actual de tu organización.",
+        "whatsapp_voice_plan_restricted": "Los mensajes de voz no están incluidos en el plan actual de tu organización.",
+        "whatsapp_quota_exceeded": "Esta organización alcanzó su límite mensual de uso de WhatsApp.",
+        "whatsapp_no_pending_action": "No hay ninguna acción pendiente para confirmar o cancelar.",
+        "whatsapp_action_cancelled": "Cancelado.",
+        "whatsapp_transcription_unavailable": "La transcripción de voz todavía no está configurada. Escribí tu mensaje en su lugar.",
+        "whatsapp_audio_too_large": "Ese audio es demasiado largo o pesado. Enviá uno más corto.",
+        "whatsapp_audio_invalid_format": "Ese formato de audio no es compatible.",
+        "whatsapp_transcript_prefix": "Escuché:",
+        "whatsapp_document_not_found": "No encontré esa factura o presupuesto.",
+        "whatsapp_document_sent": "Enviándolo ahora — lo vas a recibir acá en breve.",
+        "whatsapp_generic_error": "Algo salió mal al procesar eso. Intentá de nuevo.",
     },
 }
 

@@ -16,3 +16,8 @@ class JobType(str, Enum):
     webhook_deliver = "webhook.deliver"
     webhook_retry = "webhook.retry"
     notification_email = "notification.email"
+    # Phase 23 -- the experimental WhatsApp assistant. Re-renders the PDF
+    # from document_id at execution time (never carries PDF bytes in the
+    # payload) and sends it via the configured WhatsAppProvider -- see
+    # app.jobs.handlers.whatsapp.
+    whatsapp_send_document = "whatsapp.send_document"

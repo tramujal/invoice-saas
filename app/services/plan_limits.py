@@ -41,6 +41,8 @@ from app.billing.capabilities import (
     remaining_quote_quota,
     remaining_users,
     remaining_webhooks,
+    remaining_whatsapp_actions_quota,
+    remaining_whatsapp_users,
 )
 from app.models import Organization
 
@@ -63,6 +65,9 @@ class LimitedResource(str, Enum):
     ai_actions = "ai_actions"
     api_keys = "api_keys"
     webhooks = "webhooks"
+    # Phase 23 additions -- the experimental WhatsApp assistant.
+    whatsapp_users = "whatsapp_users"
+    whatsapp_actions = "whatsapp_actions"
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,14 @@ _RESOURCE_SPECS: dict[LimitedResource, _ResourceSpec] = {
     ),
     LimitedResource.webhooks: _ResourceSpec(
         lambda c: c.entitlements.max_webhooks, lambda c: c.usage_webhooks, remaining_webhooks
+    ),
+    LimitedResource.whatsapp_users: _ResourceSpec(
+        lambda c: c.entitlements.max_whatsapp_users, lambda c: c.usage_whatsapp_users, remaining_whatsapp_users
+    ),
+    LimitedResource.whatsapp_actions: _ResourceSpec(
+        lambda c: c.entitlements.monthly_whatsapp_actions,
+        lambda c: c.usage_whatsapp_actions,
+        remaining_whatsapp_actions_quota,
     ),
     # storage intentionally omitted -- see module docstring.
 }

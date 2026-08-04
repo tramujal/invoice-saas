@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+
+# WhatsApp Web session data -- equivalent to full account access if
+# leaked (see docs/whatsapp.md's "Session persistence" section). NEVER
+# commit this, regardless of WHATSAPP_SESSION_PATH's configured value.
+.wwebjs_auth/
+.wwebjs_cache/
+session/
+sessions/
+
+.env
+.env.local

@@ -69,6 +69,10 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_audit_entries_table(engine)
     _add_high_priority_query_indexes(engine)
     _add_document_customer_snapshots(engine)
+    _add_plan_whatsapp_fields(engine)
+    _backfill_plan_whatsapp_defaults(engine)
+    _add_whatsapp_identities_table(engine)
+    _add_whatsapp_inbound_messages_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -2053,3 +2057,144 @@ def _add_document_customer_snapshots(engine: Engine) -> None:
                         "doc_id": row["doc_id"],
                     },
                 )
+
+
+def _add_plan_whatsapp_fields(engine: Engine) -> None:
+    """Phase 23 -- adds the experimental WhatsApp assistant's 4 plan
+    columns (see Plan's own docstring in app/models.py). Same guard shape
+    as _add_plan_billing_fields: a no-op both on a pre-existing database
+    that already ran this AND on a brand-new database (where
+    Base.metadata.create_all() already created every column, since Plan's
+    ORM model declares them)."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("plans")}
+    if "whatsapp_enabled" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE plans ADD COLUMN whatsapp_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE plans ADD COLUMN voice_messages_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE plans ADD COLUMN max_whatsapp_users INTEGER NULL"))
+        conn.execute(text("ALTER TABLE plans ADD COLUMN monthly_whatsapp_actions INTEGER NULL"))
+
+
+def _backfill_plan_whatsapp_defaults(engine: Engine) -> None:
+    """Phase 23 -- enables the experimental WhatsApp assistant on the
+    Enterprise seed plan only (per the phase's own spec: "enable only on
+    Enterprise or an internal demo plan"), leaving every other built-in
+    plan and every custom admin-created plan at the column defaults
+    (whatsapp_enabled=False), freely editable afterward via
+    PATCH /admin/plans exactly like every other capability.
+
+    Idempotency signal: the enterprise plan's own `whatsapp_enabled`
+    still being false, checked fresh on every startup, mirroring
+    _backfill_plan_billing_defaults' exact "value, not column-existence"
+    signal for the same reason -- the column exists immediately on a
+    fresh create_all()'d database, before this has ever run there."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("plans")}
+    if "whatsapp_enabled" not in columns:
+        return  # _add_plan_whatsapp_fields hasn't run yet this startup for some reason
+
+    with engine.begin() as conn:
+        already_applied = conn.execute(
+            text("SELECT whatsapp_enabled FROM plans WHERE code = 'enterprise'")
+        ).scalar()
+        if already_applied:
+            return
+
+        conn.execute(
+            text(
+                "UPDATE plans SET whatsapp_enabled = TRUE, voice_messages_enabled = TRUE, "
+                "max_whatsapp_users = :max_whatsapp_users, "
+                "monthly_whatsapp_actions = :monthly_whatsapp_actions "
+                "WHERE code = 'enterprise'"
+            ),
+            {"max_whatsapp_users": 5, "monthly_whatsapp_actions": 200},
+        )
+
+
+def _add_whatsapp_identities_table(engine: Engine) -> None:
+    """Creates whatsapp_identities if it's missing -- same idempotent
+    safety net as _add_assistant_actions_table, for the same reason
+    (Base.metadata.create_all() already creates this table on a fresh
+    database since WhatsAppIdentity is a declared model)."""
+    inspector = inspect(engine)
+    if "whatsapp_identities" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS whatsapp_identities ("
+                "id CHAR(36) PRIMARY KEY, "
+                "provider VARCHAR(32) NOT NULL, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "user_id CHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "normalized_phone_number VARCHAR(32) NOT NULL, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                "verification_code_hash VARCHAR(64) NULL, "
+                "verification_expires_at TIMESTAMP NULL, "
+                "verification_attempts INTEGER NOT NULL DEFAULT 0, "
+                "verified_at TIMESTAMP NULL, "
+                "last_message_at TIMESTAMP NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_whatsapp_identity_phone "
+                "ON whatsapp_identities (provider, normalized_phone_number)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_whatsapp_identities_org "
+                "ON whatsapp_identities (organization_id)"
+            )
+        )
+
+
+def _add_whatsapp_inbound_messages_table(engine: Engine) -> None:
+    """Creates whatsapp_inbound_messages if it's missing -- same
+    idempotent safety net as _add_whatsapp_identities_table above."""
+    inspector = inspect(engine)
+    if "whatsapp_inbound_messages" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS whatsapp_inbound_messages ("
+                "id CHAR(36) PRIMARY KEY, "
+                "provider VARCHAR(32) NOT NULL, "
+                "message_id VARCHAR(128) NOT NULL, "
+                "organization_id CHAR(36) NULL REFERENCES organizations(id) ON DELETE SET NULL, "
+                "user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "whatsapp_identity_id CHAR(36) NULL REFERENCES whatsapp_identities(id) ON DELETE SET NULL, "
+                "message_type VARCHAR(16) NOT NULL, "
+                "command_action VARCHAR(64) NULL, "
+                "status VARCHAR(24) NOT NULL, "
+                "failure_code VARCHAR(64) NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_whatsapp_inbound_message "
+                "ON whatsapp_inbound_messages (provider, message_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_whatsapp_inbound_messages_org_created "
+                "ON whatsapp_inbound_messages (organization_id, created_at)"
+            )
+        )

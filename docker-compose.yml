@@ -1,4 +1,6 @@
-# Local Docker Compose stack: Postgres + backend + frontend.
+# Local Docker Compose stack: Postgres + backend + frontend, plus an
+# optional, experimental whatsapp-bridge service (Phase 23, disabled by
+# default -- see the `whatsapp` profile below and docs/whatsapp.md).
 #
 # `docker compose up --build` works with no .env file at all -- every value
 # below is a safe local default. Container-internal values (the Postgres
@@ -69,8 +71,52 @@ services:
       AI_MODEL: ${AI_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Experimental WhatsApp assistant (Phase 23, see docs/whatsapp.md) --
+      # unset/false by default, same "app starts and functions normally
+      # without it" contract as every other optional provider above. Only
+      # meaningful together with the `whatsapp` profile's whatsapp-bridge
+      # service below; WHATSAPP_BRIDGE_SECRET must be the exact same value
+      # on both services (it's how the two authenticate to each other).
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-null}
+      WHATSAPP_BRIDGE_URL: ${WHATSAPP_BRIDGE_URL:-http://whatsapp-bridge:3100}
+      WHATSAPP_BRIDGE_SECRET: ${WHATSAPP_BRIDGE_SECRET:-}
     ports:
       - "8000:8000"
+    restart: on-failure
+
+  # Experimental, UNOFFICIAL WhatsApp Web transport bridge (Phase 23) --
+  # see docs/whatsapp.md. Excluded from a bare `docker compose up`; start
+  # it explicitly with `docker compose --profile whatsapp up --build`, and
+  # only after setting WHATSAPP_ENABLED=true, WHATSAPP_PROVIDER=bridge, and
+  # a real WHATSAPP_BRIDGE_SECRET (matching the `backend` service above) in
+  # your `.env` file. Needs a real Chromium runtime and a persistent
+  # process/volume -- this is why it is its own container instead of
+  # running inside `backend`, and why it cannot run on a serverless host.
+  whatsapp-bridge:
+    profiles: ["whatsapp"]
+    build:
+      context: ./whatsapp-bridge
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      PORT: "3100"
+      BACKEND_BASE_URL: http://backend:8000
+      WHATSAPP_BRIDGE_SECRET: ${WHATSAPP_BRIDGE_SECRET:-}
+      WHATSAPP_SESSION_PATH: /app/.wwebjs_auth
+      SIGNATURE_TOLERANCE_SECONDS: ${WHATSAPP_SIGNATURE_TOLERANCE_SECONDS:-300}
+      BACKEND_REQUEST_TIMEOUT_SECONDS: "10"
+      RECONNECT_INITIAL_DELAY_SECONDS: "5"
+      RECONNECT_MAX_DELAY_SECONDS: "300"
+      RECONNECT_MAX_ATTEMPTS: "20"
+    volumes:
+      # Session data is equivalent to full WhatsApp account access if it
+      # leaks -- a named volume (not a bind mount) keeps it out of the
+      # repo working tree entirely. Deleting this volume is the container
+      # equivalent of Settings -> WhatsApp's "Delete session" action.
+      - whatsapp_session:/app/.wwebjs_auth
     restart: on-failure
 
   # Durable background-job worker (Phase 15C) -- a genuinely separate
@@ -123,3 +169,4 @@ services:
 
 volumes:
   pgdata:
+  whatsapp_session:

@@ -43,6 +43,8 @@ def _caps(**entitlement_overrides) -> OrganizationCapabilities:
         storage_limit_mb=None,
         max_api_keys=None,
         max_webhooks=None,
+        max_whatsapp_users=None,
+        monthly_whatsapp_actions=None,
         custom_branding_enabled=False,
         api_access_enabled=False,
         advanced_reports_enabled=False,
@@ -50,6 +52,8 @@ def _caps(**entitlement_overrides) -> OrganizationCapabilities:
         forecasting_enabled=False,
         ai_enabled=False,
         background_jobs_enabled=False,
+        whatsapp_enabled=False,
+        voice_messages_enabled=False,
     )
     defaults.update(entitlement_overrides)
     entitlements = Entitlements(**defaults)
@@ -63,6 +67,8 @@ def _caps(**entitlement_overrides) -> OrganizationCapabilities:
         usage_ai_actions=0,
         usage_api_keys=0,
         usage_webhooks=0,
+        usage_whatsapp_users=0,
+        usage_whatsapp_actions=0,
     )
 
 

@@ -1699,6 +1699,88 @@ export type NotificationPreference = {
   email_enabled: boolean;
 };
 
+// Phase 23: experimental WhatsApp AI assistant (Settings -> WhatsApp).
+// See app/whatsapp/schemas.py -- these mirror that module's response
+// shapes exactly.
+export type WhatsAppConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "qr_required"
+  | "connected"
+  | "session_expired";
+
+export type WhatsAppConnectionResponse = {
+  state: WhatsAppConnectionState;
+  connected_phone_number: string | null;
+  last_heartbeat_at: string | null;
+};
+
+export type WhatsAppQuotaResponse = {
+  used: number;
+  limit: number | null;
+  unlimited: boolean;
+};
+
+export type WhatsAppStatusResponse = {
+  transport_enabled: boolean;
+  transport_configured: boolean;
+  plan_allows_whatsapp: boolean;
+  plan_allows_voice_messages: boolean;
+  connection: WhatsAppConnectionResponse;
+  whatsapp_users_quota: WhatsAppQuotaResponse;
+  whatsapp_actions_quota: WhatsAppQuotaResponse;
+};
+
+export type WhatsAppIdentityStatus = "pending" | "verified" | "disabled";
+
+export type WhatsAppIdentityResponse = {
+  id: string;
+  user_id: string;
+  user_email: string;
+  normalized_phone_number: string;
+  status: WhatsAppIdentityStatus;
+  verified_at: string | null;
+  last_message_at: string | null;
+  created_at: string;
+};
+
+export type WhatsAppIdentityListResponse = {
+  items: WhatsAppIdentityResponse[];
+};
+
+export type WhatsAppLinkRequest = {
+  phone_number: string;
+};
+
+/** The one and only response that ever carries the raw verification code
+ * -- see WhatsAppLinkResponse's own docstring. Never persist this beyond
+ * the component state needed to display it once. */
+export type WhatsAppLinkResponse = {
+  identity_id: string;
+  normalized_phone_number: string;
+  status: WhatsAppIdentityStatus;
+  verification_code: string;
+  verification_expires_at: string;
+};
+
+export type WhatsAppQrResponse = {
+  qr_data_base64: string;
+  expires_at: string;
+};
+
+export type WhatsAppCommandHistoryItemResponse = {
+  id: string;
+  message_type: "text" | "audio";
+  command_action: string | null;
+  status: string;
+  failure_code: string | null;
+  created_at: string;
+};
+
+export type WhatsAppCommandHistoryResponse = {
+  items: WhatsAppCommandHistoryItemResponse[];
+};
+
 export type UpdateNotificationPreferenceRequest = {
   email_enabled: boolean;
 };

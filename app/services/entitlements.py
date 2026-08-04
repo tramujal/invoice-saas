@@ -66,6 +66,12 @@ class PlanFeature(str, Enum):
     forecasting = "forecasting_enabled"
     ai = "ai_enabled"
     background_jobs = "background_jobs_enabled"
+    # Phase 23 additions -- the experimental WhatsApp assistant. Two
+    # separate flags (not one) so a plan can allow text commands without
+    # allowing voice notes, which depend on a transcription provider and
+    # cost more per message.
+    whatsapp = "whatsapp_enabled"
+    whatsapp_voice_messages = "voice_messages_enabled"
 
 
 class PlanLimit(str, Enum):
@@ -82,6 +88,13 @@ class PlanLimit(str, Enum):
     storage_limit_mb = "storage_limit_mb"
     max_api_keys = "max_api_keys"
     max_webhooks = "max_webhooks"
+    # Phase 23 additions -- see Plan's own docstring in app/models.py.
+    # monthly_whatsapp_actions is intentionally its own quota, distinct
+    # from max_ai_actions_per_month: it counts every processed inbound
+    # WhatsApp message (read-only queries included), not just the subset
+    # that also creates an AssistantAction.
+    max_whatsapp_users = "max_whatsapp_users"
+    monthly_whatsapp_actions = "monthly_whatsapp_actions"
 
 
 @dataclass(frozen=True)
@@ -105,6 +118,8 @@ class Entitlements:
     storage_limit_mb: int | None
     max_api_keys: int | None
     max_webhooks: int | None
+    max_whatsapp_users: int | None
+    monthly_whatsapp_actions: int | None
     custom_branding_enabled: bool
     api_access_enabled: bool
     advanced_reports_enabled: bool
@@ -112,6 +127,8 @@ class Entitlements:
     forecasting_enabled: bool
     ai_enabled: bool
     background_jobs_enabled: bool
+    whatsapp_enabled: bool
+    voice_messages_enabled: bool
 
 
 def _entitlements_from_plan(plan: Plan) -> Entitlements:
@@ -128,6 +145,8 @@ def _entitlements_from_plan(plan: Plan) -> Entitlements:
         storage_limit_mb=plan.storage_limit_mb,
         max_api_keys=plan.max_api_keys,
         max_webhooks=plan.max_webhooks,
+        max_whatsapp_users=plan.max_whatsapp_users,
+        monthly_whatsapp_actions=plan.monthly_whatsapp_actions,
         custom_branding_enabled=plan.custom_branding_enabled,
         api_access_enabled=plan.api_access_enabled,
         advanced_reports_enabled=plan.advanced_reports_enabled,
@@ -135,6 +154,8 @@ def _entitlements_from_plan(plan: Plan) -> Entitlements:
         forecasting_enabled=plan.forecasting_enabled,
         ai_enabled=plan.ai_enabled,
         background_jobs_enabled=plan.background_jobs_enabled,
+        whatsapp_enabled=plan.whatsapp_enabled,
+        voice_messages_enabled=plan.voice_messages_enabled,
     )
 
 
