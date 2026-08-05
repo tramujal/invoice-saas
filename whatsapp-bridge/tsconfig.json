@@ -7,6 +7,22 @@
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
+    // Required by two genuine, verified bugs in whatsapp-web.js@1.26.0's
+    // own shipped index.d.ts, not by anything in this project's source:
+    // (1) a relative type import to ./src/util/InterfaceController.js
+    // with no matching .d.ts, and (2) a reference to
+    // puppeteer.PuppeteerNodeLaunchOptions, a type that does not exist
+    // even in puppeteer@24.38.0 -- the EXACT version whatsapp-web.js
+    // itself pins as a dependency (confirmed by inspecting
+    // node_modules/puppeteer/lib/types.d.ts directly). Neither is fixable
+    // from this project without patching a third-party package's own
+    // declaration file. (A third, legitimately-fixable error --
+    // "Could not find a declaration file for module 'node-fetch'" -- was
+    // fixed properly instead, by adding @types/node-fetch as a real
+    // devDependency; this flag does not paper over that one.)
+    // skipLibCheck only skips type-checking *.d.ts files -- it has no
+    // effect on this project's own .ts source under src/, which is still
+    // fully strict-checked.
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,

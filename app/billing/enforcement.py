@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session
 from app.billing.capabilities import (
     OrganizationCapabilities,
     can_use_ai,
+    can_use_advanced_financial_analytics,
+    can_use_ai_financial_recommendations,
     can_use_analytics,
     can_use_whatsapp,
     can_use_whatsapp_voice_messages,
@@ -108,3 +110,34 @@ def require_whatsapp_voice_messages(db: Session, organization_id: str) -> Organi
     first; this is only reached for an inbound `type: audio` message."""
     caps = get_organization_capabilities(db, organization_id)
     return _require(caps, feature="whatsapp_voice_messages", allowed=can_use_whatsapp_voice_messages(caps))
+
+
+def require_advanced_financial_analytics(db: Session, organization_id: str) -> OrganizationCapabilities:
+    """Phase 24 -- raises CapabilityDeniedError if the organization's plan
+    doesn't include the Financial Intelligence module's deterministic
+    dashboard (aging, concentration, cash-flow calendar, quote funnel).
+    Unlike forecasting (can_use_revenue_forecasting below), these sections
+    hard-reject rather than soft-degrade -- there is no meaningful partial
+    version of "receivables aging" to fall back to."""
+    caps = get_organization_capabilities(db, organization_id)
+    return _require(
+        caps, feature="advanced_financial_analytics", allowed=can_use_advanced_financial_analytics(caps)
+    )
+
+
+def require_ai_financial_recommendations(db: Session, organization_id: str) -> OrganizationCapabilities:
+    """Phase 24 -- raises CapabilityDeniedError if the organization's plan
+    doesn't include AI-generated financial recommendations. Checked at the
+    AI-panel endpoints only (GET insights/latest, POST insights/generate),
+    never at the deterministic-dashboard endpoints, which are gated
+    separately by require_advanced_financial_analytics above.
+
+    revenue_forecasting_enabled (app.financial_intelligence.forecasting)
+    deliberately has NO require_* raising counterpart here -- it soft-
+    degrades exactly like the existing can_use_forecasting, returning a
+    structurally-valid forecast response with plan_restricted=True
+    instead of rejecting the request."""
+    caps = get_organization_capabilities(db, organization_id)
+    return _require(
+        caps, feature="ai_financial_recommendations", allowed=can_use_ai_financial_recommendations(caps)
+    )

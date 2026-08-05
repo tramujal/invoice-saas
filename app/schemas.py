@@ -1566,6 +1566,7 @@ _PLAN_LIMIT_FIELD_NAMES = (
     "max_webhooks",
     "max_whatsapp_users",
     "monthly_whatsapp_actions",
+    "monthly_financial_ai_reports",
 )
 _PLAN_FEATURE_FIELD_NAMES = (
     "custom_branding_enabled",
@@ -1577,6 +1578,9 @@ _PLAN_FEATURE_FIELD_NAMES = (
     "background_jobs_enabled",
     "whatsapp_enabled",
     "voice_messages_enabled",
+    "advanced_financial_analytics_enabled",
+    "revenue_forecasting_enabled",
+    "ai_financial_recommendations_enabled",
 )
 
 
@@ -1597,6 +1601,7 @@ class PlanLimits(BaseModel):
     max_webhooks: int | None
     max_whatsapp_users: int | None
     monthly_whatsapp_actions: int | None
+    monthly_financial_ai_reports: int | None
 
 
 class PlanFeatures(BaseModel):
@@ -1604,7 +1609,8 @@ class PlanFeatures(BaseModel):
     allow the capability, not whether it's actually wired up and
     enforced anywhere yet (enforcement is a later phase). The last four
     were added in Phase 17A alongside the billing/subscription domain;
-    the last two (Phase 23) gate the experimental WhatsApp assistant."""
+    the next two (Phase 23) gate the experimental WhatsApp assistant; the
+    final three (Phase 24) gate the Financial Intelligence module."""
 
     custom_branding_enabled: bool
     api_access_enabled: bool
@@ -1615,6 +1621,9 @@ class PlanFeatures(BaseModel):
     background_jobs_enabled: bool
     whatsapp_enabled: bool
     voice_messages_enabled: bool
+    advanced_financial_analytics_enabled: bool
+    revenue_forecasting_enabled: bool
+    ai_financial_recommendations_enabled: bool
 
 
 class PlanResponse(BaseModel):
@@ -1692,6 +1701,7 @@ class PlanCreateRequest(BaseModel):
     max_webhooks: int | None = None
     max_whatsapp_users: int | None = None
     monthly_whatsapp_actions: int | None = None
+    monthly_financial_ai_reports: int | None = None
     custom_branding_enabled: bool = False
     api_access_enabled: bool = False
     advanced_reports_enabled: bool = False
@@ -1701,6 +1711,9 @@ class PlanCreateRequest(BaseModel):
     background_jobs_enabled: bool = False
     whatsapp_enabled: bool = False
     voice_messages_enabled: bool = False
+    advanced_financial_analytics_enabled: bool = False
+    revenue_forecasting_enabled: bool = False
+    ai_financial_recommendations_enabled: bool = False
     reason: str = Field(min_length=1, max_length=1000)
 
     @field_validator("code")
@@ -1759,6 +1772,7 @@ class PlanUpdateRequest(BaseModel):
     max_webhooks: int | None = None
     max_whatsapp_users: int | None = None
     monthly_whatsapp_actions: int | None = None
+    monthly_financial_ai_reports: int | None = None
     custom_branding_enabled: bool | None = None
     api_access_enabled: bool | None = None
     advanced_reports_enabled: bool | None = None
@@ -1768,6 +1782,9 @@ class PlanUpdateRequest(BaseModel):
     background_jobs_enabled: bool | None = None
     whatsapp_enabled: bool | None = None
     voice_messages_enabled: bool | None = None
+    advanced_financial_analytics_enabled: bool | None = None
+    revenue_forecasting_enabled: bool | None = None
+    ai_financial_recommendations_enabled: bool | None = None
 
     @field_validator("reason")
     @classmethod

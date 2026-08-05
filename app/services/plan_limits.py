@@ -36,6 +36,7 @@ from app.billing.capabilities import (
     remaining_ai_actions_quota,
     remaining_api_keys,
     remaining_customers,
+    remaining_financial_ai_reports_quota,
     remaining_invoice_quota,
     remaining_products,
     remaining_quote_quota,
@@ -68,6 +69,8 @@ class LimitedResource(str, Enum):
     # Phase 23 additions -- the experimental WhatsApp assistant.
     whatsapp_users = "whatsapp_users"
     whatsapp_actions = "whatsapp_actions"
+    # Phase 24 addition -- the Financial Intelligence module's AI reports.
+    financial_ai_reports = "financial_ai_reports"
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,11 @@ _RESOURCE_SPECS: dict[LimitedResource, _ResourceSpec] = {
         lambda c: c.entitlements.monthly_whatsapp_actions,
         lambda c: c.usage_whatsapp_actions,
         remaining_whatsapp_actions_quota,
+    ),
+    LimitedResource.financial_ai_reports: _ResourceSpec(
+        lambda c: c.entitlements.monthly_financial_ai_reports,
+        lambda c: c.usage_financial_ai_reports,
+        remaining_financial_ai_reports_quota,
     ),
     # storage intentionally omitted -- see module docstring.
 }

@@ -1391,7 +1391,7 @@ export type PlanLimitReachedDetail = {
 // .to_error_detail()). Distinct from PlanLimitReachedDetail above: this
 // is "your plan doesn't include this feature at all", never a
 // used-vs-limit quota.
-export type CapabilityDeniedFeature = "ai" | "analytics";
+export type CapabilityDeniedFeature = "ai" | "analytics" | "advanced_financial_analytics";
 
 export type CapabilityDeniedDetail = {
   code: "feature_not_available";
@@ -1783,4 +1783,240 @@ export type WhatsAppCommandHistoryResponse = {
 
 export type UpdateNotificationPreferenceRequest = {
   email_enabled: boolean;
+};
+
+// Phase 24.1 -- the deterministic Financial Dashboard
+// (app/financial_intelligence/). No forecasting, no AI recommendations
+// yet -- those are separate, later phases; the capabilities block below
+// only ever reports whether they're available, never returns data for
+// them from these endpoints.
+export type FinancialDataCompleteness = "complete" | "partial" | "insufficient";
+export type FinancialTrendDirection = "up" | "down" | "flat" | "unknown";
+
+/** One self-describing KPI -- current value, an optional previous-period
+ * comparison (previous_value/percent_change/trend_direction travel
+ * together; all three are null together when no comparison exists for
+ * this particular metric -- see each metric's own `note`), and
+ * `formula_key` as a stable pointer into docs/financial_dashboard.md's
+ * metric dictionary. Money/percentage `value`s serialize as strings
+ * (backend Decimal), matching every other monetary field in this app. */
+export type FinancialMetricValue = {
+  id: string;
+  label: string;
+  value: string | null;
+  currency_code: string | null;
+  period: string | null;
+  comparison_period: string | null;
+  previous_value: string | null;
+  percent_change: string | null;
+  trend_direction: FinancialTrendDirection | null;
+  data_completeness: FinancialDataCompleteness;
+  formula_key: string;
+  note: string | null;
+};
+
+export type FinancialIntelligenceCapabilities = {
+  advanced_financial_analytics_enabled: boolean;
+  revenue_forecasting_enabled: boolean;
+  ai_financial_recommendations_enabled: boolean;
+  remaining_financial_ai_reports_this_month: number | null;
+};
+
+export type ExecutiveOverviewCurrencyMetrics = {
+  currency_code: string;
+  invoiced_this_month: FinancialMetricValue;
+  collected_this_month: FinancialMetricValue;
+  outstanding_receivables: FinancialMetricValue;
+  overdue_receivables: FinancialMetricValue;
+  expected_collections_next_30_days: FinancialMetricValue;
+  average_invoice_value: FinancialMetricValue;
+  collection_rate: FinancialMetricValue;
+  overdue_rate: FinancialMetricValue;
+};
+
+export type ExecutiveOverviewResponse = {
+  generated_at: string;
+  period_start: string;
+  period_end: string;
+  by_currency: ExecutiveOverviewCurrencyMetrics[];
+  quote_conversion_rate: FinancialMetricValue;
+  average_days_to_payment: FinancialMetricValue;
+  capabilities: FinancialIntelligenceCapabilities;
+};
+
+export type RevenueTrendPoint = {
+  period: string;
+  currency_code: string;
+  invoiced: string;
+  collected: string;
+  invoice_count: number;
+};
+
+export type RevenueTrendsResponse = {
+  generated_at: string;
+  granularity: "monthly";
+  points: RevenueTrendPoint[];
+  month_over_month_change_percent: Record<string, string | null>;
+  year_over_year_change_percent: Record<string, string | null>;
+  rolling_3_month_average: Record<string, string>;
+  rolling_6_month_average: Record<string, string>;
+  data_completeness: FinancialDataCompleteness;
+};
+
+export type FinancialAgingBucketName =
+  | "not_yet_due"
+  | "overdue_1_30"
+  | "overdue_31_60"
+  | "overdue_61_90"
+  | "overdue_90_plus";
+
+export type FinancialAgingBucket = {
+  bucket: FinancialAgingBucketName;
+  currency_code: string;
+  amount: string;
+  invoice_count: number;
+  percent_of_total: string | null;
+};
+
+export type FinancialTopOverdueCustomer = {
+  customer_id: string;
+  customer_name: string;
+  currency_code: string;
+  overdue_total: string;
+  overdue_invoice_count: number;
+  oldest_overdue_days: number;
+};
+
+export type ReceivablesAgingResponse = {
+  generated_at: string;
+  as_of_date: string;
+  buckets: FinancialAgingBucket[];
+  top_overdue_customers: FinancialTopOverdueCustomer[];
+  invoices_missing_due_date: number;
+};
+
+export type FinancialCustomerRevenueEntry = {
+  customer_id: string;
+  customer_name: string;
+  currency_code: string;
+  revenue: string;
+  invoice_count: number;
+};
+
+export type FinancialCustomerOutstandingEntry = {
+  customer_id: string;
+  customer_name: string;
+  currency_code: string;
+  outstanding_total: string;
+};
+
+export type FinancialCustomerConcentration = {
+  currency_code: string;
+  top_customer_share_percent: string | null;
+  top_3_customers_share_percent: string | null;
+  data_completeness: FinancialDataCompleteness;
+};
+
+export type FinancialRepeatCustomerContribution = {
+  currency_code: string;
+  repeat_customer_revenue_share_percent: string | null;
+  repeat_customer_count: number;
+  total_customer_count: number;
+};
+
+export type FinancialAtRiskCustomer = {
+  customer_id: string;
+  customer_name: string;
+  currency_code: string | null;
+  rule: "repeated_overdue_invoices" | "overdue_far_beyond_average_delay";
+  evidence: string;
+  open_invoice_count: number;
+  overdue_total: string | null;
+};
+
+export type CustomersSectionResponse = {
+  generated_at: string;
+  period_start: string;
+  period_end: string;
+  top_by_revenue: FinancialCustomerRevenueEntry[];
+  top_by_outstanding: FinancialCustomerOutstandingEntry[];
+  most_overdue: FinancialTopOverdueCustomer[];
+  concentration: FinancialCustomerConcentration[];
+  repeat_contribution: FinancialRepeatCustomerContribution[];
+  customer_growth_count: number;
+  at_risk: FinancialAtRiskCustomer[];
+};
+
+export type FinancialProductRevenueEntry = {
+  product_id: string;
+  product_name: string;
+  product_type: string;
+  currency_code: string;
+  revenue: string;
+  quantity: string;
+  invoice_count: number;
+  average_sale_value: string;
+};
+
+export type FinancialProductTrend = {
+  product_id: string;
+  product_name: string;
+  currency_code: string;
+  direction: "increasing" | "decreasing" | "flat" | "insufficient_data";
+  months_observed: number;
+};
+
+export type FinancialProductConcentration = {
+  currency_code: string;
+  top_product_share_percent: string | null;
+};
+
+export type ProductsSectionResponse = {
+  generated_at: string;
+  period_start: string;
+  period_end: string;
+  by_revenue: FinancialProductRevenueEntry[];
+  trends: FinancialProductTrend[];
+  concentration: FinancialProductConcentration[];
+  declining: FinancialProductTrend[];
+};
+
+export type QuoteFunnelCounts = {
+  created: number;
+  sent: number;
+  accepted: number;
+  rejected: number;
+  expired: number;
+  converted: number;
+};
+
+export type QuoteFunnelCurrencyValue = {
+  currency_code: string;
+  quoted_value: string;
+  converted_value: string;
+};
+
+export type QuotesSectionResponse = {
+  generated_at: string;
+  counts: QuoteFunnelCounts;
+  conversion_rate_percent: string | null;
+  average_time_to_acceptance_days: FinancialMetricValue;
+  by_currency: QuoteFunnelCurrencyValue[];
+};
+
+export type CashflowCalendarPoint = {
+  period_start: string;
+  period_end: string;
+  currency_code: string;
+  known_amount: string;
+  invoice_count: number;
+};
+
+export type CashflowCalendarResponse = {
+  generated_at: string;
+  as_of_date: string;
+  granularity: "day" | "week" | "month";
+  horizon_days: number;
+  points: CashflowCalendarPoint[];
+  disclaimer: string;
 };

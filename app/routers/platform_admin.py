@@ -1661,6 +1661,7 @@ def _build_plan_response(plan: Plan) -> PlanResponse:
             max_webhooks=plan.max_webhooks,
             max_whatsapp_users=plan.max_whatsapp_users,
             monthly_whatsapp_actions=plan.monthly_whatsapp_actions,
+            monthly_financial_ai_reports=plan.monthly_financial_ai_reports,
         ),
         features=PlanFeatures(
             custom_branding_enabled=plan.custom_branding_enabled,
@@ -1672,6 +1673,9 @@ def _build_plan_response(plan: Plan) -> PlanResponse:
             background_jobs_enabled=plan.background_jobs_enabled,
             whatsapp_enabled=plan.whatsapp_enabled,
             voice_messages_enabled=plan.voice_messages_enabled,
+            advanced_financial_analytics_enabled=plan.advanced_financial_analytics_enabled,
+            revenue_forecasting_enabled=plan.revenue_forecasting_enabled,
+            ai_financial_recommendations_enabled=plan.ai_financial_recommendations_enabled,
         ),
         version=plan.version,
         created_at=plan.created_at,
@@ -1735,6 +1739,7 @@ def create_platform_plan(
         max_webhooks=body.max_webhooks,
         max_whatsapp_users=body.max_whatsapp_users,
         monthly_whatsapp_actions=body.monthly_whatsapp_actions,
+        monthly_financial_ai_reports=body.monthly_financial_ai_reports,
         custom_branding_enabled=body.custom_branding_enabled,
         api_access_enabled=body.api_access_enabled,
         advanced_reports_enabled=body.advanced_reports_enabled,
@@ -1744,6 +1749,9 @@ def create_platform_plan(
         background_jobs_enabled=body.background_jobs_enabled,
         whatsapp_enabled=body.whatsapp_enabled,
         voice_messages_enabled=body.voice_messages_enabled,
+        advanced_financial_analytics_enabled=body.advanced_financial_analytics_enabled,
+        revenue_forecasting_enabled=body.revenue_forecasting_enabled,
+        ai_financial_recommendations_enabled=body.ai_financial_recommendations_enabled,
     )
     db.add(plan)
     db.flush()

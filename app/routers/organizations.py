@@ -86,6 +86,7 @@ def get_organization_entitlements_endpoint(
             max_webhooks=entitlements.max_webhooks,
             max_whatsapp_users=entitlements.max_whatsapp_users,
             monthly_whatsapp_actions=entitlements.monthly_whatsapp_actions,
+            monthly_financial_ai_reports=entitlements.monthly_financial_ai_reports,
         ),
         features=PlanFeatures(
             custom_branding_enabled=entitlements.custom_branding_enabled,
@@ -97,6 +98,9 @@ def get_organization_entitlements_endpoint(
             background_jobs_enabled=entitlements.background_jobs_enabled,
             whatsapp_enabled=entitlements.whatsapp_enabled,
             voice_messages_enabled=entitlements.voice_messages_enabled,
+            advanced_financial_analytics_enabled=entitlements.advanced_financial_analytics_enabled,
+            revenue_forecasting_enabled=entitlements.revenue_forecasting_enabled,
+            ai_financial_recommendations_enabled=entitlements.ai_financial_recommendations_enabled,
         ),
     )
 

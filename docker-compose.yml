@@ -98,6 +98,19 @@ services:
     build:
       context: ./whatsapp-bridge
       dockerfile: Dockerfile
+    # A stable hostname, not Docker's default (a new random container ID
+    # on every recreation), is required for the persisted session volume
+    # below to actually survive a container restart: Chromium's own
+    # SingletonLock mechanism records the launching machine's hostname
+    # alongside its PID, and refuses to reuse a profile whose lock names a
+    # DIFFERENT hostname -- it can't safely tell that apart from "a
+    # genuinely different, possibly still-running machine using this
+    # profile". Without this, every container recreation would fail to
+    # launch Chromium at all ("profile appears to be in use by another
+    # Chromium process on another computer"), silently breaking the
+    # "session survives container restart" guarantee documented in
+    # docs/whatsapp.md -- found by actually starting the built image.
+    hostname: whatsapp-bridge
     depends_on:
       backend:
         condition: service_healthy

@@ -360,6 +360,18 @@ def get_invoice_in_org(db: Session, organization_id: str, invoice_reference: str
 def update_invoice_payment_status_record(
     db: Session, invoice: Invoice, new_status: PaymentStatus, actor_user_id: str | None = None
 ) -> Invoice:
+    # Phase 24 -- the one and only place invoice.paid_at is ever written.
+    # Set exactly once, the moment the status actually transitions TO
+    # paid (never overwritten by a redundant "already paid" call);
+    # cleared if a mistaken "paid" is corrected away from paid, so a
+    # stale timestamp can never survive a correction. See paid_at's own
+    # docstring in app/models.py for why a pre-existing paid invoice
+    # legitimately keeps paid_at=NULL forever if it was marked paid
+    # before this column existed.
+    if new_status == PaymentStatus.paid and invoice.payment_status != PaymentStatus.paid.value:
+        invoice.paid_at = datetime.now(timezone.utc)
+    elif new_status != PaymentStatus.paid:
+        invoice.paid_at = None
     invoice.payment_status = new_status.value
     emit_event(
         db,

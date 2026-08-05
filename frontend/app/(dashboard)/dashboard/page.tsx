@@ -270,6 +270,37 @@ export default function DashboardPage() {
             </svg>
           }
         />
+        {/* Phase 24.1 -- a single shortcut card into the dedicated
+            /analytics/financial page, deliberately NOT a KPI number:
+            this dashboard stays the at-a-glance summary it already is,
+            and the deeper financial reporting (aging, cash calendar,
+            concentration, quote funnel, ...) lives entirely on its own
+            page rather than growing this one. */}
+        <DashboardCard
+          title={t("dashboard.financialDashboardTitle")}
+          value={t("dashboard.financialDashboardCta")}
+          description={t("dashboard.financialDashboardDescription")}
+          loading={loading}
+          tone="success"
+          href="/analytics/financial"
+          icon={
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M3 3v18h18" />
+              <path d="m19 9-5 5-4-4-3 3" />
+            </svg>
+          }
+        />
       </section>
 
       {/* Quotes precede invoices in the funnel -- a brand-new business

@@ -25,6 +25,7 @@ from app.routers import (
     customer_imports,
     customers,
     dashboard,
+    financial_intelligence,
     insights,
     invitation_public,
     invitations,
@@ -223,6 +224,7 @@ app.include_router(invitations.router)
 app.include_router(invitation_public.router)
 app.include_router(dashboard.router)
 app.include_router(analytics.router)
+app.include_router(financial_intelligence.router)
 app.include_router(billing.router)
 app.include_router(billing_webhooks.router)
 app.include_router(notifications.router)

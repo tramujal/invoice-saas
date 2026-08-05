@@ -45,6 +45,7 @@ def _caps(**entitlement_overrides) -> OrganizationCapabilities:
         max_webhooks=None,
         max_whatsapp_users=None,
         monthly_whatsapp_actions=None,
+        monthly_financial_ai_reports=None,
         custom_branding_enabled=False,
         api_access_enabled=False,
         advanced_reports_enabled=False,
@@ -54,6 +55,9 @@ def _caps(**entitlement_overrides) -> OrganizationCapabilities:
         background_jobs_enabled=False,
         whatsapp_enabled=False,
         voice_messages_enabled=False,
+        advanced_financial_analytics_enabled=False,
+        revenue_forecasting_enabled=False,
+        ai_financial_recommendations_enabled=False,
     )
     defaults.update(entitlement_overrides)
     entitlements = Entitlements(**defaults)
@@ -69,6 +73,7 @@ def _caps(**entitlement_overrides) -> OrganizationCapabilities:
         usage_webhooks=0,
         usage_whatsapp_users=0,
         usage_whatsapp_actions=0,
+        usage_financial_ai_reports=0,
     )
 
 

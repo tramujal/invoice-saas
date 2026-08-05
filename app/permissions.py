@@ -56,6 +56,15 @@ class Permission(str, Enum):
     dashboard_view = "dashboard.view"
     insights_view = "insights.view"
     audit_view = "audit.view"
+    # Phase 24 -- the Financial Intelligence module (app/financial_intelligence/)
+    # surfaces materially more sensitive detail than the base dashboard
+    # (per-customer overdue timing, concentration, at-risk customers), so
+    # it gets its own toggle rather than silently piggybacking on
+    # dashboard_view/insights_view -- one permission covers both viewing
+    # every deterministic section AND requesting/reading an AI report,
+    # mirroring how insights_view alone already covers both viewing and
+    # refreshing narration today.
+    financial_intelligence_view = "financial_intelligence.view"
 
 
 _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
@@ -67,6 +76,7 @@ _VIEWER_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.dashboard_view,
         Permission.insights_view,
         Permission.assistant_chat,
+        Permission.financial_intelligence_view,
     }
 )
 

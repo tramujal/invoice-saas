@@ -20,6 +20,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.assistant_action_status import AssistantActionStatus
 from app.database import engine
+from app.financial_report_status import FinancialReportStatus
 from app.job_status import JobStatus
 from app.membership_role import MembershipRole
 from app.membership_status import MembershipStatus
@@ -179,6 +180,35 @@ class Plan(Base):
     )
     max_whatsapp_users: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monthly_whatsapp_actions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Phase 24 additions -- the Financial Intelligence module. Same
+    # commercial-entitlement-only / NULL=unlimited/0=unavailable
+    # conventions as every flag/limit above. Deliberately three separate
+    # flags, not one: advanced_financial_analytics_enabled gates the
+    # deterministic dashboard (aging, concentration, cash-flow calendar);
+    # revenue_forecasting_enabled gates the NEW horizon/backtested
+    # forecast (app.financial_intelligence.forecasting) -- a distinct,
+    # narrower-scoped capability from the pre-existing forecasting_enabled
+    # above, which continues to gate only the original one-period-ahead
+    # forecast on /analytics/trends; an org already entitled to that is
+    # NOT automatically entitled to this newer, heavier feature.
+    # ai_financial_recommendations_enabled gates the AI-generated
+    # analysis specifically, separate from the deterministic dashboard,
+    # mirroring whatsapp_enabled/voice_messages_enabled's own
+    # "broad feature + narrower paid sub-feature" split.
+    # monthly_financial_ai_reports is a distinct quota from both
+    # max_ai_actions_per_month and monthly_whatsapp_actions -- see
+    # app.services.organization_usage.count_financial_ai_reports_current_month.
+    advanced_financial_analytics_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    revenue_forecasting_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    ai_financial_recommendations_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    monthly_financial_ai_reports: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Phase 17A pricing -- informational only. No checkout, no charging,
     # no provider anywhere reads these yet; they exist so a future
@@ -865,6 +895,18 @@ class Invoice(Base):
     # A plain calendar date -- no time-of-day component, so comparisons
     # against "today" are never ambiguous the way a datetime would be.
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Phase 24 -- set exactly once, the moment payment_status transitions
+    # to "paid" (see app.services.invoices.update_invoice_payment_status_record,
+    # the single choke point every payment-status change goes through),
+    # and cleared if a "paid" status is ever corrected away from paid.
+    # Nullable and NEVER backfilled: an invoice already paid before this
+    # column existed has no real payment date recorded anywhere in this
+    # app, so it stays NULL forever rather than being guessed at -- an
+    # honest "no data," not a gap papered over. This is what makes
+    # avg-days-to-payment / payment-delay forecasting (app.financial_intelligence)
+    # possible at all; before this column, that number could not be
+    # computed (see app/analytics/calculators/payments.py's own stub).
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Snapshot of the billed customer's own fields, taken at creation time
     # (app.services.invoices.create_invoice_record) -- mirrors
     # InvoiceLineItem's own description/unit_price snapshot exactly:
@@ -2137,6 +2179,71 @@ class NotificationPreference(Base):
         CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
     email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FinancialInsightReport(Base):
+    """A single AI-generated financial analysis, produced by
+    app.jobs.handlers.financial_intelligence and read by
+    app.financial_intelligence.service (Phase 24). Deliberately holds
+    only the FINAL validated structured payload -- never a raw prompt,
+    never raw AI chain-of-thought, never unbounded customer PII -- see
+    app.financial_intelligence.recommendations for the sanitized-context
+    construction and app.financial_intelligence.schemas.FinancialAnalysisPayload
+    for the strict schema this column's JSON always conforms to when
+    status="completed".
+
+    Generation is idempotent per (organization_id, source_fingerprint):
+    app.financial_intelligence.service.request_insight_report reuses an
+    existing pending/completed row for the same fingerprint rather than
+    ever creating a duplicate -- this table is never written to on every
+    page load, only on a genuine user-triggered "generate" action (or a
+    fingerprint change, meaning the underlying financial data actually
+    moved).
+
+    Tenant-isolated like every other organization-scoped table (every
+    query in app.financial_intelligence.queries filters by
+    organization_id explicitly, never relies on this table alone)."""
+
+    __tablename__ = "financial_insight_reports"
+    __table_args__ = (
+        Index("ix_fi_reports_org_status", "organization_id", "status"),
+        Index("ix_fi_reports_org_fingerprint", "organization_id", "source_fingerprint", "status"),
+        Index("ix_fi_reports_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=FinancialReportStatus.pending.value
+    )
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    # sha256 of a canonical (sorted-key) JSON snapshot of the deterministic
+    # metrics actually fed to the AI -- ties "is this report stale" to the
+    # underlying financial data really changing, not to wall-clock time.
+    # See app.financial_intelligence.recommendations.compute_source_fingerprint.
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    ai_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # json.dumps(FinancialAnalysisPayload) when status="completed"; NULL
+    # while pending or on failure. Text, not a native JSON column, matching
+    # BackgroundJob.payload's own existing convention in this codebase.
+    structured_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

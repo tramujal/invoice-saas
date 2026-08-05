@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.billing_period import BillingPeriod
 from app.membership_role import InvitationRole, MembershipRole
+from app.payment_status import PaymentStatus
 from app.models import (
     Customer,
     Organization,
@@ -265,6 +266,21 @@ def make_invoice(
         tax_rate,
         due_date=due_date,
     )
+
+
+def mark_invoice_paid(db, invoice, *, paid_at: datetime | None = None) -> None:
+    """Test-only shortcut that sets payment_status/paid_at directly,
+    bypassing update_invoice_payment_status_record (and therefore its
+    emit_event side effects) -- used to build deterministic
+    payment-delay history for app.financial_intelligence tests, where a
+    test needs many invoices paid on specific, backdated timestamps
+    rather than "now". Real payment-status transitions in the app always
+    go through update_invoice_payment_status_record; this helper exists
+    only because that function always stamps real wall-clock time."""
+    invoice.payment_status = PaymentStatus.paid.value
+    invoice.paid_at = paid_at if paid_at is not None else datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(invoice)
 
 
 def make_quote(

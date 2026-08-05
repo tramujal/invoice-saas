@@ -31,6 +31,7 @@ from app.membership_status import MembershipStatus
 from app.models import (
     AssistantAction,
     Customer,
+    FinancialInsightReport,
     Invoice,
     OrganizationApiKey,
     OrganizationMember,
@@ -270,6 +271,30 @@ def count_whatsapp_actions_current_month(
                 WhatsAppInboundMessage.organization_id == organization_id,
                 WhatsAppInboundMessage.status == "processed",
                 WhatsAppInboundMessage.created_at >= month_start,
+            )
+        )
+        or 0
+    )
+
+
+def count_financial_ai_reports_current_month(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> int:
+    """Counts FinancialInsightReport rows created since the start of the
+    current UTC calendar month (Phase 24), regardless of terminal status
+    (pending/completed/failed) -- the AI-call cost (or at least the quota
+    slot) is incurred the moment a report row is created and a job is
+    enqueued for it, not only on eventual success. Distinct from
+    count_ai_actions_current_month (AssistantAction rows) -- a financial
+    report never creates an AssistantAction."""
+    month_start = _current_month_start_utc(now)
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(FinancialInsightReport)
+            .where(
+                FinancialInsightReport.organization_id == organization_id,
+                FinancialInsightReport.created_at >= month_start,
             )
         )
         or 0

@@ -31,6 +31,7 @@ from app.services.organization_usage import (
     count_ai_actions_current_month,
     count_api_keys,
     count_customers,
+    count_financial_ai_reports_current_month,
     count_invoices_current_month,
     count_products,
     count_quotes_current_month,
@@ -65,6 +66,9 @@ class OrganizationCapabilities:
     # each actually counts.
     usage_whatsapp_users: int
     usage_whatsapp_actions: int
+    # Phase 24 addition -- see app.services.organization_usage
+    # .count_financial_ai_reports_current_month for what this counts.
+    usage_financial_ai_reports: int
 
 
 def get_organization_capabilities(db: Session, organization_id: str) -> OrganizationCapabilities:
@@ -86,6 +90,7 @@ def get_organization_capabilities(db: Session, organization_id: str) -> Organiza
         usage_webhooks=count_webhooks(db, organization_id),
         usage_whatsapp_users=count_whatsapp_users(db, organization_id),
         usage_whatsapp_actions=count_whatsapp_actions_current_month(db, organization_id),
+        usage_financial_ai_reports=count_financial_ai_reports_current_month(db, organization_id),
     )
 
 
@@ -126,6 +131,26 @@ def can_use_whatsapp(caps: OrganizationCapabilities) -> bool:
 
 def can_use_whatsapp_voice_messages(caps: OrganizationCapabilities) -> bool:
     return caps.entitlements.voice_messages_enabled
+
+
+def can_use_advanced_financial_analytics(caps: OrganizationCapabilities) -> bool:
+    """Phase 24 -- gates the deterministic Financial Intelligence
+    dashboard (aging, concentration, cash-flow calendar). Separate from
+    can_use_analytics: an org can have the base analytics page without
+    this deeper, separately-priced reporting surface."""
+    return caps.entitlements.advanced_financial_analytics_enabled
+
+
+def can_use_revenue_forecasting(caps: OrganizationCapabilities) -> bool:
+    """Phase 24 -- gates the NEW horizon-based, backtested forecast
+    (app.financial_intelligence.forecasting). Deliberately distinct from
+    can_use_forecasting above, which continues to gate only the
+    pre-existing one-period-ahead forecast on /analytics/trends."""
+    return caps.entitlements.revenue_forecasting_enabled
+
+
+def can_use_ai_financial_recommendations(caps: OrganizationCapabilities) -> bool:
+    return caps.entitlements.ai_financial_recommendations_enabled
 
 
 # --- remaining quotas -----------------------------------------------------
@@ -174,6 +199,10 @@ def remaining_whatsapp_users(caps: OrganizationCapabilities) -> int | None:
 
 def remaining_whatsapp_actions_quota(caps: OrganizationCapabilities) -> int | None:
     return _remaining(caps.entitlements.monthly_whatsapp_actions, caps.usage_whatsapp_actions)
+
+
+def remaining_financial_ai_reports_quota(caps: OrganizationCapabilities) -> int | None:
+    return _remaining(caps.entitlements.monthly_financial_ai_reports, caps.usage_financial_ai_reports)
 
 
 # --- creation capabilities (derived from the quotas above) -----------------

@@ -72,6 +72,14 @@ class PlanFeature(str, Enum):
     # cost more per message.
     whatsapp = "whatsapp_enabled"
     whatsapp_voice_messages = "voice_messages_enabled"
+    # Phase 24 additions -- the Financial Intelligence module. Three
+    # separate flags (not a reuse of `forecasting` above), see Plan's own
+    # docstring in app/models.py for why: this is a materially deeper,
+    # separately-priced feature set from the pre-existing one-period
+    # forecast that `forecasting` already gates.
+    advanced_financial_analytics = "advanced_financial_analytics_enabled"
+    revenue_forecasting = "revenue_forecasting_enabled"
+    ai_financial_recommendations = "ai_financial_recommendations_enabled"
 
 
 class PlanLimit(str, Enum):
@@ -95,6 +103,10 @@ class PlanLimit(str, Enum):
     # that also creates an AssistantAction.
     max_whatsapp_users = "max_whatsapp_users"
     monthly_whatsapp_actions = "monthly_whatsapp_actions"
+    # Phase 24 addition -- distinct from max_ai_actions_per_month: counts
+    # every FinancialInsightReport row created this month, not ordinary
+    # assistant actions.
+    monthly_financial_ai_reports = "monthly_financial_ai_reports"
 
 
 @dataclass(frozen=True)
@@ -120,6 +132,7 @@ class Entitlements:
     max_webhooks: int | None
     max_whatsapp_users: int | None
     monthly_whatsapp_actions: int | None
+    monthly_financial_ai_reports: int | None
     custom_branding_enabled: bool
     api_access_enabled: bool
     advanced_reports_enabled: bool
@@ -129,6 +142,9 @@ class Entitlements:
     background_jobs_enabled: bool
     whatsapp_enabled: bool
     voice_messages_enabled: bool
+    advanced_financial_analytics_enabled: bool
+    revenue_forecasting_enabled: bool
+    ai_financial_recommendations_enabled: bool
 
 
 def _entitlements_from_plan(plan: Plan) -> Entitlements:
@@ -147,6 +163,7 @@ def _entitlements_from_plan(plan: Plan) -> Entitlements:
         max_webhooks=plan.max_webhooks,
         max_whatsapp_users=plan.max_whatsapp_users,
         monthly_whatsapp_actions=plan.monthly_whatsapp_actions,
+        monthly_financial_ai_reports=plan.monthly_financial_ai_reports,
         custom_branding_enabled=plan.custom_branding_enabled,
         api_access_enabled=plan.api_access_enabled,
         advanced_reports_enabled=plan.advanced_reports_enabled,
@@ -156,6 +173,9 @@ def _entitlements_from_plan(plan: Plan) -> Entitlements:
         background_jobs_enabled=plan.background_jobs_enabled,
         whatsapp_enabled=plan.whatsapp_enabled,
         voice_messages_enabled=plan.voice_messages_enabled,
+        advanced_financial_analytics_enabled=plan.advanced_financial_analytics_enabled,
+        revenue_forecasting_enabled=plan.revenue_forecasting_enabled,
+        ai_financial_recommendations_enabled=plan.ai_financial_recommendations_enabled,
     )
 
 

@@ -157,6 +157,15 @@ technical interview, not a changelog), see
   a separate transport bridge, phone-number verification, and the
   identical propose/confirm lifecycle every other AI action already uses.
   Not an official WhatsApp Business/Meta Cloud API integration.
+- **Financial Dashboard** *(deterministic — no AI, no forecasting yet; see
+  [`docs/financial_dashboard.md`](docs/financial_dashboard.md))* — a
+  dedicated `/analytics/financial` page: executive KPIs with real
+  previous-period comparisons, monthly revenue/collections trends,
+  accounts-receivable aging, customer concentration and at-risk
+  detection, product performance, the quote funnel, and a receivables
+  collections calendar — every figure grouped by currency, computed
+  entirely from real invoice and quote data, plan-gated separately from
+  the base Analytics page.
 
 ![Invoices list](docs/screenshots/invoices-list.png)
 
@@ -636,6 +645,7 @@ both CI jobs locally before opening a PR.
 | [`docs/platform_operations_dashboard.md`](docs/platform_operations_dashboard.md) | Route-by-route reference for the platform-admin console. |
 | [`docs/ci.md`](docs/ci.md) | What CI runs and how to reproduce it locally. |
 | [`docs/whatsapp.md`](docs/whatsapp.md) | The experimental, unofficial WhatsApp assistant: architecture, bridge↔backend security model, identity linking, confirmation/context/voice/PDF handling, plans/quotas, Docker setup, and its migration path to the official Meta Cloud API. |
+| [`docs/financial_dashboard.md`](docs/financial_dashboard.md) | The deterministic Financial Dashboard: every KPI's exact formula, currency behavior, invoice/payment-date eligibility, and its documented limitations (no AI, no forecasting yet). |
 | [`docs/demo.md`](docs/demo.md) | Demo account, demo workflow, and a scripted 3–5 minute live walkthrough. |
 | [`docs/screenshots.md`](docs/screenshots.md) | Every recommended screenshot for this README/portfolio — page, viewport, purpose. |
 | [`docs/portfolio.md`](docs/portfolio.md) | The engineering story for technical interviews: hardest problems, architectural decisions, testing/security strategy, lessons learned. |

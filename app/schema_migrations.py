@@ -73,6 +73,10 @@ def run_startup_migrations(engine: Engine) -> None:
     _backfill_plan_whatsapp_defaults(engine)
     _add_whatsapp_identities_table(engine)
     _add_whatsapp_inbound_messages_table(engine)
+    _add_invoice_paid_at(engine)
+    _add_plan_financial_intelligence_fields(engine)
+    _backfill_plan_financial_intelligence_defaults(engine)
+    _add_financial_insight_reports_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -2196,5 +2200,155 @@ def _add_whatsapp_inbound_messages_table(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_whatsapp_inbound_messages_org_created "
                 "ON whatsapp_inbound_messages (organization_id, created_at)"
+            )
+        )
+
+
+def _add_invoice_paid_at(engine: Engine) -> None:
+    """Phase 24 -- adds invoices.paid_at, nullable, no backfill. See
+    Invoice.paid_at's own docstring in app/models.py for why a NULL here
+    for a pre-existing paid invoice is the honest, permanent state, not a
+    gap to fill in later."""
+    inspector = inspect(engine)
+    if "invoices" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("invoices")}
+    if "paid_at" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE invoices ADD COLUMN paid_at TIMESTAMP NULL"))
+
+
+def _add_plan_financial_intelligence_fields(engine: Engine) -> None:
+    """Phase 24 -- adds the Financial Intelligence module's 4 plan
+    columns (see Plan's own docstring in app/models.py). Same guard shape
+    as _add_plan_whatsapp_fields: a no-op both on a pre-existing database
+    that already ran this AND on a brand-new database (where
+    Base.metadata.create_all() already created every column, since Plan's
+    ORM model declares them)."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("plans")}
+    if "advanced_financial_analytics_enabled" in columns:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE plans ADD COLUMN advanced_financial_analytics_enabled "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE plans ADD COLUMN revenue_forecasting_enabled "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE plans ADD COLUMN ai_financial_recommendations_enabled "
+                "BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        conn.execute(text("ALTER TABLE plans ADD COLUMN monthly_financial_ai_reports INTEGER NULL"))
+
+
+def _backfill_plan_financial_intelligence_defaults(engine: Engine) -> None:
+    """Phase 24 -- enables the Financial Intelligence module's advanced
+    dashboard, forecasting, and AI recommendations on the Pro and
+    Enterprise seed plans only, mirroring analytics_enabled/
+    forecasting_enabled/ai_enabled's own existing pro+ tiering exactly
+    (Free/Starter get the column defaults: every flag False, quota 0).
+    Every custom admin-created plan also simply keeps the column
+    defaults, freely editable afterward via PATCH /admin/plans like any
+    other capability.
+
+    Idempotency signal: the pro plan's own
+    advanced_financial_analytics_enabled still being false, checked fresh
+    on every startup -- same "value, not column-existence" reasoning as
+    _backfill_plan_whatsapp_defaults, since the columns exist immediately
+    on a fresh create_all()'d database, before this has ever run there."""
+    inspector = inspect(engine)
+    if "plans" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("plans")}
+    if "advanced_financial_analytics_enabled" not in columns:
+        return
+
+    with engine.begin() as conn:
+        already_applied = conn.execute(
+            text("SELECT advanced_financial_analytics_enabled FROM plans WHERE code = 'pro'")
+        ).scalar()
+        if already_applied:
+            return
+
+        conn.execute(
+            text(
+                "UPDATE plans SET advanced_financial_analytics_enabled = TRUE, "
+                "revenue_forecasting_enabled = TRUE, ai_financial_recommendations_enabled = TRUE, "
+                "monthly_financial_ai_reports = :monthly_financial_ai_reports "
+                "WHERE code = 'pro'"
+            ),
+            {"monthly_financial_ai_reports": 10},
+        )
+        conn.execute(
+            text(
+                "UPDATE plans SET advanced_financial_analytics_enabled = TRUE, "
+                "revenue_forecasting_enabled = TRUE, ai_financial_recommendations_enabled = TRUE, "
+                "monthly_financial_ai_reports = NULL "
+                "WHERE code = 'enterprise'"
+            )
+        )
+
+
+def _add_financial_insight_reports_table(engine: Engine) -> None:
+    """Creates financial_insight_reports if it's missing -- same
+    idempotent safety net as _add_whatsapp_identities_table above. See
+    FinancialInsightReport's own docstring in app/models.py."""
+    inspector = inspect(engine)
+    if "financial_insight_reports" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS financial_insight_reports ("
+                "id CHAR(36) PRIMARY KEY, "
+                "organization_id CHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, "
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending', "
+                "period_start DATE NOT NULL, "
+                "period_end DATE NOT NULL, "
+                "source_fingerprint VARCHAR(64) NOT NULL, "
+                "ai_provider VARCHAR(32) NULL, "
+                "ai_model VARCHAR(100) NULL, "
+                "structured_payload TEXT NULL, "
+                "generated_at TIMESTAMP NULL, "
+                "expires_at TIMESTAMP NULL, "
+                "error_code VARCHAR(64) NULL, "
+                "error_message VARCHAR(500) NULL, "
+                "created_by_user_id CHAR(36) NULL REFERENCES users(id) ON DELETE SET NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_fi_reports_org_status "
+                "ON financial_insight_reports (organization_id, status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_fi_reports_org_fingerprint "
+                "ON financial_insight_reports (organization_id, source_fingerprint, status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_fi_reports_org_created "
+                "ON financial_insight_reports (organization_id, created_at)"
             )
         )
