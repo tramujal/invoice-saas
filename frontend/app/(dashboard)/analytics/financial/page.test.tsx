@@ -3,14 +3,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import { setAuthSession } from "@/lib/auth-storage";
 import type {
+  AnomaliesResponse,
   CashflowCalendarResponse,
+  CollectionsForecastResponse,
   CustomersSectionResponse,
   ExecutiveOverviewResponse,
   FinancialMetricValue,
+  ForecastAccuracyResponse,
+  ForecastMethodsResponse,
+  ForecastSummaryResponse,
+  MonthlyProjectionResponse,
   ProductsSectionResponse,
   QuotesSectionResponse,
   ReceivablesAgingResponse,
+  RevenueForecastResponse,
   RevenueTrendsResponse,
+  ScenarioResponse,
 } from "@/lib/types";
 import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
 
@@ -164,7 +172,77 @@ const EMPTY_CALENDAR: CashflowCalendarResponse = {
   disclaimer: "This is a receivables forecast, not a profit-and-loss statement.",
 };
 
-function mockAllEndpoints(overview: ExecutiveOverviewResponse | (() => Promise<never>)) {
+// Phase 24.2 -- deterministic revenue forecasting defaults (a brand-new
+// organization: no plan restriction, simply nothing to forecast yet).
+const EMPTY_REVENUE_FORECAST: RevenueForecastResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  results: [],
+};
+
+const EMPTY_COLLECTIONS_FORECAST: CollectionsForecastResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  results: [],
+};
+
+const EMPTY_MONTHLY_PROJECTION: MonthlyProjectionResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  months: 6,
+  points: [],
+};
+
+const EMPTY_FORECAST_SUMMARY: ForecastSummaryResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  results: [],
+};
+
+const EMPTY_FORECAST_ACCURACY: ForecastAccuracyResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  results: [],
+};
+
+const EMPTY_FORECAST_METHODS: ForecastMethodsResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  methods: [
+    { method: "seasonal_naive", minimum_observations_required: 14 },
+    { method: "rolling_average", minimum_observations_required: 3 },
+    { method: "weighted_moving_average", minimum_observations_required: 3 },
+    { method: "linear_trend", minimum_observations_required: 3 },
+  ],
+};
+
+const EMPTY_ANOMALIES: AnomaliesResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  flags: [],
+};
+
+const EMPTY_SCENARIO: ScenarioResponse = {
+  generated_at: "2026-03-15T00:00:00Z",
+  plan_restricted: false,
+  scenario: "base",
+  assumptions_used: { invoice_growth_percent: "0", collection_delay_days: 0, quote_conversion_delta_percent: "0" },
+  results: [],
+};
+
+function mockAllEndpoints(
+  overview: ExecutiveOverviewResponse | (() => Promise<never>),
+  forecastOverrides: {
+    revenue?: RevenueForecastResponse;
+    collections?: CollectionsForecastResponse;
+    monthlyProjection?: MonthlyProjectionResponse;
+    summary?: ForecastSummaryResponse;
+    accuracy?: ForecastAccuracyResponse;
+    methods?: ForecastMethodsResponse;
+    anomalies?: AnomaliesResponse;
+    scenario?: ScenarioResponse;
+  } = {}
+) {
   apiFetchMock.mockImplementation((path: string) => {
     if (path.endsWith("/financial-intelligence/overview")) {
       return typeof overview === "function" ? overview() : Promise.resolve(overview);
@@ -175,6 +253,22 @@ function mockAllEndpoints(overview: ExecutiveOverviewResponse | (() => Promise<n
     if (path.endsWith("/financial-intelligence/products")) return Promise.resolve(EMPTY_PRODUCTS);
     if (path.endsWith("/financial-intelligence/quotes")) return Promise.resolve(EMPTY_QUOTES);
     if (path.includes("/financial-intelligence/cashflow-calendar")) return Promise.resolve(EMPTY_CALENDAR);
+    if (path.endsWith("/financial-intelligence/forecast/revenue"))
+      return Promise.resolve(forecastOverrides.revenue ?? EMPTY_REVENUE_FORECAST);
+    if (path.endsWith("/financial-intelligence/forecast/collections"))
+      return Promise.resolve(forecastOverrides.collections ?? EMPTY_COLLECTIONS_FORECAST);
+    if (path.includes("/financial-intelligence/forecast/monthly-projection"))
+      return Promise.resolve(forecastOverrides.monthlyProjection ?? EMPTY_MONTHLY_PROJECTION);
+    if (path.endsWith("/financial-intelligence/forecast/summary"))
+      return Promise.resolve(forecastOverrides.summary ?? EMPTY_FORECAST_SUMMARY);
+    if (path.endsWith("/financial-intelligence/forecast/accuracy"))
+      return Promise.resolve(forecastOverrides.accuracy ?? EMPTY_FORECAST_ACCURACY);
+    if (path.endsWith("/financial-intelligence/forecast/methods"))
+      return Promise.resolve(forecastOverrides.methods ?? EMPTY_FORECAST_METHODS);
+    if (path.endsWith("/financial-intelligence/forecast/anomalies"))
+      return Promise.resolve(forecastOverrides.anomalies ?? EMPTY_ANOMALIES);
+    if (path.endsWith("/financial-intelligence/forecast/scenario"))
+      return Promise.resolve(forecastOverrides.scenario ?? EMPTY_SCENARIO);
     return Promise.reject(new Error(`unexpected call: ${path}`));
   });
 }
@@ -280,11 +374,168 @@ describe("FinancialDashboardPage", () => {
     resolveOverview(EMPTY_OVERVIEW);
   });
 
-  it("shows the deterministic-only badge and no AI/forecast content", async () => {
+  it("shows the deterministic-only badge", async () => {
     mockAllEndpoints(makeOverview());
     renderWithProviders(<FinancialDashboardPage />);
 
     await waitFor(() => expect(screen.getByText("Revenue this month")).toBeInTheDocument());
     expect(screen.getByText("No AI · No estimates")).toBeInTheDocument();
+  });
+
+  // --- Phase 24.2 -- deterministic revenue forecasting --------------------
+
+  it("renders the revenue forecast chart and horizon cards when a model is selected", async () => {
+    mockAllEndpoints(makeOverview(), {
+      revenue: {
+        generated_at: "2026-03-15T00:00:00Z",
+        plan_restricted: false,
+        results: [
+          {
+            currency_code: "USD",
+            status: "ok",
+            model: "linear_trend",
+            sample_size: 14,
+            confidence: "high",
+            minimum_observations_required: 2,
+            horizons: [
+              { horizon_days: 30, forecast_value: "1000.00", lower_bound: "900.00", upper_bound: "1100.00" },
+              { horizon_days: 90, forecast_value: "3000.00", lower_bound: "2700.00", upper_bound: "3300.00" },
+              { horizon_days: 180, forecast_value: "6000.00", lower_bound: "5400.00", upper_bound: "6600.00" },
+              { horizon_days: 365, forecast_value: "12000.00", lower_bound: "10000.00", upper_bound: "14000.00" },
+            ],
+          },
+        ],
+      },
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    await waitFor(() => expect(screen.getByText("Revenue forecast")).toBeInTheDocument());
+    expect((await screen.findAllByText("Linear trend")).length).toBeGreaterThan(0);
+    expect(screen.getByText("High confidence")).toBeInTheDocument();
+    expect(screen.getByText("30 days")).toBeInTheDocument();
+    expect(screen.getByText("365 days")).toBeInTheDocument();
+  });
+
+  it("shows an insufficient-data state for a currency with too little history", async () => {
+    mockAllEndpoints(makeOverview(), {
+      revenue: {
+        generated_at: "2026-03-15T00:00:00Z",
+        plan_restricted: false,
+        results: [
+          {
+            currency_code: "USD",
+            status: "insufficient_data",
+            model: null,
+            sample_size: 1,
+            confidence: "insufficient_data",
+            minimum_observations_required: 2,
+            horizons: [],
+          },
+        ],
+      },
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    await waitFor(() => expect(screen.getByText("Revenue forecast")).toBeInTheDocument());
+    expect(await screen.findByText(/only 1 on file/)).toBeInTheDocument();
+  });
+
+  it("shows the plan-restricted state for forecast sections when the plan lacks forecasting", async () => {
+    mockAllEndpoints(makeOverview(), {
+      revenue: { generated_at: "2026-03-15T00:00:00Z", plan_restricted: true, results: [] },
+      collections: { generated_at: "2026-03-15T00:00:00Z", plan_restricted: true, results: [] },
+      summary: { generated_at: "2026-03-15T00:00:00Z", plan_restricted: true, results: [] },
+      scenario: {
+        generated_at: "2026-03-15T00:00:00Z",
+        plan_restricted: true,
+        scenario: "base",
+        assumptions_used: { invoice_growth_percent: "0", collection_delay_days: 0, quote_conversion_delta_percent: "0" },
+        results: [],
+      },
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    await waitFor(() => expect(screen.getAllByText("Not included in your plan").length).toBeGreaterThan(0));
+    // Sections gated purely by `planRestricted` (no separate empty-state
+    // text of their own) render nothing rather than a stray heading --
+    // Model Explanation is one of these.
+    expect(screen.queryByText("How this forecast is calculated")).not.toBeInTheDocument();
+  });
+
+  it("renders anomaly flags with their evidence text", async () => {
+    mockAllEndpoints(makeOverview(), {
+      anomalies: {
+        generated_at: "2026-03-15T00:00:00Z",
+        plan_restricted: false,
+        flags: [
+          {
+            rule: "revenue_drop",
+            severity: "high",
+            currency_code: "USD",
+            sample_size: 6,
+            evidence: "Invoiced revenue fell 80% month-over-month (1000 -> 200 USD).",
+          },
+        ],
+      },
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    await waitFor(() => expect(screen.getByText(/Revenue drop/)).toBeInTheDocument());
+    expect(screen.getByText(/Invoiced revenue fell 80%/)).toBeInTheDocument();
+    expect(screen.getByText("High")).toBeInTheDocument();
+  });
+
+  it("re-posts the scenario evaluation when an assumption input changes", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    mockAllEndpoints(makeOverview());
+    renderWithProviders(<FinancialDashboardPage />);
+
+    await waitFor(() => expect(screen.getByText("Scenario controls")).toBeInTheDocument());
+    apiFetchMock.mockClear();
+
+    const optimisticButton = screen.getByRole("button", { name: "Optimistic" });
+    fireEvent.click(optimisticButton);
+
+    await waitFor(
+      () => {
+        const scenarioCall = apiFetchMock.mock.calls.find((call: unknown[]) =>
+          (call[0] as string).endsWith("/financial-intelligence/forecast/scenario")
+        );
+        expect(scenarioCall).toBeDefined();
+        const body = JSON.parse((scenarioCall![1] as RequestInit).body as string);
+        expect(body.scenario).toBe("optimistic");
+        expect(body.assumptions.invoice_growth_percent).toBe(10);
+      },
+      { timeout: 2000 }
+    );
+  });
+
+  it("shows a CSV export button once monthly projection data is available", async () => {
+    mockAllEndpoints(makeOverview(), {
+      monthlyProjection: {
+        generated_at: "2026-03-15T00:00:00Z",
+        plan_restricted: false,
+        months: 1,
+        points: [
+          {
+            month: "2026-04",
+            currency_code: "USD",
+            expected_value: "1000.00",
+            lower_bound: "900.00",
+            upper_bound: "1100.00",
+            confidence: "medium",
+            sample_size: 6,
+          },
+        ],
+      },
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByRole("button", { name: "Export CSV" })).toBeInTheDocument();
   });
 });

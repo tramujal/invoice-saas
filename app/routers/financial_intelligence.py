@@ -18,6 +18,18 @@ from app.billing.enforcement import CapabilityDeniedError
 from app.database import get_db
 from app.deps import get_current_user, require_permission
 from app.financial_intelligence import service
+from app.financial_intelligence.forecasting import (
+    AnomaliesResponse,
+    CollectionsForecastResponse,
+    ForecastAccuracyResponse,
+    ForecastMethodsResponse,
+    ForecastSummaryResponse,
+    MonthlyProjectionResponse,
+    RevenueForecastResponse,
+    ScenarioAssumptions,
+    ScenarioName,
+    ScenarioResponse,
+)
 from app.financial_intelligence.schemas import (
     CashflowCalendarResponse,
     CustomersSectionResponse,
@@ -29,6 +41,7 @@ from app.financial_intelligence.schemas import (
 )
 from app.models import User
 from app.permissions import Permission
+from pydantic import BaseModel
 
 router = APIRouter(
     prefix="/organizations/{organization_id}/financial-intelligence", tags=["financial-intelligence"]
@@ -118,4 +131,104 @@ def get_cashflow_calendar(
         lambda: service.get_cashflow_calendar(
             db, organization_id, horizon_days=horizon_days, granularity=granularity
         )
+    )
+
+
+# --- Phase 24.2 -- deterministic revenue forecasting ------------------------
+#
+# Permission.financial_intelligence_view is still hard-required (same as
+# every endpoint above) -- only the PLAN capability
+# (revenue_forecasting_enabled) soft-degrades, entirely inside
+# app.financial_intelligence.forecasting; there is nothing for _run's
+# CapabilityDeniedError catch to ever intercept on these routes (that
+# error class is only ever raised by the hard-gated
+# require_advanced_financial_analytics path above).
+
+
+class ScenarioEvaluationRequest(BaseModel):
+    scenario: ScenarioName = "base"
+    assumptions: ScenarioAssumptions | None = None
+
+
+@router.get("/forecast/revenue", response_model=RevenueForecastResponse)
+def get_revenue_forecast(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RevenueForecastResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_revenue_forecast(db, organization_id)
+
+
+@router.get("/forecast/collections", response_model=CollectionsForecastResponse)
+def get_collections_forecast(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CollectionsForecastResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_collections_forecast(db, organization_id)
+
+
+@router.get("/forecast/monthly-projection", response_model=MonthlyProjectionResponse)
+def get_monthly_projection(
+    organization_id: str,
+    months: int | None = Query(default=None, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MonthlyProjectionResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_monthly_projection(db, organization_id, months=months)
+
+
+@router.get("/forecast/summary", response_model=ForecastSummaryResponse)
+def get_forecast_summary(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ForecastSummaryResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_forecast_summary(db, organization_id)
+
+
+@router.get("/forecast/accuracy", response_model=ForecastAccuracyResponse)
+def get_forecast_accuracy(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ForecastAccuracyResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_forecast_accuracy(db, organization_id)
+
+
+@router.get("/forecast/methods", response_model=ForecastMethodsResponse)
+def get_forecast_methods(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ForecastMethodsResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_forecast_methods(db, organization_id)
+
+
+@router.get("/forecast/anomalies", response_model=AnomaliesResponse)
+def get_anomalies(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AnomaliesResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.get_anomalies(db, organization_id)
+
+
+@router.post("/forecast/scenario", response_model=ScenarioResponse)
+def post_forecast_scenario(
+    organization_id: str,
+    body: ScenarioEvaluationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ScenarioResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return service.evaluate_scenario(
+        db, organization_id, scenario=body.scenario, assumptions=body.assumptions
     )

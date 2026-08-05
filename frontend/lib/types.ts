@@ -2020,3 +2020,200 @@ export type CashflowCalendarResponse = {
   points: CashflowCalendarPoint[];
   disclaimer: string;
 };
+
+// --- Phase 24.2 -- deterministic revenue forecasting
+// (app.financial_intelligence.forecasting). No AI recommendations here --
+// that's a separate, later phase. Every response carries `plan_restricted`:
+// true means the organization's plan doesn't include forecasting and every
+// number/list below is deliberately empty (a SOFT gate, unlike the 24.1
+// dashboard's hard 403 -- see that module's own docstring) -- the frontend
+// renders an upgrade prompt, never a fabricated forecast.
+
+export type ForecastModelName =
+  | "seasonal_naive"
+  | "rolling_average"
+  | "weighted_moving_average"
+  | "linear_trend";
+
+export const FORECAST_MODEL_NAMES: ForecastModelName[] = [
+  "seasonal_naive",
+  "rolling_average",
+  "weighted_moving_average",
+  "linear_trend",
+];
+
+export type ForecastConfidenceLevel = "insufficient_data" | "low" | "medium" | "high";
+
+export type ForecastHorizonResult = {
+  horizon_days: number;
+  forecast_value: string;
+  lower_bound: string;
+  upper_bound: string;
+};
+
+export type CurrencyForecastStatus = "ok" | "insufficient_data";
+
+export type RevenueForecastCurrencyResult = {
+  currency_code: string;
+  status: CurrencyForecastStatus;
+  model: ForecastModelName | null;
+  sample_size: number;
+  confidence: ForecastConfidenceLevel;
+  minimum_observations_required: number;
+  horizons: ForecastHorizonResult[];
+};
+
+export type RevenueForecastResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  results: RevenueForecastCurrencyResult[];
+};
+
+export type CollectionsHorizonResult = {
+  horizon_days: number;
+  known_amount: string;
+  projected_amount: string;
+  total_expected: string;
+  lower_bound: string;
+  upper_bound: string;
+};
+
+export type CollectionsForecastCurrencyResult = {
+  currency_code: string;
+  sample_size: number;
+  confidence: ForecastConfidenceLevel;
+  horizons: CollectionsHorizonResult[];
+};
+
+export type CollectionsForecastResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  results: CollectionsForecastCurrencyResult[];
+};
+
+export type MonthlyProjectionPoint = {
+  month: string;
+  currency_code: string;
+  expected_value: string;
+  lower_bound: string;
+  upper_bound: string;
+  confidence: ForecastConfidenceLevel;
+  sample_size: number;
+};
+
+export type MonthlyProjectionResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  months: number;
+  points: MonthlyProjectionPoint[];
+};
+
+export type ModelAccuracyEntry = {
+  method: ForecastModelName;
+  eligible: boolean;
+  fold_count: number;
+  mae: string | null;
+  wape: string | null;
+  mape: string | null;
+  directional_accuracy_percent: string | null;
+  selected: boolean;
+};
+
+export type ForecastAccuracyCurrencyResult = {
+  currency_code: string;
+  sample_size: number;
+  selected_model: ForecastModelName | null;
+  evaluations: ModelAccuracyEntry[];
+};
+
+export type ForecastAccuracyResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  results: ForecastAccuracyCurrencyResult[];
+};
+
+export type ForecastMethodDescription = {
+  method: ForecastModelName;
+  minimum_observations_required: number;
+};
+
+export type ForecastMethodsResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  methods: ForecastMethodDescription[];
+};
+
+export type ForecastAnomalyRule =
+  | "revenue_drop"
+  | "collection_slowdown"
+  | "overdue_spike"
+  | "large_invoice"
+  | "customer_concentration";
+
+export type ForecastAnomalySeverity = "low" | "medium" | "high";
+
+/** `evidence` is a factual, data-driven readout (mirrors the pre-existing
+ * AtRiskCustomer.evidence precedent from Phase 24.1) -- safe to render
+ * directly, unlike FinancialMetricValue.label/note. */
+export type AnomalyFlag = {
+  rule: ForecastAnomalyRule;
+  severity: ForecastAnomalySeverity;
+  currency_code: string | null;
+  sample_size: number;
+  evidence: string;
+};
+
+export type AnomaliesResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  flags: AnomalyFlag[];
+};
+
+export type ForecastScenarioName = "base" | "optimistic" | "conservative";
+
+export type ScenarioAssumptions = {
+  invoice_growth_percent: string;
+  collection_delay_days: number;
+  quote_conversion_delta_percent: string;
+};
+
+/** Request body for POST .../forecast/scenario -- numeric (not string)
+ * fields, since this is user-typed input from the Scenario Controls form,
+ * not a value echoed back from a Decimal the backend already computed. */
+export type ScenarioEvaluationRequest = {
+  scenario: ForecastScenarioName;
+  assumptions?: {
+    invoice_growth_percent?: number;
+    collection_delay_days?: number;
+    quote_conversion_delta_percent?: number;
+  };
+};
+
+export type ScenarioCurrencyResult = {
+  currency_code: string;
+  revenue_horizons: ForecastHorizonResult[];
+  collections_horizons: CollectionsHorizonResult[];
+};
+
+export type ScenarioResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  scenario: ForecastScenarioName;
+  assumptions_used: ScenarioAssumptions;
+  results: ScenarioCurrencyResult[];
+};
+
+export type ForecastSummaryCurrencyResult = {
+  currency_code: string;
+  model: ForecastModelName | null;
+  confidence: ForecastConfidenceLevel;
+  revenue_90d: ForecastHorizonResult | null;
+  collections_90d: CollectionsHorizonResult | null;
+  anomaly_count: number;
+};
+
+export type ForecastSummaryResponse = {
+  generated_at: string;
+  plan_restricted: boolean;
+  results: ForecastSummaryCurrencyResult[];
+};

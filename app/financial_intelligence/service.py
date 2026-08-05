@@ -17,7 +17,19 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.billing.enforcement import require_advanced_financial_analytics
-from app.financial_intelligence import metrics
+from app.financial_intelligence import forecasting, metrics
+from app.financial_intelligence.forecasting import (
+    AnomaliesResponse,
+    CollectionsForecastResponse,
+    ForecastAccuracyResponse,
+    ForecastMethodsResponse,
+    ForecastSummaryResponse,
+    MonthlyProjectionResponse,
+    RevenueForecastResponse,
+    ScenarioAssumptions,
+    ScenarioName,
+    ScenarioResponse,
+)
 from app.financial_intelligence.schemas import (
     CashflowCalendarResponse,
     CustomersSectionResponse,
@@ -92,3 +104,69 @@ def get_cashflow_calendar(
     if granularity is not None:
         kwargs["granularity"] = granularity
     return metrics.build_cashflow_calendar_section(db, organization_id, now=now, **kwargs)
+
+
+# --- Phase 24.2 -- deterministic revenue forecasting ------------------------
+#
+# No require_* capability check here, deliberately -- revenue_forecasting_
+# enabled is a SOFT gate (see app.billing.enforcement's own module
+# docstring), and every function in app.financial_intelligence.forecasting
+# already checks it and returns a structurally-valid plan_restricted=True
+# response itself. Wrapping that in a require_* raise here would turn a
+# soft degrade back into a hard 403, exactly the behavior this capability
+# is documented NOT to have.
+
+
+def get_revenue_forecast(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> RevenueForecastResponse:
+    return forecasting.build_revenue_forecast_section(db, organization_id, now=now)
+
+
+def get_collections_forecast(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> CollectionsForecastResponse:
+    return forecasting.build_collections_forecast_section(db, organization_id, now=now)
+
+
+def get_monthly_projection(
+    db: Session, organization_id: str, *, now: datetime | None = None, months: int | None = None
+) -> MonthlyProjectionResponse:
+    if months is None:
+        return forecasting.build_monthly_projection_section(db, organization_id, now=now)
+    return forecasting.build_monthly_projection_section(db, organization_id, now=now, months=months)
+
+
+def get_forecast_summary(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> ForecastSummaryResponse:
+    return forecasting.build_forecast_summary_section(db, organization_id, now=now)
+
+
+def get_forecast_accuracy(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> ForecastAccuracyResponse:
+    return forecasting.build_forecast_accuracy_section(db, organization_id, now=now)
+
+
+def get_forecast_methods(
+    db: Session, organization_id: str, *, now: datetime | None = None
+) -> ForecastMethodsResponse:
+    return forecasting.build_forecast_methods_section(db, organization_id, now=now)
+
+
+def get_anomalies(db: Session, organization_id: str, *, now: datetime | None = None) -> AnomaliesResponse:
+    return forecasting.build_anomalies_section(db, organization_id, now=now)
+
+
+def evaluate_scenario(
+    db: Session,
+    organization_id: str,
+    *,
+    scenario: ScenarioName = "base",
+    assumptions: ScenarioAssumptions | None = None,
+    now: datetime | None = None,
+) -> ScenarioResponse:
+    return forecasting.evaluate_scenario(
+        db, organization_id, scenario=scenario, assumptions=assumptions, now=now
+    )

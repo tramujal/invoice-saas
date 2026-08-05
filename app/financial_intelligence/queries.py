@@ -404,6 +404,30 @@ def get_monthly_revenue_series(
     ]
 
 
+def get_recent_payment_delay_observations(
+    db: Session, organization_id: str, *, since: datetime
+) -> list[int]:
+    """Same shape as get_payment_delay_observations above, restricted to
+    invoices actually PAID on or after `since` -- Phase 24.2's
+    collection_slowdown anomaly rule compares this recent window against
+    the organization's own all-time average (cashflow.compute_payment_delay_stats)
+    rather than an external benchmark. Only real paid_at-backed
+    observations, same honesty rule as the all-time version."""
+    rows = db.execute(
+        select(Invoice.due_date, Invoice.created_at, Invoice.paid_at).where(
+            Invoice.organization_id == organization_id,
+            Invoice.paid_at.is_not(None),
+            Invoice.paid_at >= since,
+        )
+    ).all()
+    observations: list[int] = []
+    for due_date, created_at, paid_at in rows:
+        paid_at = _aware(paid_at)
+        reference_date = due_date if due_date is not None else _aware(created_at).date()
+        observations.append((paid_at.date() - reference_date).days)
+    return observations
+
+
 @dataclass(frozen=True)
 class QuoteValueByCurrency:
     currency_code: str
