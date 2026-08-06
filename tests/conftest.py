@@ -140,6 +140,7 @@ def fake_ai_provider(monkeypatch):
     monkeypatch.setattr("app.routers.assistant.get_ai_provider", lambda *a, **kw: provider)
     monkeypatch.setattr("app.insights.narration.get_ai_provider", lambda *a, **kw: provider)
     monkeypatch.setattr("app.whatsapp.service.get_ai_provider", lambda *a, **kw: provider)
+    monkeypatch.setattr("app.financial_intelligence.recommendations.get_ai_provider", lambda *a, **kw: provider)
     return provider
 
 

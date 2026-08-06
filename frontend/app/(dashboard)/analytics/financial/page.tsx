@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CashCalendarSection } from "@/components/financial/CashCalendarSection";
 import { CustomersSection } from "@/components/financial/CustomersSection";
 import { ExecutiveKpisSection } from "@/components/financial/ExecutiveKpisSection";
+import { AiFinancialAdvisorSection } from "@/components/financial/advisor/AiFinancialAdvisorSection";
 import { AnomalyFlagsSection } from "@/components/financial/forecast/AnomalyFlagsSection";
 import { ExpectedCollectionsSection } from "@/components/financial/forecast/ExpectedCollectionsSection";
 import { ForecastAccuracySection } from "@/components/financial/forecast/ForecastAccuracySection";
@@ -119,6 +120,7 @@ export default function FinancialDashboardPage() {
   const [scenarioLoading, setScenarioLoading] = useState(true);
 
   const forecastPlanRestricted = revenueForecast?.plan_restricted ?? false;
+  const aiAdvisorPlanRestricted = overview ? !overview.capabilities.ai_financial_recommendations_enabled : false;
 
   const handleScenarioChange = useCallback((next: ForecastScenarioName) => {
     setScenario(next);
@@ -414,6 +416,12 @@ export default function FinancialDashboardPage() {
             planRestricted={forecastPlanRestricted}
           />
           <AnomalyFlagsSection data={anomalies} loading={anomaliesLoading} planRestricted={forecastPlanRestricted} />
+
+          {/* Phase 24.3 -- the AI Financial Advisor. Fetches and manages
+              its own report/polling lifecycle independently, gated only
+              by the overview's own ai_financial_recommendations_enabled
+              flag -- never blocks any other section above it. */}
+          <AiFinancialAdvisorSection planRestricted={aiAdvisorPlanRestricted} />
         </>
       )}
     </div>

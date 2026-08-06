@@ -21,3 +21,7 @@ class JobType(str, Enum):
     # payload) and sends it via the configured WhatsAppProvider -- see
     # app.jobs.handlers.whatsapp.
     whatsapp_send_document = "whatsapp.send_document"
+    # Phase 24.3 -- the AI Financial Advisor. Generates one
+    # FinancialInsightReport's structured analysis; the payload carries
+    # only the report id (see app.jobs.handlers.financial_intelligence).
+    financial_insight_generate = "financial_insight.generate"

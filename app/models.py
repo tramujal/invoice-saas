@@ -2190,18 +2190,20 @@ class NotificationPreference(Base):
 class FinancialInsightReport(Base):
     """A single AI-generated financial analysis, produced by
     app.jobs.handlers.financial_intelligence and read by
-    app.financial_intelligence.service (Phase 24). Deliberately holds
+    app.financial_intelligence.service (Phase 24.3). Deliberately holds
     only the FINAL validated structured payload -- never a raw prompt,
     never raw AI chain-of-thought, never unbounded customer PII -- see
-    app.financial_intelligence.recommendations for the sanitized-context
-    construction and app.financial_intelligence.schemas.FinancialAnalysisPayload
-    for the strict schema this column's JSON always conforms to when
+    app.financial_intelligence.insight_builder for the PII-minimal
+    structured-context construction and
+    app.financial_intelligence.schemas_ai.FinancialAnalysisPayload for the
+    strict schema this column's JSON always conforms to when
     status="completed".
 
     Generation is idempotent per (organization_id, source_fingerprint):
-    app.financial_intelligence.service.request_insight_report reuses an
-    existing pending/completed row for the same fingerprint rather than
-    ever creating a duplicate -- this table is never written to on every
+    app.financial_intelligence.recommendations.request_insight_report
+    (called via app.financial_intelligence.service's own wrapper) reuses
+    an existing completed, unexpired row for the same fingerprint rather
+    than ever creating a duplicate -- this table is never written to on every
     page load, only on a genuine user-triggered "generate" action (or a
     fingerprint change, meaning the underlying financial data actually
     moved).

@@ -1375,7 +1375,9 @@ export type PlanLimitReachedResource =
   | "ai_actions"
   // Phase 17B
   | "api_keys"
-  | "webhooks";
+  | "webhooks"
+  // Phase 24.3
+  | "financial_ai_reports";
 
 export type PlanLimitReachedDetail = {
   code: "plan_limit_reached";
@@ -1391,7 +1393,11 @@ export type PlanLimitReachedDetail = {
 // .to_error_detail()). Distinct from PlanLimitReachedDetail above: this
 // is "your plan doesn't include this feature at all", never a
 // used-vs-limit quota.
-export type CapabilityDeniedFeature = "ai" | "analytics" | "advanced_financial_analytics";
+export type CapabilityDeniedFeature =
+  | "ai"
+  | "analytics"
+  | "advanced_financial_analytics"
+  | "ai_financial_recommendations";
 
 export type CapabilityDeniedDetail = {
   code: "feature_not_available";
@@ -2216,4 +2222,90 @@ export type ForecastSummaryResponse = {
   generated_at: string;
   plan_restricted: boolean;
   results: ForecastSummaryCurrencyResult[];
+};
+
+// --- Phase 24.3 -- the AI Financial Advisor (app.financial_intelligence
+// .recommendations). Strictly-validated, backend-generated analysis --
+// every number/name in it was copied by the model from real deterministic
+// metrics (see docs/financial_ai.md); the frontend renders this content
+// directly (unlike FinancialMetricValue.label/note), since it IS the
+// product here, not internal-facing free text standing in for a UI label.
+
+export type InsightReportStatus = "pending" | "completed" | "failed";
+
+export type ObservationCategory =
+  | "revenue"
+  | "collections"
+  | "cash_flow"
+  | "forecast"
+  | "customers"
+  | "products"
+  | "quotes"
+  | "growth"
+  | "risk"
+  | "anomalies"
+  | "data_quality";
+
+export type ObservationSeverity = "info" | "positive" | "warning" | "critical";
+export type RecommendationPriority = "low" | "medium" | "high";
+export type OverallHealth = "excellent" | "good" | "fair" | "poor" | "critical";
+
+export type EvidenceItem = {
+  label: string;
+  value: string;
+};
+
+export type Observation = {
+  category: ObservationCategory;
+  severity: ObservationSeverity;
+  title: string;
+  explanation: string;
+  evidence: EvidenceItem[];
+};
+
+export type Recommendation = {
+  priority: RecommendationPriority;
+  title: string;
+  action: string;
+  reason: string;
+  expected_impact: string;
+  limitations: string;
+};
+
+export type FinancialAnalysisPayload = {
+  executive_summary: string;
+  overall_health: OverallHealth;
+  confidence_notice: string;
+  observations: Observation[];
+  recommendations: Recommendation[];
+  forecast_commentary: string;
+  strengths: string[];
+  risks: string[];
+  opportunities: string[];
+  next_actions: string[];
+  disclaimer: string;
+};
+
+export type InsightReportResponse = {
+  id: string;
+  status: InsightReportStatus;
+  period_start: string;
+  period_end: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  generated_at: string | null;
+  expires_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  analysis: FinancialAnalysisPayload | null;
+  /** True only on the POST .../insights/generate response, meaning an
+   * existing unexpired report for unchanged data was returned directly
+   * -- no new AI call was made. Always false on GET .../insights/latest. */
+  reused: boolean;
+};
+
+export type GenerateInsightRequest = {
+  force?: boolean;
 };

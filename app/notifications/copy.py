@@ -117,6 +117,21 @@ def _organization_plan_changed(payload: dict) -> tuple[str, str]:
     return "Plan changed", f"Your organization's plan changed to {plan_label}."
 
 
+def _financial_insight_requested(payload: dict) -> tuple[str, str]:
+    return "Financial analysis requested", "An AI financial analysis is being generated for your organization."
+
+
+def _financial_insight_generated(payload: dict) -> tuple[str, str]:
+    return "Financial analysis ready", "Your AI financial analysis report is ready to view."
+
+
+def _financial_insight_failed(payload: dict) -> tuple[str, str]:
+    return (
+        "Financial analysis failed",
+        "We couldn't generate your AI financial analysis this time. You can try again from the Financial Dashboard.",
+    )
+
+
 _RENDERERS: dict[WebhookEventType, _Renderer] = {
     WebhookEventType.customer_created: _customer_created,
     WebhookEventType.customer_updated: _customer_updated,
@@ -136,6 +151,9 @@ _RENDERERS: dict[WebhookEventType, _Renderer] = {
     WebhookEventType.invoice_updated: _invoice_updated,
     WebhookEventType.invoice_sent: _invoice_sent,
     WebhookEventType.organization_plan_changed: _organization_plan_changed,
+    WebhookEventType.financial_insight_requested: _financial_insight_requested,
+    WebhookEventType.financial_insight_generated: _financial_insight_generated,
+    WebhookEventType.financial_insight_failed: _financial_insight_failed,
 }
 
 

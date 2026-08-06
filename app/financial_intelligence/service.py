@@ -16,8 +16,11 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.billing.enforcement import require_advanced_financial_analytics
-from app.financial_intelligence import forecasting, metrics
+from app.billing.enforcement import require_advanced_financial_analytics, require_ai_financial_recommendations
+from app.financial_intelligence import cache, forecasting, metrics, recommendations
+from app.financial_intelligence.schemas_ai import FinancialAnalysisPayload, InsightReportResponse
+from app.financial_report_status import FinancialReportStatus
+from app.models import FinancialInsightReport
 from app.financial_intelligence.forecasting import (
     AnomaliesResponse,
     CollectionsForecastResponse,
@@ -170,3 +173,54 @@ def evaluate_scenario(
     return forecasting.evaluate_scenario(
         db, organization_id, scenario=scenario, assumptions=assumptions, now=now
     )
+
+
+# --- Phase 24.3 -- the AI Financial Advisor ---------------------------------
+#
+# Unlike revenue forecasting, ai_financial_recommendations_enabled is a
+# HARD gate (require_ai_financial_recommendations raises
+# CapabilityDeniedError, caught by the router's existing _run() helper) --
+# per this phase's own "Free: unavailable" requirement, there is no
+# meaningful degraded version of an AI-generated report to fall back to.
+
+
+def _to_insight_report_response(
+    report: FinancialInsightReport, *, reused: bool = False
+) -> InsightReportResponse:
+    analysis = None
+    if report.status == FinancialReportStatus.completed.value and report.structured_payload:
+        analysis = FinancialAnalysisPayload.model_validate_json(report.structured_payload)
+    return InsightReportResponse(
+        id=report.id,
+        status=report.status,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        ai_provider=report.ai_provider,
+        ai_model=report.ai_model,
+        generated_at=report.generated_at,
+        expires_at=report.expires_at,
+        error_code=report.error_code,
+        error_message=report.error_message,
+        created_by_user_id=report.created_by_user_id,
+        created_at=report.created_at,
+        analysis=analysis,
+        reused=reused,
+    )
+
+
+def get_latest_insight_report(db: Session, organization_id: str) -> InsightReportResponse | None:
+    require_ai_financial_recommendations(db, organization_id)
+    report = cache.get_latest_report(db, organization_id)
+    if report is None:
+        return None
+    return _to_insight_report_response(report)
+
+
+def request_insight_report(
+    db: Session, organization_id: str, *, requested_by_user_id: str, force: bool = False
+) -> InsightReportResponse:
+    require_ai_financial_recommendations(db, organization_id)
+    report, reused = recommendations.request_insight_report(
+        db, organization_id, requested_by_user_id=requested_by_user_id, force=force
+    )
+    return _to_insight_report_response(report, reused=reused)

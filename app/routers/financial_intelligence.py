@@ -39,8 +39,10 @@ from app.financial_intelligence.schemas import (
     ReceivablesAgingResponse,
     RevenueTrendsResponse,
 )
+from app.financial_intelligence.schemas_ai import InsightReportResponse
 from app.models import User
 from app.permissions import Permission
+from app.services.plan_limits import PlanLimitExceededError
 from pydantic import BaseModel
 
 router = APIRouter(
@@ -232,3 +234,47 @@ def post_forecast_scenario(
     return service.evaluate_scenario(
         db, organization_id, scenario=body.scenario, assumptions=body.assumptions
     )
+
+
+# --- Phase 24.3 -- the AI Financial Advisor ------------------------------
+#
+# ai_financial_recommendations_enabled is a HARD gate here (unlike
+# revenue_forecasting_enabled above) -- require_ai_financial_recommendations
+# raises CapabilityDeniedError, caught by _run() exactly like
+# require_advanced_financial_analytics is for the Phase 24.1 endpoints.
+
+
+class GenerateInsightRequest(BaseModel):
+    # True = always generate fresh (the "Refresh Analysis" button);
+    # False (default) = reuse an existing unexpired report for the same
+    # underlying data when one exists, per this phase's own "only
+    # regenerate when requested, expired, or data changed" requirement.
+    force: bool = False
+
+
+@router.get("/insights/latest", response_model=InsightReportResponse | None)
+def get_latest_insight(
+    organization_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InsightReportResponse | None:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    return _run(lambda: service.get_latest_insight_report(db, organization_id))
+
+
+@router.post("/insights/generate", response_model=InsightReportResponse)
+def post_generate_insight(
+    organization_id: str,
+    body: GenerateInsightRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> InsightReportResponse:
+    require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    try:
+        return service.request_insight_report(
+            db, organization_id, requested_by_user_id=current_user.id, force=body.force
+        )
+    except CapabilityDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.to_error_detail())
+    except PlanLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())

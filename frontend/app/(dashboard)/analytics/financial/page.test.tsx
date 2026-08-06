@@ -8,10 +8,12 @@ import type {
   CollectionsForecastResponse,
   CustomersSectionResponse,
   ExecutiveOverviewResponse,
+  FinancialAnalysisPayload,
   FinancialMetricValue,
   ForecastAccuracyResponse,
   ForecastMethodsResponse,
   ForecastSummaryResponse,
+  InsightReportResponse,
   MonthlyProjectionResponse,
   ProductsSectionResponse,
   QuotesSectionResponse,
@@ -222,6 +224,61 @@ const EMPTY_ANOMALIES: AnomaliesResponse = {
   flags: [],
 };
 
+// Phase 24.3 -- the AI Financial Advisor.
+function analysis(overrides: Partial<FinancialAnalysisPayload> = {}): FinancialAnalysisPayload {
+  return {
+    executive_summary: "Revenue is stable with modest growth this month.",
+    overall_health: "good",
+    confidence_notice: "Based on limited history; confidence is currently low.",
+    observations: [
+      {
+        category: "revenue",
+        severity: "info",
+        title: "Revenue grew slightly",
+        explanation: "Invoiced revenue increased compared to the prior month.",
+        evidence: [{ label: "Revenue this month", value: "USD 1200.00" }],
+      },
+    ],
+    recommendations: [
+      {
+        priority: "medium",
+        title: "Follow up on overdue invoices",
+        action: "Reach out to customers with invoices more than 30 days overdue.",
+        reason: "Overdue receivables represent 10% of outstanding balances this month.",
+        expected_impact: "Improved collection rate next month.",
+        limitations: "Based on a small sample of overdue invoices; confidence is low.",
+      },
+    ],
+    forecast_commentary: "Not enough history yet for a reliable forecast.",
+    strengths: ["Consistent monthly invoicing."],
+    risks: ["High dependency on a single customer."],
+    opportunities: ["Convert more sent quotes."],
+    next_actions: ["Review overdue invoices this week."],
+    disclaimer: "This analysis is generated from deterministic metrics and is not financial, tax, or legal advice.",
+    ...overrides,
+  };
+}
+
+function insightReport(overrides: Partial<InsightReportResponse> = {}): InsightReportResponse {
+  return {
+    id: "report-1",
+    status: "completed",
+    period_start: "2026-03-01",
+    period_end: "2026-04-01",
+    ai_provider: "anthropic",
+    ai_model: "claude-sonnet-5",
+    generated_at: "2026-03-15T00:00:00Z",
+    expires_at: "2026-03-16T00:00:00Z",
+    error_code: null,
+    error_message: null,
+    created_by_user_id: "user-1",
+    created_at: "2026-03-15T00:00:00Z",
+    analysis: analysis(),
+    reused: false,
+    ...overrides,
+  };
+}
+
 const EMPTY_SCENARIO: ScenarioResponse = {
   generated_at: "2026-03-15T00:00:00Z",
   plan_restricted: false,
@@ -241,9 +298,13 @@ function mockAllEndpoints(
     methods?: ForecastMethodsResponse;
     anomalies?: AnomaliesResponse;
     scenario?: ScenarioResponse;
+  } = {},
+  aiOverrides: {
+    latest?: InsightReportResponse | null | (() => Promise<never>);
+    generate?: (body: unknown) => Promise<InsightReportResponse>;
   } = {}
 ) {
-  apiFetchMock.mockImplementation((path: string) => {
+  apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
     if (path.endsWith("/financial-intelligence/overview")) {
       return typeof overview === "function" ? overview() : Promise.resolve(overview);
     }
@@ -269,6 +330,15 @@ function mockAllEndpoints(
       return Promise.resolve(forecastOverrides.anomalies ?? EMPTY_ANOMALIES);
     if (path.endsWith("/financial-intelligence/forecast/scenario"))
       return Promise.resolve(forecastOverrides.scenario ?? EMPTY_SCENARIO);
+    if (path.endsWith("/financial-intelligence/insights/latest")) {
+      const latest = aiOverrides.latest;
+      if (typeof latest === "function") return latest();
+      return Promise.resolve(latest === undefined ? null : latest);
+    }
+    if (path.endsWith("/financial-intelligence/insights/generate") && init?.method === "POST") {
+      if (aiOverrides.generate) return aiOverrides.generate(JSON.parse((init.body as string) ?? "{}"));
+      return Promise.resolve(insightReport({ status: "pending", analysis: null }));
+    }
     return Promise.reject(new Error(`unexpected call: ${path}`));
   });
 }
@@ -458,7 +528,13 @@ describe("FinancialDashboardPage", () => {
 
     renderWithProviders(<FinancialDashboardPage />);
 
-    await waitFor(() => expect(screen.getAllByText("Not included in your plan").length).toBeGreaterThan(0));
+    // 4 independent sections each render this exact string once their OWN
+    // plan_restricted state resolves (Revenue Forecast, Expected
+    // Collections, Forecast Confidence, and the AI Advisor) -- waiting for
+    // all 4 (not just the first, which can resolve before the others)
+    // avoids a race where this assertion runs before revenueForecast's own
+    // fetch (and therefore forecastPlanRestricted) has resolved.
+    await waitFor(() => expect(screen.getAllByText("Not included in your plan").length).toBeGreaterThanOrEqual(4));
     // Sections gated purely by `planRestricted` (no separate empty-state
     // text of their own) render nothing rather than a stray heading --
     // Model Explanation is one of these.
@@ -537,5 +613,151 @@ describe("FinancialDashboardPage", () => {
     renderWithProviders(<FinancialDashboardPage />);
 
     expect(await screen.findByRole("button", { name: "Export CSV" })).toBeInTheDocument();
+  });
+
+  // --- Phase 24.3 -- the AI Financial Advisor -------------------------
+
+  function overviewWithAiEnabled(overrides: Partial<ExecutiveOverviewResponse> = {}) {
+    return makeOverview({
+      capabilities: {
+        advanced_financial_analytics_enabled: true,
+        revenue_forecasting_enabled: false,
+        ai_financial_recommendations_enabled: true,
+        remaining_financial_ai_reports_this_month: 5,
+      },
+      ...overrides,
+    });
+  }
+
+  it("shows the plan-restricted state for the AI advisor when the plan lacks it", async () => {
+    mockAllEndpoints(makeOverview()); // default capabilities: ai_financial_recommendations_enabled: false
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByText("AI Financial Advisor")).toBeInTheDocument();
+    // Two independent "Not included in your plan" instances are expected
+    // here: the AI advisor itself uses the identical English string as
+    // the forecast sections (both plan-restricted by this same mocked
+    // overview), so this just proves the advisor's own copy renders.
+    expect((await screen.findAllByText("Not included in your plan")).length).toBeGreaterThan(0);
+  });
+
+  it("shows an empty state with a Generate button when no report exists yet", async () => {
+    mockAllEndpoints(overviewWithAiEnabled(), {}, { latest: null });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByText("No analysis yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate analysis" })).toBeInTheDocument();
+  });
+
+  it("shows a pending indicator while a report is being generated", async () => {
+    mockAllEndpoints(overviewWithAiEnabled(), {}, {
+      latest: insightReport({ status: "pending", analysis: null, generated_at: null, expires_at: null }),
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByText("Generating your analysis")).toBeInTheDocument();
+  });
+
+  it("shows a failed state with a translated, error-code-specific message", async () => {
+    mockAllEndpoints(overviewWithAiEnabled(), {}, {
+      latest: insightReport({
+        status: "failed",
+        analysis: null,
+        generated_at: null,
+        expires_at: null,
+        error_code: "provider_timeout",
+        error_message: "timed out",
+      }),
+    });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByText("Analysis failed")).toBeInTheDocument();
+    expect(screen.getByText("The AI provider took too long to respond. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("renders a completed report's full content -- summary, health, observations, recommendations, lists, disclaimer", async () => {
+    mockAllEndpoints(overviewWithAiEnabled(), {}, { latest: insightReport() });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByText("Revenue is stable with modest growth this month.")).toBeInTheDocument();
+    expect(screen.getByText("Good")).toBeInTheDocument(); // overall_health badge
+    expect(screen.getByText("Revenue grew slightly")).toBeInTheDocument();
+    expect(screen.getByText("Revenue this month:")).toBeInTheDocument();
+    expect(screen.getByText("USD 1200.00")).toBeInTheDocument();
+    expect(screen.getByText("Follow up on overdue invoices")).toBeInTheDocument();
+    expect(screen.getByText("Consistent monthly invoicing.")).toBeInTheDocument(); // strengths
+    expect(screen.getByText("High dependency on a single customer.")).toBeInTheDocument(); // risks
+    expect(screen.getByText("Convert more sent quotes.")).toBeInTheDocument(); // opportunities
+    expect(screen.getByText("Review overdue invoices this week.")).toBeInTheDocument(); // next actions
+    expect(
+      screen.getByText("This analysis is generated from deterministic metrics and is not financial, tax, or legal advice.")
+    ).toBeInTheDocument();
+    // Not a reused/cached result -- no cached indicator shown.
+    expect(screen.queryByText("Cached result")).not.toBeInTheDocument();
+  });
+
+  it("shows a cached-result indicator when the report was reused rather than freshly generated", async () => {
+    mockAllEndpoints(overviewWithAiEnabled(), {}, { latest: insightReport({ reused: true }) });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    expect(await screen.findByText("Cached result")).toBeInTheDocument();
+  });
+
+  it("clicking Generate analysis POSTs force:false and then shows the pending state", async () => {
+    const generate = vi.fn((body: unknown) =>
+      Promise.resolve(insightReport({ status: "pending", analysis: null, generated_at: null, expires_at: null }))
+    );
+    mockAllEndpoints(overviewWithAiEnabled(), {}, { latest: null, generate });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    const button = await screen.findByRole("button", { name: "Generate analysis" });
+    button.click();
+
+    await waitFor(() => expect(screen.getByText("Generating your analysis")).toBeInTheDocument());
+    expect(generate).toHaveBeenCalledWith({ force: false });
+  });
+
+  it("clicking Refresh analysis on a completed report POSTs force:true", async () => {
+    const generate = vi.fn((body: unknown) => Promise.resolve(insightReport({ reused: false })));
+    mockAllEndpoints(overviewWithAiEnabled(), {}, { latest: insightReport(), generate });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    const button = await screen.findByRole("button", { name: "Refresh analysis" });
+    button.click();
+
+    await waitFor(() => expect(generate).toHaveBeenCalledWith({ force: true }));
+  });
+
+  it("shows a quota-exceeded message when the monthly AI report limit is reached", async () => {
+    const generate = () =>
+      Promise.reject(
+        new ApiError("Request failed (409)", 409, {
+          detail: {
+            code: "plan_limit_reached",
+            resource: "financial_ai_reports",
+            used: 5,
+            limit: 5,
+            plan: { id: "plan-1", code: "pro", name: "Pro" },
+            message: "You've reached your plan's financial ai reports limit (5/5) on the Pro plan.",
+          },
+        })
+      );
+    mockAllEndpoints(overviewWithAiEnabled(), {}, { latest: null, generate });
+
+    renderWithProviders(<FinancialDashboardPage />);
+
+    const button = await screen.findByRole("button", { name: "Generate analysis" });
+    button.click();
+
+    expect(await screen.findByText("You've used 5/5 AI analyses included in your plan this month.")).toBeInTheDocument();
   });
 });

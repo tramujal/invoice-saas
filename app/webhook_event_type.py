@@ -51,6 +51,19 @@ class WebhookEventType(str, Enum):
 
     organization_plan_changed = "organization.plan_changed"
 
+    # Phase 24.3 -- the AI Financial Advisor's report lifecycle. Raised
+    # from app.financial_intelligence.recommendations at the exact
+    # transaction boundary of each transition (request, success, failure)
+    # -- never inferred elsewhere. There is deliberately no
+    # "financial_insight.expired" member: expiry is only ever noticed
+    # passively, the next time a report is requested and found stale
+    # (see app.financial_intelligence.cache.find_reusable_report) --
+    # there is no background sweep that would have an authoritative
+    # moment to raise such an event from.
+    financial_insight_requested = "financial_insight.requested"
+    financial_insight_generated = "financial_insight.generated"
+    financial_insight_failed = "financial_insight.failed"
+
 
 # Grouping key for the frontend's event-subscription selector (the part of
 # the value before the dot) -- computed here, once, rather than re-parsed

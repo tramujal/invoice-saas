@@ -6,4 +6,4 @@ job's work, keeping the import graph one-directional: bootstrap -> handlers
 -> domain services, never the reverse.
 """
 
-from app.jobs.handlers import notification, webhook, whatsapp  # noqa: F401
+from app.jobs.handlers import financial_intelligence, notification, webhook, whatsapp  # noqa: F401
