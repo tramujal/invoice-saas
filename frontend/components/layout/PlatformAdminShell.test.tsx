@@ -23,12 +23,12 @@ vi.mock("@/lib/api", async () => {
 });
 
 const meWithNoOrganizations: MeResponse = {
-  user: { id: "admin-1", email: "root@example.com", email_verified: true, platform_role: "super_admin" },
+  user: { id: "admin-1", email: "root@example.com", email_verified: true, platform_role: "super_admin", has_google_account: false, password_set: true },
   organizations: [],
 };
 
 const meWithOneOrganization: MeResponse = {
-  user: { id: "admin-1", email: "root@example.com", email_verified: true, platform_role: "super_admin" },
+  user: { id: "admin-1", email: "root@example.com", email_verified: true, platform_role: "super_admin", has_google_account: false, password_set: true },
   organizations: [
     { id: "org-1", name: "Acme Inc", currency_code: "USD", language: "en", permissions: [], status: "active" },
   ],
@@ -128,7 +128,7 @@ describe("PlatformAdminShell", () => {
   it("redirects to /dashboard if the platform role was revoked server-side", async () => {
     setAuthSession({ token: "test-token", apiBaseUrl: "http://localhost:8000", platformRole: "super_admin" });
     apiFetchMock.mockResolvedValue({
-      user: { id: "admin-1", email: "root@example.com", email_verified: true, platform_role: null },
+      user: { id: "admin-1", email: "root@example.com", email_verified: true, platform_role: null, has_google_account: false, password_set: true },
       organizations: [],
     });
 

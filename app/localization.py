@@ -11,7 +11,7 @@ from app.payment_status import PaymentStatus
 from app.quote_status import QuoteStatus
 
 if TYPE_CHECKING:
-    from app.models import Invoice, Organization, Quote
+    from app.models import Invoice, Organization, Quote, User
 
 DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ("en", "es")
@@ -425,6 +425,65 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "whatsapp_document_not_found": "I couldn't find that invoice or quote.",
         "whatsapp_document_sent": "Sending it now — you'll receive it here shortly.",
         "whatsapp_generic_error": "Something went wrong processing that. Please try again.",
+
+        # Phase 25 -- in-app/email notification copy (app.notifications.copy),
+        # one title/body pair per app.webhook_event_type.WebhookEventType.
+        # Rendered per-recipient in each recipient's own resolved language
+        # (see app.localization.resolve_recipient_language) -- the same
+        # `t(language, key).format(**kwargs)` convention every email
+        # template above already uses.
+        "notif_customer_created_title": "Customer created",
+        "notif_customer_created_body": "{name} was added as a customer.",
+        "notif_customer_updated_title": "Customer updated",
+        "notif_customer_updated_body": "{name}'s details were updated.",
+        "notif_customer_deleted_title": "Customer deleted",
+        "notif_customer_deleted_body": "{name} was deleted.",
+        "notif_product_created_title": "Product created",
+        "notif_product_created_body": "{name} was added to your catalog.",
+        "notif_product_updated_title": "Product updated",
+        "notif_product_updated_body": "{name} was updated.",
+        "notif_product_archived_title": "Product archived",
+        "notif_product_archived_body": "{name} was archived.",
+        "notif_product_restored_title": "Product restored",
+        "notif_product_restored_body": "{name} was restored.",
+        "notif_quote_created_title": "Quote created",
+        "notif_quote_created_body": "Quote {quote_number} was created.",
+        "notif_quote_updated_title": "Quote updated",
+        "notif_quote_updated_body": "Quote {quote_number} was updated.",
+        "notif_quote_deleted_title": "Quote deleted",
+        "notif_quote_deleted_body": "Quote {quote_number} was deleted.",
+        "notif_quote_sent_title": "Quote sent",
+        "notif_quote_sent_body": "Quote {quote_number} was sent to {customer}.",
+        "notif_quote_accepted_title": "Quote accepted",
+        "notif_quote_accepted_body": "Quote {quote_number} was accepted.",
+        "notif_quote_rejected_title": "Quote rejected",
+        "notif_quote_rejected_body": "Quote {quote_number} was rejected.",
+        "notif_quote_converted_title": "Quote converted",
+        "notif_quote_converted_body": "Quote {quote_number} was converted into an invoice.",
+        "notif_invoice_created_title": "Invoice created",
+        "notif_invoice_created_body": "Invoice {invoice_number} was created.",
+        "notif_invoice_updated_title": "Invoice updated",
+        "notif_invoice_updated_body": "Invoice {invoice_number} was updated.",
+        "notif_invoice_sent_title": "Invoice sent",
+        "notif_invoice_sent_body": "Invoice {invoice_number} was sent to {customer}.",
+        "notif_organization_plan_changed_title": "Plan changed",
+        "notif_organization_plan_changed_body": "Your organization's plan changed to {plan_label}.",
+        "notif_financial_insight_requested_title": "Financial analysis requested",
+        "notif_financial_insight_requested_body": "An AI financial analysis was requested for your organization.",
+        "notif_financial_insight_generated_title": "Financial analysis ready",
+        "notif_financial_insight_generated_body": "Your AI financial analysis report is ready to view.",
+        "notif_financial_insight_failed_title": "Financial analysis failed",
+        "notif_financial_insight_failed_body": (
+            "We couldn't generate your AI financial analysis this time. "
+            "You can try again from the Financial Dashboard."
+        ),
+        "notif_generic_fallback_body": "An event occurred in your organization.",
+        "notif_default_customer_label": "A customer",
+        "notif_default_product_label": "A product",
+        "notif_default_quote_label": "A quote",
+        "notif_default_invoice_label": "An invoice",
+        "notif_default_customer_reference": "the customer",
+        "notif_default_plan_label": "a new plan",
     },
     "es": {
         "invoice_title": "Factura",
@@ -835,8 +894,79 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "whatsapp_document_not_found": "No encontré esa factura o presupuesto.",
         "whatsapp_document_sent": "Enviándolo ahora — lo vas a recibir acá en breve.",
         "whatsapp_generic_error": "Algo salió mal al procesar eso. Intentá de nuevo.",
+
+        "notif_customer_created_title": "Cliente creado",
+        "notif_customer_created_body": "{name} fue agregado como cliente.",
+        "notif_customer_updated_title": "Cliente actualizado",
+        "notif_customer_updated_body": "Se actualizaron los datos de {name}.",
+        "notif_customer_deleted_title": "Cliente eliminado",
+        "notif_customer_deleted_body": "{name} fue eliminado.",
+        "notif_product_created_title": "Producto creado",
+        "notif_product_created_body": "{name} fue agregado a tu catálogo.",
+        "notif_product_updated_title": "Producto actualizado",
+        "notif_product_updated_body": "{name} fue actualizado.",
+        "notif_product_archived_title": "Producto archivado",
+        "notif_product_archived_body": "{name} fue archivado.",
+        "notif_product_restored_title": "Producto restaurado",
+        "notif_product_restored_body": "{name} fue restaurado.",
+        "notif_quote_created_title": "Presupuesto creado",
+        "notif_quote_created_body": "El presupuesto {quote_number} fue creado.",
+        "notif_quote_updated_title": "Presupuesto actualizado",
+        "notif_quote_updated_body": "El presupuesto {quote_number} fue actualizado.",
+        "notif_quote_deleted_title": "Presupuesto eliminado",
+        "notif_quote_deleted_body": "El presupuesto {quote_number} fue eliminado.",
+        "notif_quote_sent_title": "Presupuesto enviado",
+        "notif_quote_sent_body": "El presupuesto {quote_number} fue enviado a {customer}.",
+        "notif_quote_accepted_title": "Presupuesto aceptado",
+        "notif_quote_accepted_body": "El presupuesto {quote_number} fue aceptado.",
+        "notif_quote_rejected_title": "Presupuesto rechazado",
+        "notif_quote_rejected_body": "El presupuesto {quote_number} fue rechazado.",
+        "notif_quote_converted_title": "Presupuesto convertido",
+        "notif_quote_converted_body": "El presupuesto {quote_number} fue convertido en una factura.",
+        "notif_invoice_created_title": "Factura creada",
+        "notif_invoice_created_body": "La factura {invoice_number} fue creada.",
+        "notif_invoice_updated_title": "Factura actualizada",
+        "notif_invoice_updated_body": "La factura {invoice_number} fue actualizada.",
+        "notif_invoice_sent_title": "Factura enviada",
+        "notif_invoice_sent_body": "La factura {invoice_number} fue enviada a {customer}.",
+        "notif_organization_plan_changed_title": "Plan cambiado",
+        "notif_organization_plan_changed_body": "El plan de tu organización cambió a {plan_label}.",
+        "notif_financial_insight_requested_title": "Análisis financiero solicitado",
+        "notif_financial_insight_requested_body": "Se solicitó un análisis financiero con IA para tu organización.",
+        "notif_financial_insight_generated_title": "Análisis financiero listo",
+        "notif_financial_insight_generated_body": "Tu informe de análisis financiero con IA ya está listo para ver.",
+        "notif_financial_insight_failed_title": "El análisis financiero falló",
+        "notif_financial_insight_failed_body": (
+            "No pudimos generar tu análisis financiero con IA esta vez. "
+            "Podés intentarlo de nuevo desde el Panel Financiero."
+        ),
+        "notif_generic_fallback_body": "Ocurrió un evento en tu organización.",
+        "notif_default_customer_label": "Un cliente",
+        "notif_default_product_label": "Un producto",
+        "notif_default_quote_label": "Un presupuesto",
+        "notif_default_invoice_label": "Una factura",
+        "notif_default_customer_reference": "el cliente",
+        "notif_default_plan_label": "un nuevo plan",
     },
 }
+
+
+def resolve_recipient_language(
+    user: "User | None", organization: "Organization | None"
+) -> str:
+    """The one place a NOTIFICATION recipient's language is resolved --
+    Phase 25's "user language -> organization language -> application
+    default" chain. `user.language` (a personal preference, see
+    app.models.User.language's own docstring) wins when set; otherwise
+    falls through to get_language(organization) exactly as every email
+    template already resolves language today. A user with no personal
+    preference recorded (the common case for every account that existed
+    before this column did) sees identical behavior to before this
+    function existed."""
+    user_language = getattr(user, "language", None) if user is not None else None
+    if user_language in SUPPORTED_LANGUAGES:
+        return user_language
+    return get_language(organization)
 
 
 def get_language(organization: "Organization | Invoice | None" = None) -> str:

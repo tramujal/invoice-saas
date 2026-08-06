@@ -161,11 +161,20 @@ export default function SettingsPage() {
   // shows the true current status rather than a value that might not have
   // been refreshed yet on this render.
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
-  useEffect(() => {
-    apiFetch<MeResponse>("/auth/me")
+  // Phase 25 -- Google Sign-In status, refreshed from the same /auth/me
+  // call above rather than a second request.
+  const [hasGoogleAccount, setHasGoogleAccount] = useState(false);
+  const [passwordSet, setPasswordSet] = useState(true);
+  const [googleActionPending, setGoogleActionPending] = useState(false);
+  const [googleActionError, setGoogleActionError] = useState<string | null>(null);
+
+  const loadMe = useCallback(() => {
+    return apiFetch<MeResponse>("/auth/me")
       .then((me) => {
         setEmailVerified(me.user.email_verified);
         cacheEmailVerified(me.user.email_verified);
+        setHasGoogleAccount(me.user.has_google_account);
+        setPasswordSet(me.user.password_set);
       })
       .catch(() => {
         // Non-critical: the rest of the page still loads via its own
@@ -173,6 +182,34 @@ export default function SettingsPage() {
         // status line rather than surfacing an error banner for it.
       });
   }, []);
+  useEffect(() => {
+    void loadMe();
+  }, [loadMe]);
+
+  async function handleGoogleDisconnect() {
+    setGoogleActionPending(true);
+    setGoogleActionError(null);
+    try {
+      await apiFetch("/auth/google/disconnect", { method: "POST" });
+      toast.success(t("settings.googleDisconnected"));
+      await loadMe();
+    } catch (err) {
+      // /auth/google/disconnect's 400/409 responses are always the
+      // structured {code, message} shape (see
+      // app.routers.auth.google_disconnect) -- surfaced directly since
+      // it's already a clear, actionable, backend-authored sentence
+      // ("Set a password first...", "No Google account is linked"),
+      // unlike formatApiError's fallback (which can't parse this shape
+      // and would show a bare "Request failed (409)" instead).
+      const detail =
+        err instanceof ApiError && err.body && typeof err.body === "object" && "detail" in err.body
+          ? (err.body as { detail?: { message?: string } }).detail
+          : undefined;
+      setGoogleActionError(detail?.message || formatApiError(err, t("settings.googleDisconnectError")));
+    } finally {
+      setGoogleActionPending(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -328,6 +365,35 @@ export default function SettingsPage() {
           </ButtonLink>
           <p className="mt-1.5 text-xs text-slate-500">{t("settings.changePasswordHelp")}</p>
         </div>
+
+        {hasGoogleAccount ? (
+          <div className="mt-5 border-t border-slate-100 pt-5">
+            <p className="text-sm font-medium text-slate-700">{t("settings.googleAccountLabel")}</p>
+            <Badge className="mt-2 gap-1.5 bg-emerald-100 text-emerald-900 ring-emerald-200/80">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" aria-hidden />
+              {t("settings.googleConnectedLabel")}
+            </Badge>
+            {passwordSet ? (
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={googleActionPending}
+                  onClick={() => void handleGoogleDisconnect()}
+                >
+                  {googleActionPending ? t("settings.googleDisconnecting") : t("settings.googleDisconnectAction")}
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">{t("settings.googleOnlyAccountNotice")}</p>
+            )}
+            {googleActionError ? (
+              <p className="mt-2 text-sm text-red-600" role="alert">
+                {googleActionError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <form onSubmit={(e) => void onSubmit(e)} className="space-y-6" aria-busy={loading}>

@@ -239,10 +239,16 @@ class TestEmailPreference:
 
 class TestNotificationCopy:
     def test_falls_back_gracefully_for_missing_payload_fields(self):
-        title, body = render_notification_copy(WebhookEventType.invoice_sent, {})
+        title, body = render_notification_copy(WebhookEventType.invoice_sent, {}, "en")
         assert title == "Invoice sent"
         assert "An invoice" in body
         assert "the customer" in body
+
+    def test_falls_back_gracefully_for_missing_payload_fields_in_spanish(self):
+        title, body = render_notification_copy(WebhookEventType.invoice_sent, {}, "es")
+        assert title == "Factura enviada"
+        assert "Una factura" in body
+        assert "el cliente" in body
 
     def test_unmapped_event_type_never_raises(self):
         # Every current member IS mapped, but the fallback path itself
@@ -251,7 +257,7 @@ class TestNotificationCopy:
         class _Fake:
             value = "future.event"
 
-        title, body = render_notification_copy(_Fake(), {})  # type: ignore[arg-type]
+        title, body = render_notification_copy(_Fake(), {}, "en")  # type: ignore[arg-type]
         assert title == "future.event"
         assert body
 

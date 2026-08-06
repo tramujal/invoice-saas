@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { PasswordRequirementsChecklist } from "@/components/auth/PasswordRequirementsChecklist";
 import { LanguageSwitcher } from "@/components/marketing/LanguageSwitcher";
 import { Button } from "@/components/ui/Button";
@@ -17,12 +18,38 @@ import {
 } from "@/lib/auth-storage";
 import { useMarketingTranslation } from "@/lib/i18n/useMarketingTranslation";
 import { isPasswordValid } from "@/lib/password-policy";
-import type { AuthResponse, PublicConfig } from "@/lib/types";
+import type { AuthResponse, GoogleConfigResponse, PublicConfig } from "@/lib/types";
 
 const defaultApi =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
 
 type Mode = "login" | "register";
+
+// The exact set of codes app.routers.auth ever redirects with (in
+// ?google_error=) or this page itself ever sets locally -- anything else
+// (should never happen, since the backend's own vocabulary is closed)
+// falls back to the generic message rather than showing a raw,
+// untranslated key string.
+const KNOWN_GOOGLE_ERROR_CODES = new Set([
+  "google_denied",
+  "google_invalid_request",
+  "google_failed",
+  "account_disabled",
+  "invalid_handoff",
+  "no_organization",
+  "generic",
+]);
+
+/** Translates a Google-sign-in error CODE at render time (never cached
+ * as an already-translated string in state) so it always reflects the
+ * CURRENT language, including one that only finished resolving (from
+ * useMarketingTranslation's own async localStorage/browser-locale
+ * lookup) after this code was first set. */
+function googleErrorMessage(code: string | null, t: (key: string) => string): string | null {
+  if (!code) return null;
+  const key = KNOWN_GOOGLE_ERROR_CODES.has(code) ? code : "generic";
+  return t(`auth.googleError.${key}`);
+}
 
 /** A platform-admin-only account (see app.platform_permissions) may have
  * zero organization memberships -- ordinary login/register can never
@@ -86,6 +113,12 @@ function LoginForm() {
   // (app.routers.auth.register) is the authoritative gate and rejects
   // with 403 registrations_disabled regardless of what this shows.
   const [registrationsEnabled, setRegistrationsEnabled] = useState(true);
+  // Phase 25 -- Google Sign-In. Defaults to hidden (unlike
+  // registrationsEnabled's fail-open default) since an unconfigured
+  // backend would otherwise briefly show a button that 503s on click.
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [googleExchanging, setGoogleExchanging] = useState(false);
+  const [googleErrorCode, setGoogleErrorCode] = useState<string | null>(null);
 
   useEffect(() => {
     // Checked in this order since an account can hold both an
@@ -116,6 +149,87 @@ function LoginForm() {
   useEffect(() => {
     if (!registrationsEnabled && mode === "register") setMode("login");
   }, [registrationsEnabled, mode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    publicGet<GoogleConfigResponse>(apiBaseUrl, "/auth/google/config")
+      .then((config) => {
+        if (!cancelled) setGoogleEnabled(config.enabled);
+      })
+      .catch(() => {
+        // Unreachable API, wrong apiBaseUrl, etc. -- fail closed (hide
+        // the button) rather than show one that can't work.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl]);
+
+  // Phase 25 -- Google Sign-In redirect landing. GET /auth/google/callback
+  // (a backend redirect, never this page directly) sends the browser back
+  // here with either ?google_handoff=<one-time code> (success -- exchange
+  // it for a real AuthResponse) or ?google_error=<code> (a translated,
+  // generic failure). The handoff exchange always uses the DEFAULT api
+  // base URL (not whatever custom value might be in the "Advanced" field)
+  // since this is a fresh page load after a full-page redirect -- any
+  // custom apiBaseUrl from before the redirect is gone; self-hosted
+  // deployments pointing at a non-default backend should configure
+  // NEXT_PUBLIC_API_URL accordingly (see docs/google_auth.md).
+  useEffect(() => {
+    const handoff = searchParams.get("google_handoff");
+    const googleError = searchParams.get("google_error");
+
+    if (googleError) {
+      // Stores the raw CODE, not a translated string -- `language` (from
+      // useMarketingTranslation) hasn't necessarily resolved past its
+      // default yet on this same initial mount (it resolves in its own
+      // effect, asynchronously), so translating eagerly here would
+      // freeze the message in whatever language was current at THIS
+      // instant forever, never reacting to the language resolving (or
+      // later changing) afterward. Translated reactively in JSX instead
+      // (see the render below), which re-evaluates on every render.
+      setGoogleErrorCode(googleError);
+      router.replace("/login", { scroll: false });
+      return;
+    }
+
+    if (handoff) {
+      setGoogleExchanging(true);
+      authRequest<AuthResponse>(defaultApi, "/auth/google/exchange", { code: handoff })
+        .then((auth) => {
+          if (!applyAuthResponse(auth, defaultApi)) {
+            setGoogleErrorCode("no_organization");
+            return;
+          }
+          router.replace(safeNextPath(searchParams.get("next"), defaultLandingPath(auth)));
+        })
+        .catch((err) => {
+          // A real, already-in-English backend-provided detail (e.g. an
+          // expired handoff code) is shown as-is -- same convention
+          // formatApiError already uses for ordinary login/register
+          // failures elsewhere on this page. Only the GENERIC fallback
+          // (no structured detail) needs to react to language, so that
+          // one path alone goes through the same reactive googleErrorCode.
+          const detail =
+            err instanceof ApiError && err.body && typeof err.body === "object" && "detail" in err.body
+              ? (err.body as { detail?: { message?: string } | string }).detail
+              : undefined;
+          const message = typeof detail === "object" ? detail?.message : typeof detail === "string" ? detail : undefined;
+          if (message) {
+            setError(message);
+          } else {
+            setGoogleErrorCode("generic");
+          }
+          router.replace("/login", { scroll: false });
+        })
+        .finally(() => setGoogleExchanging(false));
+    }
+    // Only ever run once on mount -- searchParams/router are stable
+    // enough in practice here, and re-running on every searchParams
+    // change (including the router.replace calls above clearing them)
+    // would create a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -317,9 +431,9 @@ function LoginForm() {
             />
           </details>
 
-          {error ? (
+          {error || googleErrorCode ? (
             <p className="text-sm text-red-600" role="alert">
-              {error}
+              {error || googleErrorMessage(googleErrorCode, t)}
             </p>
           ) : null}
 
@@ -333,6 +447,25 @@ function LoginForm() {
                 : t("auth.createAccount")}
           </Button>
         </form>
+
+        {googleEnabled ? (
+          <>
+            <div className="mt-6 flex items-center gap-3">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs uppercase tracking-wide text-slate-400">{t("auth.orDivider")}</span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+            <div className="mt-4">
+              <GoogleSignInButton
+                apiBaseUrl={apiBaseUrl}
+                label={
+                  googleExchanging ? t("auth.googleSigningIn") : t("auth.continueWithGoogle")
+                }
+                disabled={isSubmitting || googleExchanging}
+              />
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
   );

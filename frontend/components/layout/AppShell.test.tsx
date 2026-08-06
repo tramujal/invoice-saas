@@ -24,7 +24,7 @@ vi.mock("@/lib/api", async () => {
 });
 
 const meResponse: MeResponse = {
-  user: { id: "user-1", email: "owner@example.com", email_verified: true, platform_role: null },
+  user: { id: "user-1", email: "owner@example.com", email_verified: true, platform_role: null, has_google_account: false, password_set: true },
   organizations: [
     {
       id: "org-1",

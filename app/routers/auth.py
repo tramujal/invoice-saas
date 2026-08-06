@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,15 @@ from app.email_verification import (
     generate_verification_token,
     hash_verification_token,
 )
+from app.google_oauth import (
+    STATE_TTL_MINUTES,
+    GoogleOAuthError,
+    begin_authorization,
+    complete_google_sign_in,
+    consume_handoff,
+    create_handoff,
+    is_google_oauth_configured,
+)
 from app.localization import DEFAULT_LANGUAGE
 from app.membership_role import MembershipRole
 from app.organization_status import OrganizationStatus
@@ -27,7 +38,10 @@ from app.models import (
     PasswordResetToken,
     User,
 )
+from app.security import ENVIRONMENT
+from app.tokens import FRONTEND_BASE_URL
 from app.user_status import UserStatus
+from app.rate_limit import GOOGLE_CALLBACK_RULES, GOOGLE_EXCHANGE_RULES, GOOGLE_START_RULES
 from app.billing.service import BillingService
 from app.services.entitlements import get_default_plan
 from app.services.platform_settings import get_effective_settings
@@ -169,7 +183,16 @@ def register(
             detail="Email already registered",
         )
 
-    user = User(email=body.email, hashed_password=hash_password(body.password))
+    # Phase 25 -- the language the visitor had selected on the public
+    # register form becomes this user's own notification-language
+    # preference (see User.language's own docstring / app.localization
+    # .resolve_recipient_language) -- previously this value was used only
+    # to localize the one-off verification email and then discarded.
+    user = User(
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        language=body.language.value,
+    )
     db.add(user)
     db.flush()
 
@@ -578,3 +601,166 @@ def verify_email(
     db.commit()
 
     return VerifyEmailResponse(message=VERIFY_EMAIL_SUCCESS_MESSAGE)
+
+
+# --- Phase 25 -- Google Sign-In ------------------------------------------
+#
+# Flow: GET /google/start (redirect to Google, set a short-lived httpOnly
+# state cookie) -> Google -> GET /google/callback (verify server-side,
+# create a one-time handoff code, redirect to the frontend) ->
+# POST /google/exchange (the frontend trades the handoff code for a real
+# AuthResponse, identical in shape to login/register). The access token
+# itself never appears in a URL, browser history, or referrer header at
+# any point -- see app.google_oauth's own module docstring.
+
+GOOGLE_STATE_COOKIE_NAME = "google_oauth_state"
+_GOOGLE_COOKIE_SECURE = ENVIRONMENT == "production"
+
+
+class GoogleConfigResponse(BaseModel):
+    enabled: bool
+
+
+class GoogleExchangeRequest(BaseModel):
+    code: str
+
+
+class GoogleDisconnectResponse(BaseModel):
+    message: str
+
+
+@router.get("/google/config", response_model=GoogleConfigResponse)
+def google_config() -> GoogleConfigResponse:
+    """Unauthenticated, no-network-call check the login/register pages
+    use to decide whether to render "Continue with Google" at all --
+    mirrors GET /public/config's own minimal, side-effect-free shape."""
+    return GoogleConfigResponse(enabled=is_google_oauth_configured())
+
+
+@router.get("/google/start")
+def google_start(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    enforce_rate_limit(
+        [RateLimitCheck(scope="auth:google:start", identity=ip_identity(request), rules=GOOGLE_START_RULES)]
+    )
+    if not is_google_oauth_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "google_oauth_not_configured", "message": "Google Sign-In is not enabled."},
+        )
+
+    authorization = begin_authorization(db)
+    response = RedirectResponse(url=authorization.authorization_url, status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        GOOGLE_STATE_COOKIE_NAME,
+        authorization.state,
+        max_age=STATE_TTL_MINUTES * 60,
+        httponly=True,
+        secure=_GOOGLE_COOKIE_SECURE,
+        samesite="lax",
+        path="/auth/google",
+    )
+    return response
+
+
+@router.get("/google/callback")
+def google_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    enforce_rate_limit(
+        [RateLimitCheck(scope="auth:google:callback", identity=ip_identity(request), rules=GOOGLE_CALLBACK_RULES)]
+    )
+
+    def _error_redirect(code_: str) -> RedirectResponse:
+        response = RedirectResponse(
+            url=f"{FRONTEND_BASE_URL}/login?google_error={code_}", status_code=status.HTTP_302_FOUND
+        )
+        response.delete_cookie(GOOGLE_STATE_COOKIE_NAME, path="/auth/google")
+        return response
+
+    if error is not None:
+        # The user declined consent, or Google itself reported a problem
+        # (e.g. access_denied) -- never our own error, but still routed
+        # through the same generic redirect.
+        logger.info("google_callback: provider reported error=%s", error)
+        return _error_redirect("google_denied")
+
+    if not code or not state:
+        return _error_redirect("google_invalid_request")
+
+    cookie_state = request.cookies.get(GOOGLE_STATE_COOKIE_NAME)
+    try:
+        user = complete_google_sign_in(db, code=code, state=state, cookie_state=cookie_state)
+    except GoogleOAuthError as exc:
+        logger.warning("google_callback: sign-in failed: %s", exc)
+        return _error_redirect("google_failed")
+
+    if user.status == UserStatus.disabled.value:
+        return _error_redirect("account_disabled")
+
+    handoff_code = create_handoff(db, user.id)
+    response = RedirectResponse(
+        url=f"{FRONTEND_BASE_URL}/login?google_handoff={handoff_code}", status_code=status.HTTP_302_FOUND
+    )
+    response.delete_cookie(GOOGLE_STATE_COOKIE_NAME, path="/auth/google")
+    return response
+
+
+@router.post("/google/exchange", response_model=AuthResponse)
+def google_exchange(
+    body: GoogleExchangeRequest, request: Request, db: Session = Depends(get_db)
+) -> AuthResponse:
+    enforce_rate_limit(
+        [RateLimitCheck(scope="auth:google:exchange", identity=ip_identity(request), rules=GOOGLE_EXCHANGE_RULES)]
+    )
+    user = consume_handoff(db, body.code)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_handoff", "message": "This sign-in link is invalid or has expired."},
+        )
+    if user.status == UserStatus.disabled.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "account_disabled", "message": "This account has been disabled."},
+        )
+
+    return AuthResponse(
+        access_token=create_access_token(user.id),
+        user=UserResponse.model_validate(user),
+        organizations=[_organization_summary(uo) for uo in _user_organizations(db, user.id)],
+    )
+
+
+@router.post("/google/disconnect", response_model=GoogleDisconnectResponse)
+def google_disconnect(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> GoogleDisconnectResponse:
+    """Only allowed when the account has another usable login method
+    (a real password) -- see User.password_set's own docstring.
+    Disconnecting the only way to sign in would permanently lock the
+    account out, so this is rejected with a clear, actionable message
+    rather than silently allowed."""
+    if not current_user.google_sub:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "google_not_linked", "message": "No Google account is linked."},
+        )
+    if not current_user.password_set:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "no_other_auth_method",
+                "message": (
+                    "Set a password first (use 'Forgot password') before disconnecting Google -- "
+                    "this is currently the only way you can sign in."
+                ),
+            },
+        )
+
+    current_user.google_sub = None
+    db.commit()
+    return GoogleDisconnectResponse(message="Your Google account has been disconnected.")

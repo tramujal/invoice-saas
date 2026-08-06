@@ -160,6 +160,12 @@ sequenceDiagram
   `EmailVerificationToken`) — the raw token exists only in the outbound
   email and in memory for the duration of one request; only its hash is
   ever persisted.
+- **Google Sign-In** (Phase 25, disabled by default) mints the exact same
+  JWT via a server-side OAuth 2.0/OIDC authorization-code flow —
+  `/auth/google/exchange` returns the identical `AuthResponse` shape as
+  `/auth/login`/`/auth/register`. Never trusts a frontend-supplied claim;
+  see [`docs/google_auth.md`](google_auth.md) for the full flow, security
+  guarantees, and account-linking rules.
 - **API keys** (for the public REST API, `/api/v1/...`) are a completely
   separate credential type from a user session — see
   [Organization isolation](#organization-isolation-multi-tenancy) — hashed

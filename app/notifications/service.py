@@ -37,8 +37,9 @@ from sqlalchemy.orm import Session
 
 from app.audit.service import record_audit_entry
 from app.job_type import JobType
+from app.localization import resolve_recipient_language
 from app.membership_status import MembershipStatus
-from app.models import Notification, NotificationPreference, OrganizationMember, User
+from app.models import Notification, NotificationPreference, Organization, OrganizationMember, User
 from app.notifications.copy import render_notification_copy
 from app.services.background_jobs import enqueue_job
 from app.services.webhook_events import record_webhook_event
@@ -132,11 +133,30 @@ def emit_event(
     if not members:
         return
 
-    title, body = render_notification_copy(event_type, payload)
     user_ids = [member.user_id for member in members]
 
+    # Fetched once, up front (not per-member) -- both to resolve each
+    # recipient's own language (Phase 25: user language -> organization
+    # language -> platform default, see
+    # app.localization.resolve_recipient_language) and, further down, the
+    # existing email_verified gate. A batched lookup instead of db.get()
+    # per member avoids an N+1 for N active members.
+    users_by_id = {
+        user.id: user
+        for user in db.scalars(select(User).where(User.id.in_(user_ids)))
+    }
+    organization = db.get(Organization, organization_id)
+
+    # Rendered PER RECIPIENT, not once for the whole organization: two
+    # members of the same org can have different resolved languages (one
+    # has a personal User.language preference, the other falls through to
+    # the organization's), so each gets their own title/body, stored on
+    # their own Notification row and later emailed verbatim by
+    # app.jobs.handlers.notification -- never re-translated downstream.
     notifications: list[Notification] = []
     for member in members:
+        language = resolve_recipient_language(users_by_id.get(member.user_id), organization)
+        title, body = render_notification_copy(event_type, payload, language)
         notification = Notification(
             organization_id=organization_id,
             user_id=member.user_id,
@@ -151,12 +171,11 @@ def emit_event(
         notifications.append(notification)
     db.flush()
 
-    # Two batched lookups instead of is_email_enabled()/db.get(User, ...)
-    # per member (an N+1 for N active members -- 1 + 2N queries before
-    # this) -- everything below is otherwise byte-for-byte the same
-    # per-recipient decision is_email_enabled's own docstring documents
-    # (default True when no preference row exists) and the same
-    # verified-email gate.
+    # Batched lookup instead of is_email_enabled() per member (an N+1 for
+    # N active members) -- everything below is otherwise byte-for-byte
+    # the same per-recipient decision is_email_enabled's own docstring
+    # documents (default True when no preference row exists) and the
+    # same verified-email gate.
     preference_rows = db.scalars(
         select(NotificationPreference).where(
             NotificationPreference.organization_id == organization_id,
@@ -164,11 +183,6 @@ def emit_event(
         )
     ).all()
     email_enabled_by_user_id = {pref.user_id: pref.email_enabled for pref in preference_rows}
-
-    users_by_id = {
-        user.id: user
-        for user in db.scalars(select(User).where(User.id.in_(user_ids)))
-    }
 
     for notification in notifications:
         if not email_enabled_by_user_id.get(notification.user_id, True):

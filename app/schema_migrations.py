@@ -77,6 +77,9 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_plan_financial_intelligence_fields(engine)
     _backfill_plan_financial_intelligence_defaults(engine)
     _add_financial_insight_reports_table(engine)
+    _add_user_google_auth_fields(engine)
+    _add_google_oauth_states_table(engine)
+    _add_google_oauth_handoffs_table(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -2350,5 +2353,79 @@ def _add_financial_insight_reports_table(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_fi_reports_org_created "
                 "ON financial_insight_reports (organization_id, created_at)"
+            )
+        )
+
+
+def _add_user_google_auth_fields(engine: Engine) -> None:
+    """Adds User.google_sub/password_set/language -- see each column's
+    own docstring in app/models.py. `password_set` backfills every
+    existing row to TRUE atomically via the ALTER TABLE's own DEFAULT
+    clause (same proven pattern as _add_organization_status/
+    _add_user_status): every user that existed before this migration
+    ran registered with a real password, by definition. `google_sub` and
+    `language` are both nullable with no default -- NULL is already the
+    correct, honest value for "never linked Google" / "no personal
+    language preference recorded" for every pre-existing row."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        if "google_sub" not in columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN google_sub VARCHAR(255)"))
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_sub "
+                    "ON users (google_sub)"
+                )
+            )
+        if "password_set" not in columns:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN password_set BOOLEAN NOT NULL DEFAULT TRUE")
+            )
+        if "language" not in columns:
+            conn.execute(text("ALTER TABLE users ADD COLUMN language VARCHAR(8)"))
+
+
+def _add_google_oauth_states_table(engine: Engine) -> None:
+    """Creates google_oauth_states if it's missing -- see
+    GoogleOAuthState's own docstring in app/models.py."""
+    inspector = inspect(engine)
+    if "google_oauth_states" in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS google_oauth_states ("
+                "id CHAR(36) PRIMARY KEY, "
+                "state VARCHAR(128) NOT NULL UNIQUE, "
+                "nonce VARCHAR(128) NOT NULL, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "used_at TIMESTAMP NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        )
+
+
+def _add_google_oauth_handoffs_table(engine: Engine) -> None:
+    """Creates google_oauth_handoffs if it's missing -- see
+    GoogleOAuthHandoff's own docstring in app/models.py."""
+    inspector = inspect(engine)
+    if "google_oauth_handoffs" in inspector.get_table_names():
+        return
+    references_clause = "" if engine.dialect.name == "sqlite" else " REFERENCES users(id) ON DELETE CASCADE"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS google_oauth_handoffs ("
+                "id CHAR(36) PRIMARY KEY, "
+                "code VARCHAR(128) NOT NULL UNIQUE, "
+                f"user_id CHAR(36) NOT NULL{references_clause}, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "used_at TIMESTAMP NULL, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
             )
         )

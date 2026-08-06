@@ -272,6 +272,14 @@ LOGIN_IP_RULES = (
 LOGIN_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 
 REGISTER_RULES = (RateLimitRule(limit=3, window_seconds=3600),)
+# Phase 25 -- Google Sign-In. GOOGLE_START_RULES bounds how many redirect
+# flows one IP can kick off (each one writes a GoogleOAuthState row);
+# GOOGLE_CALLBACK_RULES is deliberately looser (Google itself, not an
+# attacker, is the one calling back) but still bounded against a forged
+# callback being hammered directly.
+GOOGLE_START_RULES = (RateLimitRule(limit=10, window_seconds=60), RateLimitRule(limit=30, window_seconds=3600))
+GOOGLE_CALLBACK_RULES = (RateLimitRule(limit=20, window_seconds=60),)
+GOOGLE_EXCHANGE_RULES = (RateLimitRule(limit=20, window_seconds=60),)
 FORGOT_PASSWORD_RULES = (RateLimitRule(limit=3, window_seconds=3600),)
 RESET_PASSWORD_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
 VERIFY_EMAIL_RULES = (RateLimitRule(limit=10, window_seconds=3600),)

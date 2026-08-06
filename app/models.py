@@ -597,6 +597,38 @@ class User(Base):
     # and duplicating them on User would be two sources of truth for the
     # same fact with no way to keep them in sync.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=UserStatus.active.value)
+    # Phase 25 -- Google Sign-In. The stable "sub" claim from Google's ID
+    # token, unique per Google account, never reused, never changes even
+    # if the user's email does -- the correct identifier for "have we
+    # already seen this Google account," never the email address alone
+    # (see app.google_oauth.find_or_link_user for why). NULL means this
+    # user has never signed in with Google.
+    google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    # Whether `hashed_password` is a REAL, user-chosen password the user
+    # can actually log in with -- deliberately kept as its own boolean
+    # rather than making hashed_password nullable (a NOT NULL -> NULLable
+    # column change needs a full table rebuild on SQLite, which this
+    # codebase's plain-ALTER-TABLE migration style avoids everywhere
+    # else). A Google-only account still has a `hashed_password` value
+    # (a bcrypt hash of a random, never-revealed, never-reachable value,
+    # generated at creation -- see app.google_oauth.create_google_user),
+    # so ordinary password verification simply always fails for it
+    # (exactly like a wrong password -- no special-cased login branch,
+    # no new information-disclosure oracle), but `password_set=False`
+    # is what app.routers.auth's Google-disconnect endpoint actually
+    # checks before allowing a user to unlink their only login method.
+    # Existing users (created before this column existed) backfill to
+    # True -- see _add_user_google_auth_fields.
+    password_set: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    # Phase 25 -- this user's own notification-language preference,
+    # independent of any organization's `language` (see
+    # app.localization.resolve_recipient_language's own docstring for the
+    # full "user language -> organization language -> platform default"
+    # resolution chain this powers). NULL means "no personal preference
+    # recorded yet" -- always falls through to the organization's
+    # language, exactly the same as before this column existed; nothing
+    # about any PAST notification is ever rewritten when this is set.
+    language: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     memberships: Mapped[list["OrganizationMember"]] = relationship(
         back_populates="user", foreign_keys="OrganizationMember.user_id"
@@ -605,6 +637,13 @@ class User(Base):
     @property
     def email_verified(self) -> bool:
         return self.email_verified_at is not None
+
+    @property
+    def has_google_account(self) -> bool:
+        """Whether a Google account is linked -- exposed instead of the
+        raw google_sub value itself (see UserResponse), which the
+        frontend has no legitimate use for."""
+        return self.google_sub is not None
 
 
 class PasswordResetToken(Base):
@@ -634,6 +673,59 @@ class EmailVerificationToken(Base):
         CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class GoogleOAuthState(Base):
+    """One in-flight Google Sign-In redirect, from /auth/google/start to
+    /auth/google/callback -- mirrors PasswordResetToken/
+    EmailVerificationToken's exact "opaque random value, hashed... no,
+    stored directly since it's never emailed or otherwise exposed to a
+    third party, single-use, time-boxed" shape. `state` is what Google
+    echoes back verbatim on the callback redirect (CSRF/request-binding);
+    `nonce` is embedded in the authorization request and re-checked
+    against the claim inside the returned ID token (replay protection --
+    see app.google_oauth.verify_google_id_token). Consumed exactly once
+    (`used_at` set) at the callback -- a state value that doesn't exist,
+    already expired, or is already used is treated identically (see
+    app.google_oauth's own "no partial trust" validation), never
+    distinguished to the caller.
+    """
+
+    __tablename__ = "google_oauth_states"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    state: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    nonce: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class GoogleOAuthHandoff(Base):
+    """A short-lived, single-use opaque code handing the RESULT of a
+    completed Google Sign-In from the backend's own redirect-based
+    /auth/google/callback (a browser navigation, which can't return JSON)
+    to the frontend's POST /auth/google/exchange (which can). Carries
+    only `user_id` -- the real JWT is minted fresh at exchange time, so
+    no live access token is ever persisted at rest or appears in a URL,
+    browser history, or referrer header. Deliberately very short-lived
+    (a couple of minutes, enforced the same way as every other one-time
+    token in this app -- see app.google_oauth.GOOGLE_HANDOFF_TTL_MINUTES)
+    since the whole redirect round-trip normally completes in seconds.
+    """
+
+    __tablename__ = "google_oauth_handoffs"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    code: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    user_id: Mapped[str] = mapped_column(CHAR(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

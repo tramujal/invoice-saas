@@ -291,6 +291,11 @@ Copy this into your own tracking issue/PR before a first public deploy:
 - [ ] `TRUSTED_PROXY_HOPS` matches your actual reverse-proxy topology (1
       for Render or the Path-B Caddy setup; 0 for anything with no proxy
       in front of it).
+- [ ] If enabling Google Sign-In: `GOOGLE_REDIRECT_URI` is the real
+      `https://<your-api-domain>/auth/google/callback` and is registered
+      exactly (scheme, host, path) as an authorized redirect URI on the
+      Google Cloud OAuth client — a mismatch fails the callback, not
+      silently. See [`docs/google_auth.md`](google_auth.md).
 - [ ] `GET /health` and `GET /health/ready` both return 200 against the
       deployed URL.
 - [ ] Backend and frontend are on HTTPS (Render/Vercel: automatic; Path

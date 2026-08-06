@@ -177,6 +177,13 @@ export type AuthUser = {
    * -- never a source of truth for authorization, which the backend
    * always re-checks live. */
   platform_role: string | null;
+  // Phase 25 -- Google Sign-In. Whether a Google account is linked, and
+  // whether a real, usable password is also set -- together decide
+  // whether Settings offers "Disconnect Google" (only when both are
+  // true; the backend rejects disconnecting the only login method
+  // regardless, this is purely a UX affordance).
+  has_google_account: boolean;
+  password_set: boolean;
 };
 
 export type OrganizationSummary = {
@@ -987,6 +994,12 @@ export type PlatformSettingsUpdateRequest = {
 export type PublicConfig = {
   maintenance_mode: boolean;
   registrations_enabled: boolean;
+};
+
+/** GET /auth/google/config -- Phase 25. Whether "Continue with Google"
+ * should even render; no network call needed beyond this cheap check. */
+export type GoogleConfigResponse = {
+  enabled: boolean;
 };
 
 export type PlatformDashboard = {

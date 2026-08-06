@@ -220,6 +220,14 @@ class UserResponse(BaseModel):
     # which always re-checks the live User.platform_role via
     # require_platform_permission, not this cached response value.
     platform_role: str | None = None
+    # Phase 25 -- whether a Google account is linked (never the actual
+    # google_sub value -- see User.has_google_account) and whether a real,
+    # usable password is set (see User.password_set) -- together, what the
+    # frontend needs to decide whether "Disconnect Google" is even offered
+    # (only when both are true; disconnecting the only login method is
+    # rejected server-side regardless, this is purely a UX affordance).
+    has_google_account: bool = False
+    password_set: bool = True
 
 
 class OrganizationSummary(BaseModel):
