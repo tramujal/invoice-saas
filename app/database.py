@@ -40,9 +40,35 @@ if _is_sqlite:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 else:
-    # pool_pre_ping avoids errors from stale connections after a DB restart
-    # or network blip, which matters once the database is a networked service.
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    # Tuned for a SERVERLESS/managed Postgres (Neon, Supabase, RDS Proxy),
+    # which is what every documented deployment path for this app actually
+    # uses -- see docs/deployment.md.
+    #
+    # pool_pre_ping: avoids errors from stale connections after a DB
+    #   restart or network blip. Essential on Neon, which routinely closes
+    #   idle connections from its own side (autosuspend); without this the
+    #   first query after an idle period fails instead of transparently
+    #   reconnecting.
+    # pool_recycle: proactively discards a connection this app has held
+    #   longer than the interval, so it is never the side that discovers a
+    #   server-closed socket. 300s is comfortably under Neon's own idle
+    #   timeout while still reusing connections for real traffic.
+    # pool_size / max_overflow: bounded deliberately. SQLAlchemy's defaults
+    #   (5 + 10) are PER PROCESS, and docker-compose.prod.yml runs uvicorn
+    #   with WEB_CONCURRENCY workers plus a separate worker container --
+    #   the defaults can therefore multiply into far more server-side
+    #   connections than a small managed instance allows. These values are
+    #   overridable per deployment without a code change.
+    _pool_size = int(os.environ.get("DB_POOL_SIZE", "5"))
+    _max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "5"))
+    _pool_recycle = int(os.environ.get("DB_POOL_RECYCLE_SECONDS", "300"))
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=_pool_recycle,
+        pool_size=_pool_size,
+        max_overflow=_max_overflow,
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

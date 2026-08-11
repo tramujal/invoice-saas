@@ -683,6 +683,7 @@ both CI jobs locally before opening a PR.
 | [`docs/financial_dashboard.md`](docs/financial_dashboard.md) | The deterministic Financial Dashboard: every KPI's exact formula, currency behavior, invoice/payment-date eligibility, and its documented limitations. |
 | [`docs/revenue_forecasting.md`](docs/revenue_forecasting.md) | Deterministic revenue forecasting: the 4 candidate models, rolling-origin backtesting and model selection, confidence methodology, scenario analysis, anomaly rules, and API/frontend reference. |
 | [`docs/financial_ai.md`](docs/financial_ai.md) | The AI Financial Advisor: prompt flow, structured context, strict output schema, background-job generation, fingerprint-based caching, security/privacy, plan gating, and troubleshooting. |
+| [`docs/production_readiness.md`](docs/production_readiness.md) | **Read before a first real deploy.** Architecture diagram, deployment topology, canonical environment-variable reference, before/deploy/after/rollback checklist, smoke-test plan, and backup responsibilities. |
 | [`docs/google_auth.md`](docs/google_auth.md) | Google Sign-In: the full OAuth 2.0/OIDC flow, security guarantees, account-linking rules, session-storage audit, and migration strategy. |
 | [`docs/localization.md`](docs/localization.md) | Notification/email localization: the user → organization → platform-default language resolution chain, and a category-by-category audit. |
 | [`docs/cookies.md`](docs/cookies.md) | The complete cookie and third-party-script inventory, and why no consent banner exists. |

@@ -41,6 +41,55 @@ services:
       # this isn't explicitly set, e.g. local dev — see app/rate_limit.py.
       - key: TRUSTED_PROXY_HOPS
         value: "1"
+      # Verbosity for every `logging.getLogger(__name__)` call in the app
+      # (see app/main.py). Optional -- INFO is the code-level default.
+      - key: LOG_LEVEL
+        value: INFO
+      # REQUIRED IN PRACTICE, even though nothing crashes without it: this
+      # is the base URL every emailed link is built from (password reset,
+      # email verification, public quote share links) AND the destination
+      # the Google Sign-In callback redirects the browser back to (see
+      # app/tokens.py, app/routers/auth.py). Left unset, it defaults to
+      # http://localhost:3000 and every one of those links silently points
+      # at the user's own machine instead of the deployed frontend. Set it
+      # to the deployed frontend origin, e.g. https://your-app.vercel.app.
+      - key: FRONTEND_BASE_URL
+        sync: false
+      # Outbound email (Resend). Both required together; without them the
+      # app still starts and every non-email route works, but password
+      # reset / verification / invitation / invoice / quote emails are
+      # never actually delivered (send failures are swallowed by design --
+      # see app/routers/auth.py's issue_password_reset).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # Billing (Phase 17A/19). "none" (the code default) runs against
+      # NullBillingProvider -- plan limits are still fully enforced,
+      # nothing is ever charged, and the checkout/portal routes 503. Set
+      # to "stripe" plus the two secrets below to enable real checkout.
+      # See docs/billing_providers.md.
+      - key: BILLING_PROVIDER
+        sync: false
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # Google Sign-In (Phase 25) -- disabled by default even with the
+      # credentials set; GOOGLE_OAUTH_ENABLED is a separate explicit
+      # opt-in. GOOGLE_REDIRECT_URI must EXACTLY match a redirect URI
+      # registered on the Google Cloud OAuth client, and must be THIS
+      # service's own public URL + /auth/google/callback. Password
+      # login/registration are unaffected when this is left disabled.
+      # See docs/google_auth.md.
+      - key: GOOGLE_OAUTH_ENABLED
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
       # AI Business Assistant — optional, provider-agnostic (see
       # app/ai/factory.py). Without a valid provider configured, the
       # POST .../assistant/chat endpoint returns a clean 503 and nothing
@@ -64,20 +113,38 @@ services:
       - key: AI_MODEL
         sync: false
 
-# Durable background-job worker (Phase 15C) -- executes webhook delivery
-# (and any future job type registered in app.jobs.registry) claimed from
-# the `background_jobs` table. Commented out for the same reason the
-# cronJobs block below is: it's a second, ALWAYS-ON process, and Render's
-# free tier supports exactly one free web service, not a second worker
-# process for free -- this genuinely requires upgrading to a paid plan
-# (Render "Background Worker" service type), unlike the web service
-# above. Until upgraded, webhooks are durably PERSISTED (every event and
-# delivery row still commits transactionally -- see
-# app.services.webhook_events) but never actually DELIVERED: nothing
-# claims pending jobs without a running worker. This is a deliberate,
-# honestly-documented deployment gap, not a bug -- see this phase's own
-# completion report for the explicit "at-least-once delivery requires a
-# running worker" guarantee statement.
+# ==========================================================================
+# BACKGROUND WORKER -- READ THIS BEFORE YOUR FIRST REAL DEPLOY.
+# ==========================================================================
+# Durable background-job worker (Phase 15C) -- executes EVERY job type
+# registered in app.jobs.registry, claimed from the `background_jobs`
+# table. Commented out because it is a second, ALWAYS-ON process, and
+# Render's free tier supports exactly one free web service, not a second
+# worker for free -- enabling it genuinely requires a paid plan (Render
+# "Background Worker" service type). That is a cost decision only the
+# operator can make, which is why this is left commented rather than
+# enabled by default.
+#
+# WHAT SILENTLY DOES NOT WORK WITHOUT A RUNNING WORKER (as of Phase 24.3
+# there are 5 job types, not just webhooks -- this list has grown since
+# this block was first written):
+#   - webhook.deliver / webhook.retry  -> outbound webhooks are durably
+#     PERSISTED (every event/delivery row still commits transactionally,
+#     see app.services.webhook_events) but never actually DELIVERED.
+#   - notification.email               -> in-app notifications still
+#     appear, but their EMAIL copies are never sent.
+#   - financial_insight.generate       -> the AI Financial Advisor's
+#     "Generate analysis" button leaves the report stuck in `pending`
+#     FOREVER, with the UI polling a status that will never change. This
+#     is the most user-visible consequence and did not exist when this
+#     block was originally written.
+#   - whatsapp.send_document           -> requested invoice/quote PDFs
+#     are never delivered over WhatsApp.
+#
+# Everything else (invoicing, PDFs, dashboard, analytics, forecasting,
+# auth) works completely normally with no worker running. If you deploy
+# without one, treat the four features above as OFF, not as broken.
+# See docs/production_readiness.md for the deploy-time decision.
 #
 # services:
 #   - type: worker

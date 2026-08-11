@@ -114,7 +114,11 @@ export function AiFinancialAdvisorSection({ planRestricted }: Props) {
         if (mountedRef.current) setActionPending(false);
       }
     },
-    [fetchLatest]
+    // `t` is genuinely a dependency: its identity changes when the
+    // organization's language does, and omitting it would let this
+    // callback keep formatting error messages with a stale translator
+    // after a language switch.
+    [fetchLatest, t]
   );
 
   const renderButton = (label: string, force: boolean, variant: "primary" | "secondary" = "primary") => (

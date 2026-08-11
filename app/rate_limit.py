@@ -277,6 +277,15 @@ REGISTER_RULES = (RateLimitRule(limit=3, window_seconds=3600),)
 # GOOGLE_CALLBACK_RULES is deliberately looser (Google itself, not an
 # attacker, is the one calling back) but still bounded against a forged
 # callback being hammered directly.
+# Phase 24.3 -- the AI Financial Advisor's generate endpoint. The plan
+# QUOTA (LimitedResource.financial_ai_reports) is the real cost control
+# for AI calls, but it is only consulted AFTER the deterministic context
+# is assembled (~10 aggregate queries, see
+# app.financial_intelligence.insight_builder.build_structured_context),
+# so a caller whose quota is already exhausted can still drive that query
+# load in a loop. This bounds that, independently of quota state.
+FINANCIAL_AI_GENERATE_RULES = (RateLimitRule(limit=10, window_seconds=3600),)
+
 GOOGLE_START_RULES = (RateLimitRule(limit=10, window_seconds=60), RateLimitRule(limit=30, window_seconds=3600))
 GOOGLE_CALLBACK_RULES = (RateLimitRule(limit=20, window_seconds=60),)
 GOOGLE_EXCHANGE_RULES = (RateLimitRule(limit=20, window_seconds=60),)

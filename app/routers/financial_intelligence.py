@@ -11,8 +11,16 @@ plan capability before calling metrics.py/cashflow.py). No calculation
 lives here.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
+
+from app.rate_limit import (
+    FINANCIAL_AI_GENERATE_RULES,
+    RateLimitCheck,
+    enforce_rate_limit,
+    user_identity,
+    user_ip_identity,
+)
 
 from app.billing.enforcement import CapabilityDeniedError
 from app.database import get_db
@@ -266,10 +274,28 @@ def get_latest_insight(
 def post_generate_insight(
     organization_id: str,
     body: GenerateInsightRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> InsightReportResponse:
     require_permission(current_user, organization_id, Permission.financial_intelligence_view, db)
+    # Bounded independently of the plan quota -- see
+    # FINANCIAL_AI_GENERATE_RULES' own comment for why the quota alone
+    # isn't sufficient protection for this particular endpoint.
+    enforce_rate_limit(
+        [
+            RateLimitCheck(
+                scope="financial_intelligence:insights_generate:user",
+                identity=user_identity(current_user.id),
+                rules=FINANCIAL_AI_GENERATE_RULES,
+            ),
+            RateLimitCheck(
+                scope="financial_intelligence:insights_generate:user_ip",
+                identity=user_ip_identity(request, current_user.id),
+                rules=FINANCIAL_AI_GENERATE_RULES,
+            ),
+        ]
+    )
     try:
         return service.request_insight_report(
             db, organization_id, requested_by_user_id=current_user.id, force=body.force

@@ -24,6 +24,11 @@ htmlcov/
 *.sqlite3
 
 # --- Node / Next.js frontend ---
+# Bare `node_modules/` (no leading path) matches at ANY depth, which the
+# previous frontend-only rule did not -- a stray root-level
+# node_modules/.vite/ cache file had been committed because of that gap.
+node_modules/
+.vite/
 frontend/node_modules/
 frontend/.next/
 frontend/out/

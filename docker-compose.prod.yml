@@ -77,6 +77,22 @@ services:
       AI_MODEL: "${AI_MODEL:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      # Billing (Phase 17A/19) -- "none"/unset runs against
+      # NullBillingProvider: plan limits stay fully enforced, nothing is
+      # ever charged, and only the checkout/portal routes 503. See
+      # docs/billing_providers.md.
+      BILLING_PROVIDER: "${BILLING_PROVIDER:-}"
+      STRIPE_API_KEY: "${STRIPE_API_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+      # Google Sign-In (Phase 25) -- off unless GOOGLE_OAUTH_ENABLED=true.
+      # GOOGLE_REDIRECT_URI must exactly match the URI registered on the
+      # Google Cloud OAuth client: https://${DOMAIN_API}/auth/google/callback.
+      # Password login/registration are unaffected when disabled. See
+      # docs/google_auth.md.
+      GOOGLE_OAUTH_ENABLED: "${GOOGLE_OAUTH_ENABLED:-false}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      GOOGLE_REDIRECT_URI: "${GOOGLE_REDIRECT_URI:-}"
     # Overrides the Dockerfile's single-worker CMD -- WEB_CONCURRENCY
     # (plain uvicorn worker processes, not gunicorn) lets this scale to
     # the host's actual CPU count. Keep at 1 on a single-core host; 2-4
@@ -123,6 +139,28 @@ services:
       JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}"
       TRUSTED_PROXY_HOPS: "1"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+      # The worker EXECUTES jobs that call these providers directly -- it
+      # is not merely a database consumer, so it needs the same provider
+      # configuration the backend has, not a subset:
+      #   notification.email          -> RESEND_API_KEY + EMAIL_FROM
+      #                                  (without them every notification
+      #                                  email permanently fails with
+      #                                  error_code=email_not_configured)
+      #   financial_insight.generate  -> AI_PROVIDER + AI_MODEL + the key
+      #                                  matching that provider (without
+      #                                  them every AI Financial Advisor
+      #                                  report is recorded as `failed`
+      #                                  with error_code=ai_unavailable)
+      # FRONTEND_BASE_URL is read at import time by app.tokens for link
+      # building; harmless but kept consistent with the backend so the two
+      # processes can never disagree about it.
+      FRONTEND_BASE_URL: "https://${DOMAIN_FRONTEND:?Set DOMAIN_FRONTEND in .env}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-}"
+      AI_PROVIDER: "${AI_PROVIDER:-}"
+      AI_MODEL: "${AI_MODEL:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       WORKER_QUEUE: "${WORKER_QUEUE:-default}"
       WORKER_POLL_INTERVAL_SECONDS: "${WORKER_POLL_INTERVAL_SECONDS:-2}"
       WORKER_IDLE_BACKOFF_MAX_SECONDS: "${WORKER_IDLE_BACKOFF_MAX_SECONDS:-30}"

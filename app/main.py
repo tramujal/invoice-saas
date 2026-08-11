@@ -72,6 +72,31 @@ _DEFAULT_CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 _PRODUCTION_ENVIRONMENT = os.environ.get("ENVIRONMENT", "development").strip().lower() == "production"
 
 
+def _api_docs_enabled() -> bool:
+    """Whether to serve the interactive API docs (/docs, /redoc) and the
+    raw /openapi.json schema.
+
+    Defaults to ENABLED outside production (a local developer should
+    always get the docs with no configuration) and DISABLED in production
+    -- the schema enumerates every route in the app, including every
+    /admin platform-administration endpoint, which is reconnaissance
+    material an anonymous visitor has no need for. Nothing behind those
+    routes becomes reachable either way (every one re-checks auth on its
+    own), so this is defense in depth, not an access control.
+
+    API_DOCS_ENABLED=true re-enables them in production, deliberately:
+    this app ships a documented PUBLIC REST API under /api/v1 for
+    third-party integrations, and an operator who wants to publish those
+    docs at their own domain should be able to, as an explicit,
+    informed choice rather than an accident of the default."""
+    raw = os.environ.get("API_DOCS_ENABLED", "").strip().lower()
+    if raw in {"true", "1", "yes"}:
+        return True
+    if raw in {"false", "0", "no"}:
+        return False
+    return not _PRODUCTION_ENVIRONMENT
+
+
 def _cors_origins() -> list[str]:
     """Reads CORS_ALLOWED_ORIGINS (comma-separated) from the environment.
 
@@ -108,10 +133,17 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+_DOCS_ENABLED = _api_docs_enabled()
+
 app = FastAPI(
     title="Invoices API",
     version="1.0.0",
     lifespan=lifespan,
+    # None disables the route entirely (FastAPI's own documented
+    # mechanism) -- see _api_docs_enabled above for the default.
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
     description=(
         "The browser-facing application API is unversioned and requires a "
         "logged-in session. The **public REST API** for third-party "
