@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { NavIcon } from "@/components/layout/NavIcon";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
   clearAuthSession,
@@ -150,12 +151,19 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
   function renderNavContent(onNavigate?: () => void) {
     return (
       <>
-        <div className="border-b border-slate-100 px-6 py-3">
+        {/* The admin badge stays exactly as-is -- it is the one thing that
+            must keep this context visually distinct from the tenant app.
+            Only its surrounding spacing is aligned with AppShell's. */}
+        <div className="px-3 pb-3">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
             {t("adminNav.badge")}
           </span>
         </div>
-        <nav className="flex flex-col gap-1 px-2 py-3 md:py-6">
+        <div className="border-t border-slate-100" />
+        {/* Identical row/active-state treatment to AppShell so the two
+            sidebars read as one product -- see that component for the
+            rationale behind the pill and the icon colour states. */}
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
           {links.map((item) => {
             const active = isNavActive(pathname, item.href);
             return (
@@ -163,26 +171,41 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
                 key={item.href}
                 href={item.href}
                 onClick={onNavigate}
-                className={`whitespace-nowrap rounded-r-lg border-l-2 py-2 pl-[14px] pr-4 text-sm font-medium transition ${
+                aria-current={active ? "page" : undefined}
+                className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                   active
-                    ? "border-slate-900 bg-slate-100 text-slate-900"
-                    : "border-transparent text-slate-700 hover:bg-surface-muted"
+                    ? "bg-slate-100 font-semibold text-slate-900"
+                    : "font-medium text-slate-600 hover:bg-surface-muted hover:text-slate-900"
                 }`}
               >
-                {t(item.labelKey)}
+                <NavIcon
+                  href={item.href}
+                  className={`shrink-0 transition-colors ${
+                    active ? "text-slate-900" : "text-slate-400 group-hover:text-slate-600"
+                  }`}
+                />
+                <span className="truncate">{t(item.labelKey)}</span>
               </Link>
             );
           })}
         </nav>
-        <div className="mt-auto border-t border-slate-200 px-4 py-3 md:px-6 md:py-4">
+        <div className="mt-auto border-t border-slate-200 px-3 py-3">
           {userEmail ? (
-            <p className="mb-2 truncate text-sm font-medium text-slate-800">{userEmail}</p>
+            <div className="mb-2 flex items-center gap-2.5 px-1">
+              <span
+                aria-hidden
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold uppercase text-slate-600"
+              >
+                {userEmail.charAt(0)}
+              </span>
+              <p className="min-w-0 truncate text-sm font-medium text-slate-800">{userEmail}</p>
+            </div>
           ) : null}
           {hasOrganizations ? (
             <Link
               href="/dashboard"
               onClick={onNavigate}
-              className="mb-2 block w-full rounded-lg border border-slate-200 px-3 py-1.5 text-center text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+              className="mb-1.5 block w-full rounded-lg px-3 py-1.5 text-center text-xs font-medium text-slate-600 transition-colors hover:bg-surface-muted hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
             >
               {t("adminNav.returnToOrganization")}
             </Link>
@@ -190,7 +213,7 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={logout}
-            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            className="w-full rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-surface-muted hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             {t("nav.logout")}
           </button>
@@ -235,7 +258,10 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-dvh flex-col bg-surface md:flex-row">
       <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <div className="flex items-center gap-2">
-          <Link href={logoHref} className="text-lg font-semibold text-slate-900">
+          <Link
+            href={logoHref}
+            className="truncate text-[15px] font-semibold tracking-tight text-slate-900"
+          >
             Invoicing
           </Link>
           <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
@@ -306,8 +332,11 @@ export function PlatformAdminShell({ children }: { children: ReactNode }) {
         </div>
       </dialog>
 
-      <aside className="hidden shrink-0 flex-col border-slate-200 bg-white md:flex md:w-56 md:border-r">
-        <div className="px-6 pt-6">
+      {/* Pinned to the viewport for the same reason as the tenant shell:
+          otherwise the aside stretches to the full document height and the
+          user footer ends up below the fold on long admin tables. */}
+      <aside className="hidden shrink-0 flex-col border-slate-200 bg-white md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:border-r">
+        <div className="px-4 pb-3 pt-5">
           <Link href={logoHref} className="text-lg font-semibold text-slate-900">
             Invoicing
           </Link>

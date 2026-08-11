@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { NavIcon } from "@/components/layout/NavIcon";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -293,8 +294,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   function renderNavContent(idPrefix: string, onNavigate?: () => void) {
     return (
       <>
+        {/* The organization sits directly under the wordmark as secondary
+            information -- no divider between them, so brand + org read as
+            one block, with the single divider below separating that block
+            from the navigation. `truncate`/`min-w-0` keep a long
+            organization name from ever widening the sidebar. */}
         {organizations && organizations.length > 1 ? (
-          <div className="border-b border-slate-100 px-6 py-3">
+          <div className="px-3 pb-3">
             <label htmlFor={`${idPrefix}-org-switcher`} className="sr-only">
               {t("nav.switchOrganization")}
             </label>
@@ -303,7 +309,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               value={getOrganizationId() ?? ""}
               onChange={(e) => switchOrganization(e.target.value)}
               disabled={isSwitchingOrg}
-              className="w-full truncate rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-800 outline-none ring-slate-400 focus:ring-2 disabled:opacity-60"
+              className="w-full truncate rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none ring-slate-400 focus:ring-2 disabled:opacity-60"
             >
               {organizations.map((org) => (
                 <option key={org.id} value={org.id}>
@@ -313,15 +319,23 @@ export function AppShell({ children }: { children: ReactNode }) {
             </select>
           </div>
         ) : organizationName ? (
-          <Link
-            href="/settings"
-            onClick={onNavigate}
-            className="truncate border-b border-slate-100 px-6 py-3 text-sm font-semibold text-slate-800 hover:bg-surface-muted"
-          >
-            {organizationName}
-          </Link>
+          <div className="px-3 pb-3">
+            <Link
+              href="/settings"
+              onClick={onNavigate}
+              className="block truncate rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-surface-muted hover:text-slate-900"
+            >
+              {organizationName}
+            </Link>
+          </div>
         ) : null}
-        <nav className="flex flex-col gap-1 px-2 py-3 md:py-6">
+        <div className="border-t border-slate-100" />
+        {/* px-3 matches the footer's own horizontal padding so the nav
+            items, the org row and the footer all sit on one vertical
+            edge -- the rows themselves are inset by their own px-3, which
+            is what makes the active pill look aligned rather than
+            flush-left against the border. */}
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
           {links
             .filter((item) => !item.permission || hasPermission({ permissions: orgPermissions }, item.permission))
             .map((item) => {
@@ -331,33 +345,56 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={item.href}
                 href={item.href}
                 onClick={onNavigate}
-                className={`whitespace-nowrap rounded-r-lg border-l-2 py-2 pl-[14px] pr-4 text-sm font-medium transition ${
+                aria-current={active ? "page" : undefined}
+                // Subtle active state: a soft filled pill, slightly
+                // stronger text and a full-opacity icon -- no heavy left
+                // border, no shadow, no saturated colour. The icon
+                // carries most of the state change, which is what keeps
+                // it feeling calm at a glance.
+                className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                   active
-                    ? "border-slate-900 bg-slate-100 text-slate-900"
-                    : "border-transparent text-slate-700 hover:bg-surface-muted"
+                    ? "bg-slate-100 font-semibold text-slate-900"
+                    : "font-medium text-slate-600 hover:bg-surface-muted hover:text-slate-900"
                 }`}
               >
-                {t(item.labelKey)}
+                <NavIcon
+                  href={item.href}
+                  className={`shrink-0 transition-colors ${
+                    active ? "text-slate-900" : "text-slate-400 group-hover:text-slate-600"
+                  }`}
+                />
+                <span className="truncate">{t(item.labelKey)}</span>
               </Link>
             );
           })}
         </nav>
-        <div className="mt-auto border-t border-slate-200 px-4 py-3 md:px-6 md:py-4">
-          {userEmail || organizationName ? (
-            <div className="mb-2 min-w-0">
-              {userEmail ? (
+        {/* mt-auto pins this to the bottom of the flex column (the nav
+            above is flex-1), which is what visually separates the user
+            from the navigation without any absolute positioning. */}
+        <div className="mt-auto border-t border-slate-200 px-3 py-3">
+          {userEmail ? (
+            <div className="mb-2 flex items-center gap-2.5 px-1">
+              {/* Initial derived from the email already in the session --
+                  no new data, no avatar upload, no request. */}
+              <span
+                aria-hidden
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold uppercase text-slate-600"
+              >
+                {userEmail.charAt(0)}
+              </span>
+              <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-slate-800">{userEmail}</p>
-              ) : null}
-              {organizationName ? (
-                <p className="truncate text-xs text-slate-500">{organizationName}</p>
-              ) : null}
+                {organizationName ? (
+                  <p className="truncate text-xs text-slate-500">{organizationName}</p>
+                ) : null}
+              </div>
             </div>
           ) : null}
           {platformRole ? (
             <Link
               href="/admin"
               onClick={onNavigate}
-              className="mb-2 block w-full rounded-lg border border-slate-200 px-3 py-1.5 text-center text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+              className="mb-1.5 block w-full rounded-lg px-3 py-1.5 text-center text-xs font-medium text-slate-600 transition-colors hover:bg-surface-muted hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
             >
               {t("adminNav.entryLink")}
             </Link>
@@ -365,7 +402,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             onClick={logout}
-            className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            className="w-full rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-surface-muted hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             {t("nav.logout")}
           </button>
@@ -429,8 +466,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             panelVisible ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4">
-            <span className="text-lg font-semibold text-slate-900">Invoicing</span>
+          <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-4">
+            <span className="truncate text-[15px] font-semibold tracking-tight text-slate-900">Invoicing</span>
             <button
               type="button"
               onClick={closeMobileNav}
@@ -462,9 +499,23 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Desktop sidebar -- unchanged in substance from before this pass,
           just now hidden below md instead of also rendering (differently
           styled) on mobile. */}
-      <aside className="hidden shrink-0 flex-col border-slate-200 bg-white md:flex md:w-56 md:border-r">
-        <div className="flex items-center justify-between px-6 pt-6">
-          <Link href="/dashboard" className="text-lg font-semibold text-slate-900">
+      {/* Width unchanged at md:w-56 -- the previous full-width pass
+          established that this leaves the right amount to the content,
+          so nothing here reclaims horizontal space from the page. */}
+      {/* sticky + h-dvh: without it the aside is a plain flex child that
+          stretches to the full document height, so `mt-auto` pushed the
+          user footer thousands of pixels down on any long page. Pinning it
+          to the viewport keeps nav and footer permanently in view and lets
+          the nav scroll on its own when the list outgrows short screens. */}
+      <aside className="hidden shrink-0 flex-col border-slate-200 bg-white md:sticky md:top-0 md:flex md:h-dvh md:w-56 md:border-r">
+        {/* px-4 here vs px-3 on the rows below is deliberate: the rows
+            have their own px-3 inset, so this lines the wordmark up with
+            the nav labels rather than with the pill edges. */}
+        <div className="flex items-center justify-between gap-2 px-4 pb-3 pt-5">
+          <Link
+            href="/dashboard"
+            className="truncate text-[15px] font-semibold tracking-tight text-slate-900"
+          >
             Invoicing
           </Link>
           <NotificationBell />

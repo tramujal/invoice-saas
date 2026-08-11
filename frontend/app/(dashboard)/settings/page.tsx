@@ -59,6 +59,29 @@ function formatDayList(days: number[]): string {
   return days.join(", ");
 }
 
+/** PAGE WIDTH != FIELD WIDTH.
+ *
+ * The page (and therefore every card) is `wide` so Settings sits in the
+ * same full-width system as the rest of the app. But a two-column grid
+ * spanning a 1600px card would produce ~790px-wide inputs for things like
+ * a phone number, which is worse, not better. These two constants are the
+ * only place that trade-off is expressed, so the sections stay consistent
+ * with each other.
+ *
+ * FIELD_GRID: paired short/medium fields. Capped so each column settles
+ * around 500px at desktop -- generous, still clearly a form field.
+ * Naturally-long values (address, logo URL) opt out per-field with
+ * `sm:col-span-2`, which is why they keep spanning the full grid.
+ *
+ * The Localization grid deliberately does NOT use this: four compact
+ * selects distributed across the full card width is exactly the intent
+ * there, and each control still lands at a comfortable ~380-430px.
+ */
+const FIELD_GRID = "mt-4 grid max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2";
+/** Single short field (org name, a day-list input) -- one comfortable
+ * column, never stretched to the card. */
+const NARROW_FIELD = "mt-1 max-w-md";
+
 const LIMITS = {
   name: 255,
   business_name: 255,
@@ -297,8 +320,13 @@ export default function SettingsPage() {
 
   const disabled = isSubmitting || loading;
 
+  // `wide`, not `form`: the CARDS should span the available width like
+  // every other page in the app -- field width is constrained inside each
+  // card instead (see FIELD_GRID/NARROW_FIELD above), so the page
+  // integrates with the full-width layout without turning a phone-number
+  // input into a 1600px field.
   return (
-    <PageContainer width="form">
+    <PageContainer width="wide">
       <PageHeader
         title={t("settings.title")}
         subtitle={t("settings.subtitle")}
@@ -413,7 +441,7 @@ export default function SettingsPage() {
               onChange={(e) => update("name", e.target.value)}
               disabled={disabled}
               maxLength={LIMITS.name}
-              className="mt-1 max-w-md"
+              className={NARROW_FIELD}
               aria-invalid={Boolean(nameError)}
               aria-describedby={nameError ? "org-name-err" : undefined}
             />
@@ -434,7 +462,7 @@ export default function SettingsPage() {
             {t("settings.businessDetailsSubtitle")}
           </p>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className={FIELD_GRID}>
             <div>
               <label
                 htmlFor="business-name"
@@ -643,7 +671,7 @@ export default function SettingsPage() {
             </label>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className={FIELD_GRID}>
             <div>
               <label
                 htmlFor="reminder-before-days"
