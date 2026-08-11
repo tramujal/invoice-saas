@@ -9,6 +9,7 @@ import { WhatsAppQrDialog } from "@/components/settings/WhatsAppQrDialog";
 import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/toast";
 import { getUserEmail } from "@/lib/auth-storage";
@@ -175,7 +176,7 @@ export default function WhatsAppSettingsPage() {
   const canUseWhatsapp = Boolean(status?.transport_enabled && status?.plan_allows_whatsapp);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <PageContainer>
       <PageHeader
         title={t("whatsapp.title")}
         subtitle={t("whatsapp.subtitle")}
@@ -351,6 +352,6 @@ export default function WhatsAppSettingsPage() {
       ) : null}
 
       <WhatsAppQrDialog qr={qr} onClose={() => setQr(null)} />
-    </div>
+    </PageContainer>
   );
 }

@@ -6,6 +6,7 @@ import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/toast";
 import { apiFetch, orgPath } from "@/lib/api";
@@ -109,7 +110,7 @@ export default function NotificationsSettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <PageContainer width="form">
       <PageHeader
         title={t("notificationsPage.title")}
         subtitle={t("notificationsPage.subtitle")}
@@ -232,6 +233,6 @@ export default function NotificationsSettingsPage() {
           </div>
         ) : null}
       </section>
-    </div>
+    </PageContainer>
   );
 }

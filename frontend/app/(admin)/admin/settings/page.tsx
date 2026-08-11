@@ -7,6 +7,7 @@ import { VersionConflictDialog } from "@/components/admin/VersionConflictDialog"
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -246,7 +247,7 @@ export default function PlatformSettingsPage() {
   const hasUnsavedChanges = changes.length > 0;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 pb-24">
+    <PageContainer width="form" className="pb-24">
       <PageHeader
         title={t("admin.settingsTitle")}
         subtitle={t("admin.settingsSubtitle")}
@@ -479,6 +480,6 @@ export default function PlatformSettingsPage() {
         onReload={() => void handleReloadLatest()}
         onCancel={() => setConflictVersion(null)}
       />
-    </div>
+    </PageContainer>
   );
 }

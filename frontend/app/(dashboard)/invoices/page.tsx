@@ -8,6 +8,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Input, Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
@@ -422,7 +423,7 @@ function InvoicesContent() {
   const showEmpty = !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader
         title={t("invoices.title")}
         subtitle={t("invoices.subtitle")}
@@ -753,7 +754,7 @@ function InvoicesContent() {
           </div>
         ) : null}
       </div>
-    </div>
+    </PageContainer>
   );
 }
 

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -122,7 +123,7 @@ export default function PlatformUsersPage() {
   const showEmpty = !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("admin.usersTitle")} subtitle={t("admin.usersSubtitle")} />
 
       <FilterToolbar
@@ -281,6 +282,6 @@ export default function PlatformUsersPage() {
           </div>
         ) : null}
       </div>
-    </div>
+    </PageContainer>
   );
 }

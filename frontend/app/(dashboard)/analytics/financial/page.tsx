@@ -20,6 +20,7 @@ import { ReceivablesAgingSection } from "@/components/financial/ReceivablesAging
 import { RevenueTrendsSection } from "@/components/financial/RevenueTrendsSection";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { getCapabilityDeniedDetail } from "@/lib/format-api-error";
@@ -297,7 +298,7 @@ export default function FinancialDashboardPage() {
   ]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <PageContainer spacing="8">
       <PageHeader
         title={t("financial.title")}
         subtitle={t("financial.subtitle")}
@@ -424,6 +425,6 @@ export default function FinancialDashboardPage() {
           <AiFinancialAdvisorSection planRestricted={aiAdvisorPlanRestricted} />
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Input, Select, Textarea } from "@/components/ui/Input";
 import { apiFetch, orgPath } from "@/lib/api";
@@ -160,7 +161,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
   const disableCustomerSelect = isSubmitting || customersLoading;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8 pb-12">
+    <PageContainer width="form" spacing="8" className="pb-12">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link href={backHref} className="text-sm font-medium text-slate-600 hover:text-slate-900">
@@ -341,6 +342,6 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
           </Button>
         </div>
       </form>
-    </div>
+    </PageContainer>
   );
 }

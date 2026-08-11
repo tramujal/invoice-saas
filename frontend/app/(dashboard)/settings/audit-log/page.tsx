@@ -7,6 +7,7 @@ import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Badge } from "@/components/ui/Badge";
 import { Input, Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -204,7 +205,7 @@ export default function SettingsAuditLogPage() {
   const showEmpty = !dateRangeInvalid && !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("settingsAuditLog.title")} subtitle={t("settingsAuditLog.subtitle")} />
 
       <SettingsSubNav />
@@ -407,6 +408,6 @@ export default function SettingsAuditLogPage() {
         eventTypeLabel={(eventType) => eventTypeLabel(t, eventType)}
         formatTimestamp={(value) => formatTimestamp(value, language)}
       />
-    </div>
+    </PageContainer>
   );
 }

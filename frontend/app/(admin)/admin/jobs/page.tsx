@@ -8,6 +8,7 @@ import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterTool
 import { Badge } from "@/components/ui/Badge";
 import { RowActionsMenu, STICKY_ACTIONS_TD_CLASS, STICKY_ACTIONS_TH_CLASS } from "@/components/ui/RowActionsMenu";
 import { Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -182,7 +183,7 @@ export default function PlatformJobsPage() {
   const showEmpty = !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("jobs.title")} subtitle={t("jobs.subtitle")} />
 
       <FilterToolbar
@@ -368,6 +369,6 @@ export default function PlatformJobsPage() {
         onClose={closeAction}
         onConfirm={(reason) => void handleConfirmAction(reason)}
       />
-    </div>
+    </PageContainer>
   );
 }

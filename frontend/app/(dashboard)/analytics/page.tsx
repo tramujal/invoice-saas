@@ -14,6 +14,7 @@ import { TimeWindowSelector } from "@/components/analytics/TimeWindowSelector";
 import { CurrencySelector } from "@/components/dashboard/CurrencySelector";
 import { PaymentStatusBreakdown } from "@/components/dashboard/PaymentStatusBreakdown";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { getCapabilityDeniedDetail } from "@/lib/format-api-error";
@@ -208,7 +209,7 @@ function AnalyticsPageContent() {
     : EMPTY_FORECAST;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <PageContainer spacing="8">
       <PageHeader
         title={t("analytics.title")}
         subtitle={
@@ -444,7 +445,7 @@ function AnalyticsPageContent() {
       </section>
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }
 

@@ -8,6 +8,7 @@ import { Button, ButtonLink } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PlanLimitReachedDialog } from "@/components/ui/PlanLimitReachedDialog";
 import {
@@ -224,7 +225,7 @@ export default function ProductsPage() {
   const showEmpty = !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader
         title={t("products.title")}
         subtitle={t("products.subtitle")}
@@ -495,6 +496,6 @@ export default function ProductsPage() {
       </div>
 
       <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
-    </div>
+    </PageContainer>
   );
 }

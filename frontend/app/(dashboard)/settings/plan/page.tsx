@@ -6,6 +6,7 @@ import { ManageBillingButton } from "@/components/settings/ManageBillingButton";
 import { PlanSelector } from "@/components/settings/PlanSelector";
 import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { Badge } from "@/components/ui/Badge";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { useTranslation, type TranslateFn } from "@/lib/i18n/useTranslation";
@@ -111,7 +112,7 @@ export default function PlanAndLimitsPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageContainer width="form">
       <PageHeader title={t("planAndLimits.title")} subtitle={t("planAndLimits.subtitle")} />
       <SettingsSubNav />
 
@@ -269,7 +270,7 @@ export default function PlanAndLimitsPage() {
       </section>
 
       <PlanSelector subscription={subscription} />
-    </div>
+    </PageContainer>
   );
 }
 

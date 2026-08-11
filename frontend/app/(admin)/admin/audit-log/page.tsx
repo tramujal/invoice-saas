@@ -6,6 +6,7 @@ import { AuditLogEntryDrawer } from "@/components/admin/AuditLogEntryDrawer";
 import { type ActiveFilterChip, FilterToolbar } from "@/components/ui/FilterToolbar";
 import { Badge } from "@/components/ui/Badge";
 import { Input, Select } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -185,7 +186,7 @@ export default function PlatformAuditLogPage() {
   const showEmpty = !dateRangeInvalid && !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("auditLog.title")} subtitle={t("auditLog.subtitle")} />
 
       <FilterToolbar
@@ -368,6 +369,6 @@ export default function PlatformAuditLogPage() {
         actionLabel={(code) => actionLabel(t, code)}
         formatTimestamp={(value) => formatTimestamp(value, language)}
       />
-    </div>
+    </PageContainer>
   );
 }

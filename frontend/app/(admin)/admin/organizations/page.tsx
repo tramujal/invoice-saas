@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -76,7 +77,7 @@ export default function PlatformOrganizationsPage() {
   const showEmpty = !loading && data !== null && data.items.length === 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("admin.organizationsTitle")} subtitle={t("admin.organizationsSubtitle")} />
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -200,6 +201,6 @@ export default function PlatformOrganizationsPage() {
           </div>
         ) : null}
       </div>
-    </div>
+    </PageContainer>
   );
 }

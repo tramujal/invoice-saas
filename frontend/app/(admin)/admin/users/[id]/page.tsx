@@ -9,6 +9,7 @@ import { type UserActionMode, UserActionDialog } from "@/components/admin/UserAc
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -170,21 +171,21 @@ export default function PlatformUserDetailPage() {
 
   if (notFound) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <PageContainer width="form">
         <Link href="/admin/users" className="text-sm font-medium text-slate-600 hover:text-slate-900">
           {t("admin.backToUsers")}
         </Link>
         <div className="mt-4">
           <EmptyState title={t("admin.userNotFoundTitle")} description={t("admin.userNotFoundDescription")} />
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   const hasPlatformRole = Boolean(data?.platform_role);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageContainer>
       <Link href="/admin/users" className="text-sm font-medium text-slate-600 hover:text-slate-900">
         {t("admin.backToUsers")}
       </Link>
@@ -396,6 +397,6 @@ export default function PlatformUserDetailPage() {
           onConfirm={() => void handleSimpleActionConfirm()}
         />
       ) : null}
-    </div>
+    </PageContainer>
   );
 }

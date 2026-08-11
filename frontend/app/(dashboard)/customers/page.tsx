@@ -6,6 +6,7 @@ import { CustomerForm } from "@/components/customers/CustomerForm";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterToolbar } from "@/components/ui/FilterToolbar";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
@@ -230,7 +231,7 @@ export default function CustomersPage() {
   const showTable = !loading && items !== null && items.length > 0;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <PageContainer>
       <PageHeader
         title={t("customers.title")}
         subtitle={t("customers.subtitle")}
@@ -399,6 +400,6 @@ export default function CustomersPage() {
           </div>
         </div>
       ) : null}
-    </div>
+    </PageContainer>
   );
 }

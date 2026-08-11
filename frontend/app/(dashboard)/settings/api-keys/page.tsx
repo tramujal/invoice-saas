@@ -6,6 +6,7 @@ import { CreateApiKeyForm } from "@/components/settings/CreateApiKeyForm";
 import { ApiKeySecretDialog } from "@/components/settings/ApiKeySecretDialog";
 import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { Badge } from "@/components/ui/Badge";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
@@ -109,7 +110,7 @@ export default function ApiKeysPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("apiKeys.title")} subtitle={t("apiKeys.subtitle")} />
       <SettingsSubNav />
 
@@ -199,6 +200,6 @@ export default function ApiKeysPage() {
       </section>
 
       <ApiKeySecretDialog apiKey={revealedKey} onClose={() => setRevealedKey(null)} />
-    </div>
+    </PageContainer>
   );
 }

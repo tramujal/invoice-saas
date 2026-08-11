@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -43,7 +44,7 @@ export default function PlatformSystemHealthPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageContainer>
       <PageHeader
         title={t("admin.systemHealthTitle")}
         subtitle={t("admin.systemHealthSubtitle")}
@@ -97,7 +98,7 @@ export default function PlatformSystemHealthPage() {
           <Stat label={t("admin.reminderFailed7d")} value={data?.reminder_emails_failed_7d} loading={loading} />
         </div>
       </section>
-    </div>
+    </PageContainer>
   );
 }
 

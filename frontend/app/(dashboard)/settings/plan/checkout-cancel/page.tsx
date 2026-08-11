@@ -1,6 +1,7 @@
 "use client";
 
 import { ButtonLink } from "@/components/ui/Button";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 
@@ -13,12 +14,12 @@ export default function CheckoutCancelPage() {
   const { t } = useTranslation();
 
   return (
-    <div className="mx-auto max-w-lg space-y-6 text-center">
+    <PageContainer width="narrow" className="text-center">
       <PageHeader title={t("checkoutCancel.title")} subtitle={t("checkoutCancel.subtitle")} />
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
         <p className="text-sm text-slate-600">{t("checkoutCancel.message")}</p>
       </div>
       <ButtonLink href="/settings/plan">{t("checkoutCancel.backToPlan")}</ButtonLink>
-    </div>
+    </PageContainer>
   );
 }

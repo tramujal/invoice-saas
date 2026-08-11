@@ -19,6 +19,7 @@ import { TopServicesChart } from "@/components/dashboard/TopServicesChart";
 import { PaymentStatusBadge } from "@/components/invoices/PaymentStatusBadge";
 import { ButtonLink } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
 import { getOrganizationCurrency } from "@/lib/auth-storage";
@@ -137,7 +138,7 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <PageContainer spacing="8">
       <PageHeader
         title={t("dashboard.title")}
         subtitle={t("dashboard.subtitle")}
@@ -471,6 +472,6 @@ export default function DashboardPage() {
           </section>
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }

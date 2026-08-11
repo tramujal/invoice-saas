@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { PageContainer } from "@/components/ui/PageContainer";
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
@@ -182,7 +183,7 @@ export default function NewInvoicePage() {
   const disableCustomerSelect = isSubmitting || customersLoading;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8 pb-12">
+    <PageContainer width="form" spacing="8" className="pb-12">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link
@@ -404,6 +405,6 @@ export default function NewInvoicePage() {
       </form>
 
       <PlanLimitReachedDialog detail={planLimitDetail} onClose={() => setPlanLimitDetail(null)} />
-    </div>
+    </PageContainer>
   );
 }

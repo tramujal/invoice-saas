@@ -9,6 +9,7 @@ import { WebhookSecretDialog } from "@/components/settings/WebhookSecretDialog";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   RowActionsMenu,
@@ -157,7 +158,7 @@ export default function WebhooksPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <PageContainer>
       <PageHeader title={t("webhooks.title")} subtitle={t("webhooks.subtitle")} />
       <SettingsSubNav />
 
@@ -272,7 +273,7 @@ export default function WebhooksPage() {
       {deliveryDetailId ? (
         <DeliveryDetailDialog deliveryId={deliveryDetailId} onClose={() => setDeliveryDetailId(null)} />
       ) : null}
-    </div>
+    </PageContainer>
   );
 }
 

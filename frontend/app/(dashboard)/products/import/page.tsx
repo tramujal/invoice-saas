@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
+import { PageContainer } from "@/components/ui/PageContainer";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Input";
@@ -364,7 +365,7 @@ export default function ProductImportPage() {
   const importableCount = preview ? preview.valid_count + preview.warning_count : 0;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 pb-12">
+    <PageContainer width="form" className="pb-12">
       <div>
         <Link
           href="/products"
@@ -789,6 +790,6 @@ export default function ProductImportPage() {
           </div>
         </section>
       ) : null}
-    </div>
+    </PageContainer>
   );
 }

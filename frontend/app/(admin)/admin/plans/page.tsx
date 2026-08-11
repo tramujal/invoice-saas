@@ -8,6 +8,7 @@ import { VersionConflictDialog } from "@/components/admin/VersionConflictDialog"
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -192,7 +193,7 @@ export default function PlatformPlansPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <PageContainer>
       <PageHeader
         title={t("adminPlans.title")}
         subtitle={t("adminPlans.subtitle")}
@@ -385,6 +386,6 @@ export default function PlatformPlansPage() {
         messageKey="adminPlans.planVersionConflictMessage"
         reloadButtonKey="adminPlans.planVersionConflictReloadButton"
       />
-    </div>
+    </PageContainer>
   );
 }

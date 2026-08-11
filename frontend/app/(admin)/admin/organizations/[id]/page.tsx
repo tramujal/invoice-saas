@@ -9,6 +9,7 @@ import { SuspendReactivateDialog } from "@/components/admin/SuspendReactivateDia
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   TABLE_BODY_CLASS,
@@ -139,19 +140,19 @@ export default function PlatformOrganizationDetailPage() {
 
   if (notFound) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <PageContainer width="form">
         <Link href="/admin/organizations" className="text-sm font-medium text-slate-600 hover:text-slate-900">
           {t("admin.backToOrganizations")}
         </Link>
         <div className="mt-4">
           <EmptyState title={t("admin.orgNotFoundTitle")} description={t("admin.orgNotFoundDescription")} />
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <PageContainer>
       <Link href="/admin/organizations" className="text-sm font-medium text-slate-600 hover:text-slate-900">
         {t("admin.backToOrganizations")}
       </Link>
@@ -445,7 +446,7 @@ export default function PlatformOrganizationDetailPage() {
           onConfirm={(planId, reason) => void handleConfirmPlanChange(planId, reason)}
         />
       ) : null}
-    </div>
+    </PageContainer>
   );
 }
 

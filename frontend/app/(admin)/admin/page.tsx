@@ -9,6 +9,7 @@ import { UsageOutcomeChart } from "@/components/admin/UsageOutcomeChart";
 import { WeeklyActiveOrganizationsChart } from "@/components/admin/WeeklyActiveOrganizationsChart";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
 import { Button } from "@/components/ui/Button";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -80,7 +81,7 @@ export default function PlatformAdminDashboardPage() {
   const anyLoading = overview.loading || business.loading || usage.loading || health.loading || growth.loading;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <PageContainer spacing="8">
       <PageHeader
         title={t("admin.dashboardTitle")}
         subtitle={t("admin.dashboardSubtitle")}
@@ -257,7 +258,7 @@ export default function PlatformAdminDashboardPage() {
         </div>
         <FeatureAdoptionChart data={growth.data?.feature_adoption ?? []} loading={growth.loading} />
       </section>
-    </div>
+    </PageContainer>
   );
 }
 

@@ -6,6 +6,7 @@ import { SettingsSubNav } from "@/components/settings/SettingsSubNav";
 import { Badge } from "@/components/ui/Badge";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Input, Select, Textarea } from "@/components/ui/Input";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, apiFetch, orgPath } from "@/lib/api";
@@ -297,7 +298,7 @@ export default function SettingsPage() {
   const disabled = isSubmitting || loading;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageContainer width="form">
       <PageHeader
         title={t("settings.title")}
         subtitle={t("settings.subtitle")}
@@ -748,6 +749,6 @@ export default function SettingsPage() {
           </Button>
         </div>
       </form>
-    </div>
+    </PageContainer>
   );
 }
