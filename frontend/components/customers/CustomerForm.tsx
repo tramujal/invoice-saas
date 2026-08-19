@@ -12,6 +12,7 @@ import {
   formatApiError,
   getPlanLimitReachedDetail,
   getTaxIdDuplicateDetail,
+  isInvalidUruguayRutError,
   isEmailNotVerifiedError,
 } from "@/lib/format-api-error";
 import { useTranslation } from "@/lib/i18n/useTranslation";
@@ -187,7 +188,14 @@ export function CustomerForm({ customer, onSaved, onCancel, onOpenExisting }: Cu
       toast.dismiss(loadingId);
       const planLimit = getPlanLimitReachedDetail(err);
       const taxIdDuplicate = getTaxIdDuplicateDetail(err);
-      if (planLimit) {
+      if (isInvalidUruguayRutError(err)) {
+        // Checked before the duplicate branch, mirroring the backend's
+        // own ordering -- an invalid RUT is never reported as a
+        // duplicate. The message is translated here rather than taken
+        // from the API so it follows the user's language, and it never
+        // mentions checksums.
+        toast.error(t("customerForm.invalidRut"));
+      } else if (planLimit) {
         setPlanLimitDetail(planLimit);
       } else if (taxIdDuplicate) {
         // Defense-in-depth fallback: the backend blocks tax_id

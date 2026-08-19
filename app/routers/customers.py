@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.customers import (
     CustomerNotFoundError,
+    InvalidUruguayRutError,
     TaxIdDuplicateError,
     create_customer_record,
     delete_customer_record,
@@ -71,6 +72,13 @@ def create_customer(
         )
     except PlanLimitExceededError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
+    except InvalidUruguayRutError as exc:
+        # 422, not 409: this is a malformed field, not a conflict with
+        # existing data -- and it is raised before any duplicate lookup
+        # so the two can never be confused (see InvalidUruguayRutError).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.to_error_detail()
+        )
     except TaxIdDuplicateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())
 
@@ -151,6 +159,13 @@ def update_customer(
             changes,
             actor_user_id=current_user.id,
             duplicate_warning_acknowledged=body.duplicate_warning_acknowledged,
+        )
+    except InvalidUruguayRutError as exc:
+        # 422, not 409: this is a malformed field, not a conflict with
+        # existing data -- and it is raised before any duplicate lookup
+        # so the two can never be confused (see InvalidUruguayRutError).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.to_error_detail()
         )
     except TaxIdDuplicateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_error_detail())

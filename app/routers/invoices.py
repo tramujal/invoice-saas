@@ -205,6 +205,24 @@ def list_organization_invoices(
     return PaginatedInvoicesResponse(total=total, items=list(rows))
 
 
+@router.get("/{invoice_id}", response_model=InvoiceResponse)
+def get_invoice(
+    organization_id: str,
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Invoice:
+    """Phase 29 -- a single invoice with its line items and tax groups.
+
+    Added because the invoice DETAIL page needs it: until now every
+    invoice surface was the list, which returns summaries only. Uses the
+    same org-scoped lookup as every other invoice endpoint, so a foreign
+    id is a 404 rather than a leak.
+    """
+    require_permission(current_user, organization_id, Permission.invoice_read, db)
+    return _invoice_in_org(db, organization_id, invoice_id)
+
+
 @router.get("/{invoice_id}/pdf")
 def download_invoice_pdf(
     organization_id: str,

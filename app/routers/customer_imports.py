@@ -180,7 +180,14 @@ def preview_customer_import(
         )
 
     existing_emails, existing_tax_ids = fetch_existing_keys(db, organization_id)
-    process_row = make_row_processor(existing_emails, existing_tax_ids)
+    # Phase 28 -- the organization's own tax label is what decides whether
+    # a numeric tax_id in this file is read as a Uruguayan RUT.
+    organization = db.get(Organization, organization_id)
+    process_row = make_row_processor(
+        existing_emails,
+        existing_tax_ids,
+        tax_label=organization.tax_label if organization is not None else None,
+    )
 
     try:
         mapping_result, preview = build_preview(
@@ -267,7 +274,14 @@ def confirm_customer_import(
         )
 
     existing_emails, existing_tax_ids = fetch_existing_keys(db, organization_id)
-    process_row = make_row_processor(existing_emails, existing_tax_ids)
+    # Phase 28 -- the organization's own tax label is what decides whether
+    # a numeric tax_id in this file is read as a Uruguayan RUT.
+    organization = db.get(Organization, organization_id)
+    process_row = make_row_processor(
+        existing_emails,
+        existing_tax_ids,
+        tax_label=organization.tax_label if organization is not None else None,
+    )
     persist_row = make_persist_fn(db, organization_id, actor_user_id=current_user.id)
 
     try:

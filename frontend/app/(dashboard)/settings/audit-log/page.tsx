@@ -45,10 +45,21 @@ const EVENT_TYPES = [
   "invoice.created",
   "invoice.updated",
   "invoice.sent",
+  "adjustment_note.created",
+  "adjustment_note.issued",
+  "adjustment_note.sent",
+  "adjustment_note.voided",
   "organization.plan_changed",
 ] as const;
 
-const RESOURCE_TYPES = ["customer", "product", "quote", "invoice", "organization"] as const;
+const RESOURCE_TYPES = [
+  "customer",
+  "product",
+  "quote",
+  "invoice",
+  "adjustment_note",
+  "organization",
+] as const;
 
 function eventTypeLabel(t: TranslateFn, eventType: string): string {
   const key = `settingsAuditLog.event.${eventType.replace(".", "_")}`;

@@ -29,6 +29,11 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from app.currency import format_amount, get_currency_code
 from app.localization import get_language, quote_status_label, t
 from app.models import Quote
+from app.pdf_tax_rows import (
+    build_totals_rows,
+    format_rate_percent,
+    should_show_line_tax_column,
+)
 from app.quote_numbering import format_quote_number
 
 
@@ -155,27 +160,45 @@ def render_quote_pdf(quote: Quote) -> bytes:
         elements.append(Paragraph(t(language, "no_customer"), normal_style))
     elements.append(Spacer(1, 20))
 
-    line_item_rows = [
-        [
-            t(language, "line_description_label"),
-            t(language, "line_quantity_label"),
-            t(language, "line_unit_price_label"),
-            t(language, "line_total_label"),
-        ]
-    ]
-    for item in quote.line_items:
-        line_item_rows.append(
-            [
-                item.description,
-                _format_quantity(item.quantity),
-                _money(item.unit_price),
-                _money(item.line_total),
-            ]
-        )
+    # Phase 28 -- identical treatment to the invoice PDF (see
+    # app.pdf_tax_rows): the tax column appears only on mixed-rate
+    # documents, so single-rate quotes render exactly as before.
+    tax_groups = quote.tax_groups
+    show_tax_column = should_show_line_tax_column(tax_groups)
 
+    header = [
+        t(language, "line_description_label"),
+        t(language, "line_quantity_label"),
+        t(language, "line_unit_price_label"),
+    ]
+    if show_tax_column:
+        header.append(t(language, "tax_amount_label"))
+    header.append(t(language, "line_total_label"))
+    line_item_rows = [header]
+
+    for item in quote.line_items:
+        row = [
+            item.description,
+            _format_quantity(item.quantity),
+            _money(item.unit_price),
+        ]
+        if show_tax_column:
+            row.append(
+                t(language, "tax_exempt_label")
+                if item.tax_rate == 0
+                else format_rate_percent(item.tax_rate)
+            )
+        row.append(_money(item.line_total))
+        line_item_rows.append(row)
+
+    col_widths = (
+        [2.5 * inch, 0.8 * inch, 1.0 * inch, 0.9 * inch, 1.1 * inch]
+        if show_tax_column
+        else [3.2 * inch, 0.9 * inch, 1.1 * inch, 1.1 * inch]
+    )
     items_table = Table(
         line_item_rows,
-        colWidths=[3.2 * inch, 0.9 * inch, 1.1 * inch, 1.1 * inch],
+        colWidths=col_widths,
         repeatRows=1,
     )
     items_table.setStyle(
@@ -197,11 +220,14 @@ def render_quote_pdf(quote: Quote) -> bytes:
     elements.append(items_table)
     elements.append(Spacer(1, 16))
 
-    totals_rows = [
-        [t(language, "subtotal_label"), format_amount(quote.subtotal, currency_code)],
-        [t(language, "tax_amount_label"), format_amount(quote.tax_amount, currency_code)],
-        [t(language, "total_label"), format_amount(quote.total, currency_code)],
-    ]
+    totals_rows = build_totals_rows(
+        subtotal=quote.subtotal,
+        tax_amount=quote.tax_amount,
+        total=quote.total,
+        tax_groups=tax_groups,
+        language=language,
+        currency_code=currency_code,
+    )
     totals_table = Table(totals_rows, colWidths=[4.9 * inch, 1.4 * inch])
     totals_table.setStyle(
         TableStyle(

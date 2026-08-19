@@ -39,6 +39,7 @@ const links: NavLink[] = [
   { href: "/analytics", labelKey: "nav.analytics", permission: "dashboard.view" },
   { href: "/invoices", labelKey: "nav.invoices" },
   { href: "/quotes", labelKey: "nav.quotes" },
+  { href: "/notes", labelKey: "nav.notes" },
   { href: "/customers", labelKey: "nav.customers" },
   { href: "/products", labelKey: "nav.products" },
   { href: "/assistant", labelKey: "nav.assistant" },

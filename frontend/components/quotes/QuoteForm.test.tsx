@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAuthSession } from "@/lib/auth-storage";
 import type { Customer, PaginatedProducts, Product, Quote } from "@/lib/types";
-import { renderWithProviders, screen, waitFor } from "@/tests/test-utils";
+import { renderWithProviders, screen, waitFor, within } from "@/tests/test-utils";
 
 import { QuoteForm } from "./QuoteForm";
 
@@ -64,7 +64,8 @@ function makeQuote(overrides: Partial<Quote> = {}): Quote {
         description: "Consulting",
         quantity: "1",
         unit_price: "100.00",
-        line_total: "100.00",
+        tax_rate: "0.2200",
+      line_total: "100.00",
         product_id: "product-eur",
       },
     ],
@@ -107,6 +108,57 @@ describe("QuoteForm — create mode", () => {
     await user.click(screen.getByRole("option", { name: /Hosting/ }));
 
     await waitFor(() => expect(screen.getByText(/Currency: USD/)).toBeInTheDocument());
+  });
+});
+
+/** Regression coverage for the same bug fixed in ManualLineEditor: this
+ * form's own <form onSubmit> was being triggered by ManualLineEditor's
+ * portal-rendered form submitting, before the user ever clicked the
+ * quote's real submit button -- see the equivalent test file for
+ * invoices/new for the full explanation. QuoteForm shares the same
+ * LineItemsEditor/ManualLineEditor, so it shared the bug. */
+describe("QuoteForm — manual line never prematurely submits (regression)", () => {
+  async function addManualLine(user: ReturnType<typeof userEvent.setup>, description: string) {
+    await user.click(screen.getByRole("button", { name: "+ Add line" }));
+    await waitFor(() => expect(screen.getByText("➕ Create Manual Line")).toBeInTheDocument());
+    await user.click(screen.getByRole("option", { name: /Create Manual Line/ }));
+    const dialog = await screen.findByRole("dialog");
+    const descInput = within(dialog).getByPlaceholderText(/description/i);
+    await user.type(descInput, description);
+    await user.click(within(dialog).getByRole("button", { name: /add line/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  }
+
+  it("adding a manual line does not call the quote's onSubmit", async () => {
+    mockProductsResponse([]);
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <QuoteForm mode="create" backHref="/quotes" onSubmit={onSubmit} isSubmitting={false} />
+    );
+
+    await addManualLine(user, "Line one");
+    await waitFor(() => expect(screen.getByDisplayValue("Line one")).toBeInTheDocument());
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("adding a second manual line still does not call onSubmit, and the explicit submit fires it exactly once", async () => {
+    mockProductsResponse([]);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderWithProviders(
+      <QuoteForm mode="create" backHref="/quotes" onSubmit={onSubmit} isSubmitting={false} />
+    );
+
+    await addManualLine(user, "Line one");
+    await waitFor(() => expect(screen.getByDisplayValue("Line one")).toBeInTheDocument());
+    await addManualLine(user, "Line two");
+    await waitFor(() => expect(screen.getByDisplayValue("Line two")).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /create quote|save/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
   });
 });
 

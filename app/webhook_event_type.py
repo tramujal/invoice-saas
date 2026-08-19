@@ -48,6 +48,14 @@ class WebhookEventType(str, Enum):
     invoice_created = "invoice.created"
     invoice_updated = "invoice.updated"
     invoice_sent = "invoice.sent"
+    # Phase 29 -- credit/debit notes. One event family for both types;
+    # the payload's note_type distinguishes them, so a subscriber that
+    # cares about "any adjustment to an invoice" needs one subscription
+    # rather than two that must be kept in sync.
+    adjustment_note_created = "adjustment_note.created"
+    adjustment_note_issued = "adjustment_note.issued"
+    adjustment_note_voided = "adjustment_note.voided"
+    adjustment_note_sent = "adjustment_note.sent"
 
     organization_plan_changed = "organization.plan_changed"
 

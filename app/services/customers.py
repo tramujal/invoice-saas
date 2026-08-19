@@ -20,9 +20,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.customer_duplicates import find_tax_id_duplicate
-from app.models import Customer
+from app.models import Customer, Organization
 from app.schemas import CustomerResponse
 from app.services.plan_limits import LimitedResource, check_limit
+from app.uruguay_rut import is_valid_uruguay_rut, should_validate_as_uruguay_rut
 from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 
@@ -55,6 +56,42 @@ class TaxIdDuplicateError(Exception):
         }
 
 
+class InvalidUruguayRutError(Exception):
+    """The supplied tax_id was identified as a Uruguayan RUT (see
+    app.uruguay_rut.should_validate_as_uruguay_rut) but fails the
+    modulus-11 check.
+
+    Raised BEFORE any duplicate lookup, deliberately: reporting
+    "duplicate tax id" for a value that isn't even a structurally valid
+    RUT would be actively misleading, and the order also keeps the
+    outcome deterministic rather than dependent on what happens to
+    already be in the table.
+    """
+
+    def to_error_detail(self) -> dict:
+        return {
+            # The frontend maps this code to a translated message; the
+            # English text here is the API-level fallback, and neither
+            # exposes the checksum mechanics to an end user.
+            "code": "invalid_uruguay_rut",
+            "message": "The RUT entered is not valid.",
+        }
+
+
+def assert_tax_id_valid_for_organization(organization: Organization | None, tax_id: str) -> None:
+    """Validates tax_id as a Uruguayan RUT only when it is unambiguously
+    meant to be one -- see app.uruguay_rut.should_validate_as_uruguay_rut
+    for the exact trigger. An international tax identifier is never
+    subjected to Uruguayan rules and is stored exactly as before."""
+    if not tax_id or not tax_id.strip():
+        return
+    tax_label = organization.tax_label if organization is not None else None
+    if not should_validate_as_uruguay_rut(tax_id, tax_label=tax_label):
+        return
+    if not is_valid_uruguay_rut(tax_id):
+        raise InvalidUruguayRutError()
+
+
 def get_customer_in_org(db: Session, organization_id: str, customer_id: str) -> Customer:
     customer = db.scalar(
         select(Customer).where(
@@ -79,6 +116,10 @@ def create_customer_record(
     duplicate_warning_acknowledged: bool = False,
 ) -> Customer:
     check_limit(db, organization_id, LimitedResource.customers)
+    # Validity first, duplication second -- see InvalidUruguayRutError.
+    assert_tax_id_valid_for_organization(
+        db.get(Organization, organization_id), tax_id
+    )
     existing = find_tax_id_duplicate(db, organization_id, tax_id)
     if existing is not None:
         raise TaxIdDuplicateError(existing)
@@ -131,6 +172,9 @@ def update_customer_record(
     passes it as its own keyword, since it's an audit-only signal, never
     a Customer column `setattr` could apply."""
     if changes.get("tax_id"):
+        assert_tax_id_valid_for_organization(
+            db.get(Organization, customer.organization_id), changes["tax_id"]
+        )
         existing = find_tax_id_duplicate(
             db, customer.organization_id, changes["tax_id"], exclude_customer_id=customer.id
         )

@@ -128,6 +128,107 @@ export type ImportConfirmResponse = {
   row_results: ImportConfirmRowResult[];
 };
 
+/** Phase 28 -- one tax-rate bucket of a document. `base` is the net
+ * amount taxed at `rate`; carrying it is what lets a 0% group be shown
+ * as "Exempt on 200.00" rather than a bare "0.00" that reads as tax. */
+export type TaxGroup = {
+  rate: string;
+  base: string;
+  tax: string;
+};
+
+// --- Phase 29: credit / debit notes ----------------------------------
+
+export type AdjustmentNoteType = "credit" | "debit";
+export type AdjustmentNoteStatus = "draft" | "issued" | "void";
+
+export type AdjustmentNoteLineItem = {
+  id: string;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  /** Historical snapshot, copied from the source invoice line when the
+   * line credits one -- never re-derived from the product. */
+  tax_rate: string;
+  source_invoice_line_item_id: string | null;
+};
+
+export type AdjustmentNote = {
+  id: string;
+  organization_id: string;
+  source_invoice_id: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  note_type: AdjustmentNoteType;
+  /** Already formatted by the API ("CN-000004"). */
+  note_number: string;
+  status: AdjustmentNoteStatus;
+  reason: string;
+  issue_date: string | null;
+  subtotal: string;
+  tax_amount: string;
+  total: string;
+  currency_code: string;
+  language: string;
+  issued_at: string | null;
+  voided_at: string | null;
+  created_at: string;
+  updated_at: string;
+  line_items: AdjustmentNoteLineItem[];
+  tax_groups: TaxGroup[];
+};
+
+/** The adjusted view of an invoice. `original_total` is Invoice.total,
+ * never mutated -- everything else is derived. */
+export type InvoiceAdjustmentSummary = {
+  original_total: string;
+  credited_total: string;
+  debited_total: string;
+  adjusted_total: string;
+  remaining_creditable: string;
+  currency_code: string;
+  issued_credit_note_count: number;
+  issued_debit_note_count: number;
+};
+
+export type CreditableLine = {
+  invoice_line_item_id: string;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  tax_rate: string;
+  credited_total: string;
+  remaining_creditable: string;
+};
+
+export type InvoiceCreditability = {
+  summary: InvoiceAdjustmentSummary;
+  lines: CreditableLine[];
+};
+
+export type AdjustmentNoteLineInput = {
+  description: string;
+  quantity: string;
+  unit_price?: string;
+  tax_rate?: string;
+  source_invoice_line_item_id?: string | null;
+};
+
+export type SendAdjustmentNoteEmailResponse = {
+  sent_to: string;
+  note_number: string;
+};
+
+export type PaginatedAdjustmentNotes = {
+  items: AdjustmentNote[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+
 export type InvoiceLineItemResponse = {
   id: string;
   description: string;
@@ -137,6 +238,10 @@ export type InvoiceLineItemResponse = {
   /** Purely an analytics tag ("this line came from this catalog item") --
    * never used to re-derive description/unit_price/line_total, which are
    * always this line's own permanent snapshot. */
+  /** Phase 28 -- the tax rate applied to THIS line when the document was
+   * issued, as a fraction string ("0.2200"). A permanent snapshot: never
+   * re-derived from the product's current default_tax_rate. */
+  tax_rate: string;
   product_id: string | null;
 };
 
@@ -157,6 +262,8 @@ export type InvoiceCreatedResponse = {
   language: string;
   due_date: string | null;
   line_items: InvoiceLineItemResponse[];
+  /** Phase 28 -- derived from the line snapshots, always present. */
+  tax_groups: TaxGroup[];
 };
 
 /** Response from POST /organizations/{org}/invoices/{id}/send-reminder */
@@ -569,6 +676,10 @@ export type QuoteLineItem = {
   quantity: string;
   unit_price: string;
   line_total: string;
+  /** Phase 28 -- the tax rate applied to THIS line when the document was
+   * issued, as a fraction string ("0.2200"). A permanent snapshot: never
+   * re-derived from the product's current default_tax_rate. */
+  tax_rate: string;
   product_id: string | null;
 };
 
@@ -576,6 +687,8 @@ export type QuoteLineItemInput = {
   description: string;
   quantity: string;
   unit_price: string;
+  /** Omit to inherit the document-level tax_rate (API default). */
+  tax_rate?: number;
   product_id: string | null;
 };
 

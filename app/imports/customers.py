@@ -23,16 +23,20 @@ from app.customer_validation import (
 from app.imports.types import FieldSpec, PreviewRowStatus
 from app.imports.validation import validate_row_fields
 from app.localization import get_language, t
-from app.models import Customer, Organization
+from app.models import Customer
 from app.schemas import CustomerResponse
 from app.services.plan_limits import LimitedResource, open_limit_tracker
 from app.notifications.service import emit_event
+from app.uruguay_rut import is_valid_uruguay_rut, should_validate_as_uruguay_rut
 from app.webhook_event_type import WebhookEventType
 
 REASON_MISSING_CONTACT_INFO = "missing_contact_info"
 REASON_INVALID_EMAIL = "invalid_email"
 REASON_DUPLICATE_EMAIL = "duplicate_email"
 REASON_DUPLICATE_TAX_ID = "duplicate_tax_id"
+# Phase 28 -- a value identified as a Uruguayan RUT that fails the
+# modulus-11 check. Distinct from duplicate_tax_id on purpose.
+REASON_INVALID_RUT = "invalid_rut"
 
 # Aliases are pre-normalized (trim/casefold/strip-accent) to match
 # app.imports.column_mapping.normalize_header()'s output exactly, so an
@@ -144,7 +148,10 @@ def fetch_existing_keys(
 
 
 def make_row_processor(
-    existing_emails: dict[str, tuple[str, str]], existing_tax_ids: dict[str, tuple[str, str]]
+    existing_emails: dict[str, tuple[str, str]],
+    existing_tax_ids: dict[str, tuple[str, str]],
+    *,
+    tax_label: str | None = None,
 ) -> Callable[[dict[str, str]], tuple[PreviewRowStatus, str | None]]:
     """Builds a stateful per-row processor: field validation first (name
     required + format/length rules), then duplicate detection against
@@ -152,6 +159,14 @@ def make_row_processor(
     seen earlier in THIS file (accumulated as rows are processed in
     order, so the first occurrence of a new email/tax_id wins and later
     repeats are the ones reported as duplicates).
+
+    `tax_label` is the importing organization's own tax label, used only
+    to decide whether a numeric tax_id in this file should be read as a
+    Uruguayan RUT (Phase 28 -- see
+    app.uruguay_rut.should_validate_as_uruguay_rut). Defaults to None, so
+    an existing caller that doesn't pass it keeps the exact pre-Phase-28
+    behavior and a generic international identifier is never subjected to
+    Uruguayan rules.
     """
     seen_emails: set[str] = set()
     seen_tax_ids: set[str] = set()
@@ -163,6 +178,15 @@ def make_row_processor(
 
         email = values.get("email", "")
         tax_id = values.get("tax_id", "")
+
+        # Structural validity before duplication, matching
+        # create_customer_record's own ordering: a row whose RUT isn't a
+        # RUT at all must say so, not be reported as colliding with an
+        # existing customer.
+        if tax_id and should_validate_as_uruguay_rut(tax_id, tax_label=tax_label):
+            if not is_valid_uruguay_rut(tax_id):
+                return PreviewRowStatus.invalid, REASON_INVALID_RUT
+
         norm_email = normalize_customer_email(email) if email else None
         norm_tax_id = normalize_tax_id(tax_id) if tax_id else None
 

@@ -80,7 +80,8 @@ describe("useDocumentLines", () => {
     expect(result.current.documentCurrency).toBe("EUR");
   });
 
-  it("computes subtotal/tax/total from valid lines", () => {
+  it("computes subtotal/tax/total from each line's own rate", () => {
+    // Phase 28 -- tax comes from the LINE, not a document-level field.
     const { result } = renderHook(() => useDocumentLines());
     act(() =>
       result.current.addManualLine({
@@ -90,11 +91,82 @@ describe("useDocumentLines", () => {
         unitPrice: "10.00",
       })
     );
-    act(() => result.current.onTaxPercentChange("10"));
+    const lineId = result.current.lines[0].id;
+    act(() => result.current.updateLine(lineId, { tax_percent: "10" }));
 
     expect(result.current.subtotal).toBe(20);
     expect(result.current.taxAmount).toBe(2);
     expect(result.current.total).toBe(22);
+  });
+
+  it("groups mixed rates and taxes each base separately", () => {
+    const { result } = renderHook(() => useDocumentLines());
+    for (const [description, unitPrice] of [
+      ["A", "1000.00"],
+      ["B", "500.00"],
+      ["C", "200.00"],
+    ] as const) {
+      act(() =>
+        result.current.addManualLine({
+          currencyCode: "USD",
+          description,
+          quantity: "1",
+          unitPrice,
+        })
+      );
+    }
+    const [a, b, c] = result.current.lines.map((l) => l.id);
+    act(() => result.current.updateLine(a, { tax_percent: "22" }));
+    act(() => result.current.updateLine(b, { tax_percent: "10" }));
+    act(() => result.current.updateLine(c, { tax_percent: "0" }));
+
+    expect(result.current.subtotal).toBe(1700);
+    expect(result.current.taxAmount).toBe(270);
+    expect(result.current.total).toBe(1970);
+    expect(result.current.taxGroups.map((g) => [g.percent, g.base, g.tax])).toEqual([
+      ["22", 1000, 220],
+      ["10", 500, 50],
+      ["0", 200, 0],
+    ]);
+  });
+
+  it("collapses lines sharing a rate into one group", () => {
+    const { result } = renderHook(() => useDocumentLines());
+    act(() =>
+      result.current.addManualLine({
+        currencyCode: "USD",
+        description: "A",
+        quantity: "1",
+        unitPrice: "100.00",
+      })
+    );
+    act(() =>
+      result.current.addManualLine({
+        currencyCode: "USD",
+        description: "B",
+        quantity: "1",
+        unitPrice: "200.00",
+      })
+    );
+    for (const line of result.current.lines) {
+      act(() => result.current.updateLine(line.id, { tax_percent: "22" }));
+    }
+
+    expect(result.current.taxGroups).toHaveLength(1);
+    expect(result.current.taxGroups[0].base).toBe(300);
+    expect(result.current.taxGroups[0].tax).toBe(66);
+  });
+
+  it("seeds a product line's tax from the product default without binding to it", () => {
+    const { result } = renderHook(() => useDocumentLines());
+    act(() => result.current.addProductLine(makeProduct({ default_tax_rate: "0.22" })));
+    expect(result.current.lines[0].tax_percent).toBe("22");
+
+    // Overriding the line is purely local -- nothing writes back to the
+    // product, which the backend also enforces.
+    const lineId = result.current.lines[0].id;
+    act(() => result.current.updateLine(lineId, { tax_percent: "10" }));
+    expect(result.current.lines[0].tax_percent).toBe("10");
   });
 
   it("prefills tax from a single product's default_tax_rate until manually overridden", () => {

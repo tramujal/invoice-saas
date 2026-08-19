@@ -65,7 +65,16 @@ export function ManualLineEditor({
   if (!open || !mounted) return null;
 
   function handleSubmit(e: React.FormEvent) {
+    // This form is rendered via createPortal into document.body, so it
+    // sits outside the parent page's own <form> in the DOM -- but React
+    // bubbles synthetic events through the REACT tree, not the DOM tree,
+    // for portaled content (see https://react.dev/reference/react-dom/createPortal#rendering-to-a-different-part-of-the-dom).
+    // Without stopPropagation, this submit event keeps bubbling past
+    // preventDefault() and reaches the invoice/quote page's own
+    // onSubmit handler, which reads current form state and submits the
+    // whole document prematurely, with whatever line was just added.
     e.preventDefault();
+    e.stopPropagation();
     const trimmed = description.trim();
     if (!trimmed) {
       setError(t("lineItemPicker.errorDescriptionRequired"));

@@ -14,6 +14,7 @@ from app.models import init_db
 from app.request_metrics import record_request
 from app.security_headers import apply_security_headers
 from app.routers import (
+    adjustment_notes,
     analytics,
     api_key_management,
     assistant,
@@ -269,6 +270,7 @@ app.include_router(public_config.router)
 app.include_router(api_key_management.router)
 app.include_router(webhooks.router)
 app.include_router(audit.router)
+app.include_router(adjustment_notes.router)
 app.include_router(whatsapp.router)
 app.include_router(whatsapp_bridge.router)
 app.include_router(api_v1_customers.router)

@@ -109,6 +109,49 @@ without one, treat those four features as OFF, not broken** — and
 consider hiding the AI Advisor's Generate button, since its pending state
 is indefinite.
 
+### Deploying the worker on Render
+
+Service type **Background Worker**, same repo/branch as `invoicing-api`,
+root directory left blank (`requirements.txt` and `app/` are both at the
+repo root).
+
+| | |
+|---|---|
+| Build command | `pip install -r requirements.txt` |
+| Start command | `python -m app.jobs.worker` |
+| Public port / health check | none — it opens no socket |
+| Persistent disk | none — no local state; PDFs are re-rendered in memory |
+| Instances | more than one is safe on Postgres (`SELECT … FOR UPDATE SKIP LOCKED` + a conditional-UPDATE rowcount check in `claim_jobs`) |
+
+It needs the **same provider configuration as the web service**, not a
+subset — it runs the handlers itself. The full list lives in the commented
+block in `render.yaml`; copy each value from the API service rather than
+regenerating it.
+
+**The trap worth knowing about:** `AI_PROVIDER` defaults to `anthropic`
+when unset (`app/ai/factory.py`). A worker that omits it while the API
+sets `gemini` will look for `ANTHROPIC_API_KEY`, find nothing, and record
+every Financial Advisor report as `failed` — while the API's own AI
+surfaces keep working, so the misconfiguration looks like "the Advisor is
+broken" rather than "the worker is misconfigured". Set `AI_PROVIDER`,
+`AI_MODEL` and the matching key **explicitly on both services**.
+
+There is no `.env` fallback: the app never calls `load_dotenv` anywhere,
+so an unset Render variable is simply unset.
+
+### Worker troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| Worker runs, logs `worker: started`, never claims anything | `DATABASE_URL` unset. It defaults to `sqlite:///./invoices.db` (`app/database.py`), so the worker silently polls an empty local file instead of Neon. |
+| Worker crash-loops before `worker: started` | `JWT_SECRET_KEY` unset with `ENVIRONMENT=production`. `app.security` raises at import time; the worker imports it transitively via `app.ai.factory`, even though it never issues a token. |
+| Every `notification.email` → `permanently_failed`, `error_code=email_not_configured` | `RESEND_API_KEY` / `EMAIL_FROM` missing on the worker. Not retryable by design — a config condition no backoff can fix. |
+| Report `failed`, `error_code=ai_unavailable` | Provider key missing, or `AI_PROVIDER` disagrees with the key that is set (see the trap above). |
+| Report `failed`, `error_code=invalid_response` | The provider answered, but the model didn't emit a valid `submit_financial_analysis` tool call. Validate the specific `AI_MODEL` honors function calling before trusting it in production. |
+| Every `whatsapp.send_document` → `permanently_failed`, `error_code=whatsapp_not_configured` | Expected when WhatsApp is off; the null provider is the default. |
+| `webhook.deliver` job `succeeded` but nothing arrived | Correct and by design — job success means "the row executed", never "the HTTP call was accepted". The business outcome is on the `WebhookDelivery` row. |
+| Worker exits immediately, logs `WORKER_ENABLED=false` | `WORKER_ENABLED` is set to a falsy value. |
+
 ---
 
 ## Environment variables

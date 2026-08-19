@@ -146,24 +146,83 @@ services:
 # without one, treat the four features above as OFF, not as broken.
 # See docs/production_readiness.md for the deploy-time decision.
 #
+# DELIBERATELY LEFT COMMENTED, NOT MERELY UNFINISHED: a Blueprint sync
+# reads this file and CREATES what it declares, so uncommenting this block
+# provisions a paid always-on service. That has to stay an explicit,
+# deliberate action by the operator, never a side effect of editing config.
+# Everything below is complete and correct as written -- uncommenting it
+# (and nothing else) is the whole change.
+#
+# THE WORKER IS NOT JUST A DATABASE CONSUMER. It executes the handlers
+# itself, so it needs the SAME provider configuration as the web service,
+# not a subset. The email/AI variables below are not optional polish --
+# without them the two most user-visible job types fail on every attempt:
+#   notification.email          -> permanently_failed, error_code=
+#                                  email_not_configured (verified locally)
+#   financial_insight.generate  -> the job row succeeds but the report is
+#                                  recorded `failed` with error_code=
+#                                  ai_unavailable (verified locally)
+# Note AI_PROVIDER defaults to "anthropic" when UNSET (app/ai/factory.py),
+# so a worker that omits it while the web service sets "gemini" will read
+# a key that isn't there and fail every report. Set it explicitly on BOTH.
+# AI_MODEL has no fallback at all when ENVIRONMENT=production.
+#
 # services:
 #   - type: worker
 #     name: invoicing-worker
 #     runtime: python
 #     plan: starter
+#     # region: <same one the invoicing-api service already runs in>
+#     # -- omitted here rather than guessed; the web service above doesn't
+#     # pin one either, so both currently take Render's default. Keep the
+#     # worker in the API's region (and, ideally, the Neon database's) so
+#     # every claim/complete round trip stays on a short network path.
 #     buildCommand: pip install -r requirements.txt
 #     startCommand: python -m app.jobs.worker
 #     envVars:
 #       - key: ENVIRONMENT
 #         value: production
+#       # THE SAME Neon connection string as the web service. Note the
+#       # code default is `sqlite:///./invoices.db` (app/database.py), so a
+#       # worker missing this does NOT crash -- it silently polls an empty
+#       # local SQLite file forever and claims nothing. Always set it.
 #       - key: DATABASE_URL
 #         sync: false
-#       # Must match the web service's own JWT_SECRET_KEY/CORS values only
-#       # insofar as this worker imports the same app.* modules at startup
-#       # (app.security reads JWT_SECRET_KEY at import time) -- it never
-#       # issues or verifies a token itself, but the import would fail
-#       # without one set. Reuse the exact same secret as the web service.
+#       # Reuse the web service's EXACT value. The worker never issues or
+#       # verifies a token, but it imports app.security transitively (via
+#       # app.ai.factory), and that module raises at IMPORT time when
+#       # ENVIRONMENT=production and this is unset -- the worker would
+#       # crash-loop on boot before claiming anything.
 #       - key: JWT_SECRET_KEY
+#         sync: false
+#       - key: LOG_LEVEL
+#         value: INFO
+#       # Outbound email -- required for notification.email. Same values as
+#       # the web service.
+#       - key: RESEND_API_KEY
+#         sync: false
+#       - key: EMAIL_FROM
+#         sync: false
+#       # AI -- required for financial_insight.generate. Same values as the
+#       # web service; set only the key matching AI_PROVIDER.
+#       - key: AI_PROVIDER
+#         sync: false
+#       - key: AI_MODEL
+#         sync: false
+#       - key: ANTHROPIC_API_KEY
+#         sync: false
+#       - key: GEMINI_API_KEY
+#         sync: false
+#       # Only if WhatsApp is intentionally enabled -- whatsapp.send_document
+#       # otherwise resolves to the null provider and permanently fails with
+#       # error_code=whatsapp_not_configured. Omit all four when unused.
+#       - key: WHATSAPP_ENABLED
+#         sync: false
+#       - key: WHATSAPP_PROVIDER
+#         sync: false
+#       - key: WHATSAPP_BRIDGE_URL
+#         sync: false
+#       - key: WHATSAPP_BRIDGE_SECRET
 #         sync: false
 #       # See app/job_config.py for the full list and defaults -- every one
 #       # is optional; omit any you're happy leaving at its documented
@@ -178,6 +237,17 @@ services:
 #         value: "300"
 #       - key: WORKER_BATCH_SIZE
 #         value: "5"
+#
+# NOT needed by the worker, deliberately omitted above: PORT/health checks
+# (it opens no socket), a persistent disk (it holds no local state -- PDFs
+# are re-rendered in memory from the database), CORS_ALLOWED_ORIGINS and
+# TRUSTED_PROXY_HOPS (no HTTP surface), the Stripe and Google variables (no
+# job type touches billing or OAuth), and FRONTEND_BASE_URL (no worker-
+# reachable code path builds a link -- notification copy carries no URLs;
+# set it anyway if you prefer the two processes to be configured
+# identically). Multiple instances are safe on Postgres: claim_jobs uses
+# SELECT ... FOR UPDATE SKIP LOCKED plus a conditional-UPDATE rowcount
+# check, so a job is never double-owned (see app/services/background_jobs.py).
 #
 # Migration/deployment ordering: the web service's own FastAPI lifespan
 # hook already runs app.models.init_db() (idempotent schema migrations,

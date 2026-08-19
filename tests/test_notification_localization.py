@@ -73,6 +73,14 @@ def test_resolve_recipient_language_handles_missing_user(db_session):
 # --- copy.py has no hardcoded English: every event type, both languages --
 
 
+_NOTE_PAYLOAD = {
+    "note_number": "CN-000001",
+    "note_type": "credit",
+    "total": "300.00",
+    "currency_code": "UYU",
+}
+
+
 def test_every_event_type_has_a_dedicated_renderer_in_both_languages():
     payload_by_type = {
         WebhookEventType.customer_created: {"name": "Acme"},
@@ -92,6 +100,12 @@ def test_every_event_type_has_a_dedicated_renderer_in_both_languages():
         WebhookEventType.invoice_created: {"invoice_number": "INV-1"},
         WebhookEventType.invoice_updated: {"invoice_number": "INV-1"},
         WebhookEventType.invoice_sent: {"invoice_number": "INV-1", "customer_name": "Acme"},
+        # Phase 29 -- one payload shape serves all four note events; the
+        # renderers differ only in which sentence they choose.
+        WebhookEventType.adjustment_note_created: _NOTE_PAYLOAD,
+        WebhookEventType.adjustment_note_issued: _NOTE_PAYLOAD,
+        WebhookEventType.adjustment_note_voided: _NOTE_PAYLOAD,
+        WebhookEventType.adjustment_note_sent: _NOTE_PAYLOAD,
         WebhookEventType.organization_plan_changed: {"new_plan": {"code": "pro"}},
         WebhookEventType.financial_insight_requested: {"report_id": "x"},
         WebhookEventType.financial_insight_generated: {"report_id": "x"},

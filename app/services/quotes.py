@@ -213,6 +213,9 @@ def create_quote_record(
             quantity=line.quantity,
             unit_price=_quantize_money(line.unit_price),
             line_total=line_total,
+            # Resolved rate, not the raw request value -- see the
+            # identical snapshot in create_invoice_record.
+            tax_rate=(tax_rate if line.tax_rate is None else line.tax_rate),
             product_id=line.product_id,
         )
         for line, line_total in zip(line_items, totals.line_totals)
@@ -379,6 +382,9 @@ def update_quote_record(
                 quantity=line.quantity,
                 unit_price=_quantize_money(line.unit_price),
                 line_total=line_total,
+                tax_rate=(
+                    effective_tax_rate if line.tax_rate is None else line.tax_rate
+                ),
                 product_id=line.product_id,
             )
             for line, line_total in zip(line_items, totals.line_totals)
@@ -388,6 +394,13 @@ def update_quote_record(
         quote.tax_amount = totals.tax_amount
         quote.total = totals.total
     elif tax_rate is not None:
+        # Document rate changed on its own, with no replacement lines.
+        # This deliberately RE-STAMPS every line with the new rate, which
+        # is exactly what this branch did before per-line tax existed --
+        # an API client that only knows about a document-level rate must
+        # keep getting the same behavior. A caller that wants to keep
+        # differing per-line rates sends line_items instead (the branch
+        # above), which is what the UI always does.
         existing_line_items = [
             QuoteLineItemCreate(
                 description=li.description,
@@ -398,6 +411,8 @@ def update_quote_record(
             for li in quote.line_items
         ]
         totals = compute_invoice_totals(existing_line_items, effective_tax_rate)  # type: ignore[arg-type]
+        for line in quote.line_items:
+            line.tax_rate = effective_tax_rate
         quote.subtotal = totals.subtotal
         quote.tax_rate = effective_tax_rate
         quote.tax_amount = totals.tax_amount
@@ -474,6 +489,9 @@ def duplicate_quote_record(
             description=li.description,
             quantity=li.quantity,
             unit_price=li.unit_price,
+            # Phase 28 -- a duplicate must reproduce the original's
+            # per-line taxes, not flatten them to the document rate.
+            tax_rate=li.tax_rate,
             product_id=li.product_id,
         )
         for li in quote.line_items
@@ -578,6 +596,12 @@ def convert_quote_to_invoice(
             description=li.description,
             quantity=li.quantity,
             unit_price=li.unit_price,
+            # Phase 28 -- carry each line's own rate across verbatim.
+            # Without this the conversion would silently re-stamp every
+            # line with the quote's document-level rate, quietly changing
+            # the total of a mixed-tax quote the customer already
+            # accepted.
+            tax_rate=li.tax_rate,
             product_id=li.product_id,
         )
         for li in quote.line_items

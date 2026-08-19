@@ -126,4 +126,117 @@ describe("New Invoice page — product-first currency flow", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("combobox")).toBeInTheDocument();
   });
+
+});
+
+/** Regression coverage for a real bug: ManualLineEditor is portal-rendered
+ * via createPortal into document.body, outside this page's own <form> in
+ * the DOM. React bubbles synthetic events through the REACT tree rather
+ * than the DOM tree for portaled content, so without stopPropagation on
+ * the portal's own form submit, adding a manual line was also triggering
+ * THIS page's outer onSubmit -- silently creating the invoice with
+ * whatever line had just been added, before the user ever clicked
+ * "Create invoice". Fixed in ManualLineEditor.handleSubmit. */
+function invoicePostCalls(calls: unknown[][]): unknown[][] {
+  return calls.filter(
+    (call) =>
+      String(call[0]) === "/organizations/org-1/invoices" &&
+      (call[1] as { method?: string } | undefined)?.method === "POST"
+  );
+}
+
+async function addManualLine(
+  user: ReturnType<typeof userEvent.setup>,
+  description: string,
+  price: string
+) {
+  await user.click(screen.getByRole("button", { name: "+ Add line" }));
+  await waitFor(() => expect(screen.getByText("➕ Create Manual Line")).toBeInTheDocument());
+  await user.click(screen.getByRole("option", { name: /Create Manual Line/ }));
+  const dialog = await screen.findByRole("dialog");
+  const descInput = within(dialog).getByPlaceholderText(/description/i);
+  await user.type(descInput, description);
+  const numberInputs = within(dialog).getAllByRole("spinbutton");
+  await user.clear(numberInputs[1]);
+  await user.type(numberInputs[1], price);
+  await user.click(within(dialog).getByRole("button", { name: /add line/i }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+}
+
+describe("New Invoice page — manual line never prematurely submits (regression)", () => {
+  it("adding the first manual line does not submit the invoice", async () => {
+    mockProductsResponse([]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewInvoicePage />);
+
+    await addManualLine(user, "Line one", "100");
+    await waitFor(() => expect(screen.getByDisplayValue("Line one")).toBeInTheDocument());
+
+    expect(invoicePostCalls(apiFetchMock.mock.calls)).toHaveLength(0);
+  });
+
+  it("adding a second manual line does not submit the invoice", async () => {
+    mockProductsResponse([]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewInvoicePage />);
+
+    await addManualLine(user, "Line one", "100");
+    await waitFor(() => expect(screen.getByDisplayValue("Line one")).toBeInTheDocument());
+    await addManualLine(user, "Line two", "200");
+    await waitFor(() => expect(screen.getByDisplayValue("Line two")).toBeInTheDocument());
+
+    expect(screen.getByDisplayValue("Line one")).toBeInTheDocument();
+    expect(invoicePostCalls(apiFetchMock.mock.calls)).toHaveLength(0);
+  });
+
+  it("editing a line does not submit the invoice", async () => {
+    mockProductsResponse([]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewInvoicePage />);
+
+    await addManualLine(user, "Line one", "100");
+    const descField = await screen.findByDisplayValue("Line one");
+    await user.clear(descField);
+    await user.type(descField, "Line one, edited");
+
+    await waitFor(() => expect(screen.getByDisplayValue("Line one, edited")).toBeInTheDocument());
+    expect(invoicePostCalls(apiFetchMock.mock.calls)).toHaveLength(0);
+  });
+
+  it("removing a line does not submit the invoice", async () => {
+    mockProductsResponse([]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewInvoicePage />);
+
+    await addManualLine(user, "Line one", "100");
+    await screen.findByDisplayValue("Line one");
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(screen.getByText(/No line items yet/)).toBeInTheDocument());
+    expect(invoicePostCalls(apiFetchMock.mock.calls)).toHaveLength(0);
+  });
+
+  it("only the explicit Create Invoice action submits, and exactly once", async () => {
+    mockProductsResponse([]);
+    apiFetchMock.mockImplementation((path: string, init?: { method?: string }) => {
+      if (String(path).includes("/customers")) return Promise.resolve(noCustomers);
+      if (String(path).includes("/products")) {
+        return Promise.resolve({ total: 0, items: [] } satisfies PaginatedProducts);
+      }
+      if (path === "/organizations/org-1/invoices" && init?.method === "POST") {
+        return Promise.resolve({ id: "invoice-1", invoice_number: "INV-000001" });
+      }
+      return Promise.reject(new Error(`unexpected call: ${path}`));
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<NewInvoicePage />);
+
+    await addManualLine(user, "Line one", "100");
+    await screen.findByDisplayValue("Line one");
+    expect(invoicePostCalls(apiFetchMock.mock.calls)).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Create invoice" }));
+
+    await waitFor(() => expect(invoicePostCalls(apiFetchMock.mock.calls)).toHaveLength(1));
+  });
 });

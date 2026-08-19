@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Customer, Invoice, InvoiceLineItem, Product, Quote
 from app.payment_status import PaymentStatus
+from app.services.adjustment_notes import get_adjusted_totals_by_invoice
 from app.quote_status import QuoteStatus
 
 # Same defensive ceiling app/insights/queries.py already uses for its own
@@ -102,6 +103,15 @@ class CustomerRevenueRow:
 
 
 def get_customer_revenue_all(db: Session, organization_id: str) -> list[CustomerRevenueRow]:
+    """Gross revenue per customer.
+
+    Phase 29 -- deliberately NOT adjusted. This answers "how much has
+    this customer been billed", which is the gross question customer
+    concentration analysis asks; netting corrections into it would change
+    what the metric means without changing its name. Adjusted revenue is
+    exposed separately by app.analytics.calculators.revenue and the
+    monthly series. See docs/credit_debit_notes.md.
+    """
     rows = db.execute(
         select(
             Customer.id,
@@ -315,21 +325,35 @@ def get_receivables_snapshot(
     docs/financial_dashboard.md's limitations section."""
     as_of_end = datetime.combine(as_of, datetime.max.time()).replace(tzinfo=timezone.utc)
     rows = db.execute(
-        select(Invoice.currency_code, Invoice.total, Invoice.payment_status, Invoice.paid_at, Invoice.due_date).where(
+        select(Invoice.id, Invoice.currency_code, Invoice.total, Invoice.payment_status, Invoice.paid_at, Invoice.due_date).where(
             Invoice.organization_id == organization_id, Invoice.created_at <= as_of_end
         )
     ).all()
+    # Phase 29 -- an unpaid invoice with an issued credit note is
+    # economically worth less than its face value, and a debit note makes
+    # it worth more. One bounded query for the whole organization, never
+    # per invoice, and never note arithmetic spelled out here.
+    #
+    # LIMITATION, stated rather than hidden: adjustments are applied at
+    # their CURRENT value, not reconstructed as-of `as_of`. Notes carry
+    # issued_at, so a truly historical reconstruction is possible later;
+    # doing it here would need the same treatment for every other
+    # as-of metric, which is out of this phase.
+    adjustments = get_adjusted_totals_by_invoice(db, organization_id)
     outstanding: dict[str, Decimal] = {}
     overdue: dict[str, Decimal] = {}
-    for currency_code, total, payment_status, paid_at, due_date in rows:
+    for invoice_id, currency_code, total, payment_status, paid_at, due_date in rows:
         if payment_status == PaymentStatus.paid.value:
             if paid_at is None:
                 continue
             if _aware(paid_at) <= as_of_end:
                 continue
-        outstanding[currency_code] = outstanding.get(currency_code, Decimal("0")) + total
+        # Never below zero: a fully credited invoice is worth nothing
+        # outstanding, never a negative receivable.
+        effective = max(Decimal("0"), Decimal(total) + adjustments.get(invoice_id, Decimal("0")))
+        outstanding[currency_code] = outstanding.get(currency_code, Decimal("0")) + effective
         if due_date is not None and due_date < as_of:
-            overdue[currency_code] = overdue.get(currency_code, Decimal("0")) + total
+            overdue[currency_code] = overdue.get(currency_code, Decimal("0")) + effective
     return {
         code: (outstanding.get(code, Decimal("0")), overdue.get(code, Decimal("0"))) for code in outstanding
     }
@@ -368,22 +392,39 @@ def get_monthly_revenue_series(
     figure to a month inside it."""
     range_start = month_starts[0]
     rows = db.execute(
-        select(Invoice.currency_code, Invoice.created_at, Invoice.paid_at, Invoice.total).where(
+        select(Invoice.id, Invoice.currency_code, Invoice.created_at, Invoice.paid_at, Invoice.total).where(
             Invoice.organization_id == organization_id,
             or_(Invoice.created_at >= range_start, Invoice.paid_at >= range_start),
         )
     ).all()
+    # Phase 29 -- `invoiced` becomes NET adjusted revenue: an issued
+    # credit note reduces it, a debit note increases it.
+    #
+    # DATE SEMANTICS: the adjustment lands in the SOURCE INVOICE's month,
+    # not the note's issue month. This series is the deterministic input
+    # to revenue forecasting, and attributing a correction to the month
+    # of the sale it corrects keeps each month's figure equal to what
+    # that month's sales were actually worth. Issue-month attribution
+    # would inject negative spikes into months that had no such sales,
+    # teaching the forecaster a seasonality that does not exist. See
+    # docs/credit_debit_notes.md.
+    #
+    # `collected` is deliberately NOT adjusted: it reports cash actually
+    # received, and a credit note is not a refund. The payment model
+    # cannot express one (see the payment-model limitation in the docs).
+    adjustments = get_adjusted_totals_by_invoice(db, organization_id)
 
     month_keys = [start.strftime("%Y-%m") for start in month_starts]
     invoiced: dict[tuple[str, str], Decimal] = {}
     collected: dict[tuple[str, str], Decimal] = {}
     counts: dict[tuple[str, str], int] = {}
 
-    for currency_code, created_at, paid_at, total in rows:
+    for invoice_id, currency_code, created_at, paid_at, total in rows:
         created_key = _aware(created_at).strftime("%Y-%m")
         if created_key in month_keys:
             key = (currency_code, created_key)
-            invoiced[key] = invoiced.get(key, Decimal("0")) + total
+            adjusted_total = Decimal(total) + adjustments.get(invoice_id, Decimal("0"))
+            invoiced[key] = invoiced.get(key, Decimal("0")) + adjusted_total
             counts[key] = counts.get(key, 0) + 1
         if paid_at is not None:
             paid_key = _aware(paid_at).strftime("%Y-%m")

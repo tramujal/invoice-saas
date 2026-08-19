@@ -25,6 +25,7 @@ from app.job_status import JobStatus
 from app.membership_role import MembershipRole
 from app.membership_status import MembershipStatus
 from app.organization_status import OrganizationStatus
+from app.adjustment_note_status import AdjustmentNoteStatus
 from app.payment_status import PaymentStatus
 from app.product_type import ProductType
 from app.quote_status import QuoteStatus
@@ -279,6 +280,14 @@ class Organization(Base):
     )
     reminder_after_due_days: Mapped[str] = mapped_column(
         String(64), nullable=False, default="7", server_default="7"
+    )
+    # Phase 29 -- separate sequences per note type, allocated under the
+    # same organization-row lock that hands out invoice/quote numbers.
+    next_credit_note_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    next_debit_note_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
     )
     next_quote_number: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
@@ -1026,6 +1035,13 @@ class Invoice(Base):
     reminders: Mapped[list["InvoiceReminder"]] = relationship(
         back_populates="invoice", cascade="all, delete-orphan"
     )
+    # Phase 29. NO cascade delete: adjustment notes are independent
+    # financial documents, and AdjustmentNote.source_invoice_id has no
+    # ON DELETE precisely so an invoice can never take its own
+    # corrections down with it.
+    adjustment_notes: Mapped[list["AdjustmentNote"]] = relationship(
+        back_populates="source_invoice"
+    )
 
     @property
     def customer_name(self) -> str | None:
@@ -1038,6 +1054,22 @@ class Invoice(Base):
         if self.customer_phone_snapshot is not None:
             return self.customer_phone_snapshot
         return self.customer.phone if self.customer is not None else None
+
+    @property
+    def tax_groups(self) -> list["TaxGroup"]:
+        """This document's tax broken down by rate (Phase 28), derived
+        from the stored line snapshots -- never from any product's
+        current configuration.
+
+        A plain property alongside customer_name/effective_payment_status
+        so it is picked up automatically wherever an Invoice is
+        serialized via from_attributes, with no extra step at each call
+        site. Single-rate documents (including every pre-Phase-28
+        invoice) simply yield one group.
+        """
+        from app.tax_groups import group_lines_by_tax_rate
+
+        return group_lines_by_tax_rate(self.line_items)
 
     @property
     def effective_payment_status(self) -> "PaymentStatus":
@@ -1068,7 +1100,25 @@ class InvoiceLineItem(Base):
     description: Mapped[str] = mapped_column(String(512), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # NET of tax, exactly as before Phase 28 -- quantity * unit_price,
+    # quantized once. Adding per-line tax deliberately did NOT change what
+    # this column means, so every existing reader (analytics, exports,
+    # PDFs, the AI context builder) keeps working untouched.
     line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Phase 28 -- the tax rate that applied to THIS line when the document
+    # was issued, as a fraction (0.22 == 22%). A permanent historical
+    # snapshot, exactly like description/unit_price above: it is copied
+    # from Product.default_tax_rate at the moment the line is created and
+    # never re-read from the product afterward, so re-pricing a catalog
+    # item's tax can never retroactively alter an issued invoice.
+    #
+    # Backfilled for pre-Phase-28 rows from the document's single
+    # invoice-level rate, so historical documents recompute to byte-
+    # identical totals -- see app.schema_migrations._add_line_item_tax_rates
+    # and app.services.invoices.compute_invoice_totals' grouping rule.
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), nullable=False, default=0, server_default="0"
+    )
     # Purely an analytics tag ("which catalog item generated this line") --
     # NEVER read back to reconstruct description/unit_price/line_total.
     # Nullable and ON DELETE SET NULL so a hypothetical product removal
@@ -1355,6 +1405,14 @@ class Quote(Base):
         return get_effective_quote_status(self, today_local)
 
     @property
+    def tax_groups(self) -> list["TaxGroup"]:
+        """See Invoice.tax_groups -- identical derivation, so a quote and
+        the invoice it converts into present their taxes the same way."""
+        from app.tax_groups import group_lines_by_tax_rate
+
+        return group_lines_by_tax_rate(self.line_items)
+
+    @property
     def public_url(self) -> str:
         from app.quote_public_links import build_quote_public_link
 
@@ -1375,6 +1433,13 @@ class QuoteLineItem(Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Phase 28 -- see InvoiceLineItem.tax_rate's own docstring. Quotes get
+    # the identical model on purpose: a quote converted to an invoice must
+    # carry its per-line taxes across unchanged, which is only possible if
+    # both sides speak the same tax vocabulary.
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), nullable=False, default=0, server_default="0"
+    )
     # Purely an analytics tag -- see InvoiceLineItem.product_id's identical
     # docstring; never read back to reconstruct a line's snapshot values.
     product_id: Mapped[str | None] = mapped_column(
@@ -2344,6 +2409,176 @@ class FinancialInsightReport(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class AdjustmentNote(Base):
+    """A credit or debit note: a first-class financial document that
+    adjusts the economic value of ONE source invoice (Phase 29).
+
+    NOT a negative invoice. The note carries positive line amounts and
+    its own document number from its own per-type sequence; the direction
+    of its economic effect lives entirely in `note_type` and is applied
+    once, by app.services.adjustment_notes.signed_total. That is what
+    keeps "issued revenue" and "adjusted revenue" separable, and what
+    stops a credit note from ever being mistaken for a sale.
+
+    The source invoice is REQUIRED and immutable. organization_id,
+    customer_id and currency_code are all DERIVED from it server-side and
+    never accepted from a client (see create_adjustment_note), which
+    makes a cross-tenant or currency-mismatched note structurally
+    impossible rather than merely validated against.
+
+    Invoice.total is never mutated by any of this. The original invoice
+    remains the historical record of what was issued; the adjusted value
+    is computed on demand -- see app.services.adjustment_notes.
+    """
+
+    __tablename__ = "adjustment_notes"
+    __table_args__ = (
+        # Per-type sequences, so a credit note and a debit note may both
+        # be number 1 in the same organization, and neither ever consumes
+        # an invoice number.
+        UniqueConstraint("organization_id", "note_type", "note_number"),
+        Index("ix_adjustment_notes_source_invoice_id", "source_invoice_id"),
+        Index("ix_adjustment_notes_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    organization_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    # No CASCADE / SET NULL: an issued note is financial history about a
+    # specific invoice and has no coherent meaning if its source
+    # vanished. Invoices are never hard-deleted in this app anyway, so
+    # this guards against a future mistake rather than a current path.
+    source_invoice_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("invoices.id"), nullable=False
+    )
+    customer_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    note_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    note_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=AdjustmentNoteStatus.draft.value,
+        server_default=AdjustmentNoteStatus.draft.value,
+    )
+
+    # Free-text explanation ("returned 2 units", "omitted delivery
+    # charge"). Shown on the document and in the UI; deliberately NOT
+    # forwarded to the AI Financial Advisor, which receives only
+    # structured, PII-minimal figures.
+    reason: Mapped[str] = mapped_column(
+        String(1000), nullable=False, default="", server_default=""
+    )
+
+    issue_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Copied from the source invoice at creation, then pinned exactly like
+    # Invoice.currency_code / Invoice.language -- a note must render years
+    # from now the way it did the day it was issued.
+    currency_code: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="USD", server_default="USD"
+    )
+    language: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="en", server_default="en"
+    )
+
+    # Same snapshot rule as Invoice: editing the customer later must never
+    # alter an already-issued document.
+    customer_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_phone_snapshot: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    customer_address_snapshot: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped["Organization"] = relationship()
+    source_invoice: Mapped["Invoice"] = relationship(back_populates="adjustment_notes")
+    customer: Mapped["Customer | None"] = relationship()
+    line_items: Mapped[list["AdjustmentNoteLineItem"]] = relationship(
+        back_populates="note", cascade="all, delete-orphan"
+    )
+
+    @property
+    def customer_name(self) -> str | None:
+        if self.customer_name_snapshot is not None:
+            return self.customer_name_snapshot
+        return self.customer.name if self.customer is not None else None
+
+    @property
+    def tax_groups(self) -> list["TaxGroup"]:
+        """Identical derivation to Invoice.tax_groups -- notes reuse Phase
+        28's grouping wholesale rather than computing tax their own way."""
+        from app.tax_groups import group_lines_by_tax_rate
+
+        return group_lines_by_tax_rate(self.line_items)
+
+    @property
+    def formatted_number(self) -> str:
+        from app.adjustment_note_numbering import format_note_number
+
+        return format_note_number(self.note_type, self.note_number)
+
+
+class AdjustmentNoteLineItem(Base):
+    """One line of a credit or debit note.
+
+    Structurally identical to InvoiceLineItem, INCLUDING Phase 28's
+    per-line `tax_rate` snapshot -- a note's tax must be frozen at issue
+    time for exactly the same reason an invoice's is, and reusing the
+    shape means app.tax_groups and app.pdf_tax_rows already work on notes
+    with no changes at all.
+    """
+
+    __tablename__ = "adjustment_note_line_items"
+    __table_args__ = (
+        Index("ix_adjustment_note_line_items_source_line", "source_invoice_line_item_id"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        CHAR(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    note_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("adjustment_notes.id", ondelete="CASCADE"), nullable=False
+    )
+    description: Mapped[str] = mapped_column(String(512), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Historical snapshot, copied from the source invoice line when there
+    # is one -- never re-read from Product.default_tax_rate. See
+    # docs/taxes_and_rut.md for the Phase 28 rule this follows.
+    tax_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), nullable=False, default=0, server_default="0"
+    )
+    # Which invoice line this credits, when it credits one. This is what
+    # line-level over-credit protection counts against (see
+    # get_line_credit_usage). NULL for free-form lines -- every debit-note
+    # line, and any credit line typed by hand rather than picked from the
+    # invoice.
+    source_invoice_line_item_id: Mapped[str | None] = mapped_column(
+        CHAR(36), ForeignKey("invoice_line_items.id", ondelete="SET NULL"), nullable=True
+    )
+
+    note: Mapped["AdjustmentNote"] = relationship(back_populates="line_items")
 
 
 def init_db() -> None:

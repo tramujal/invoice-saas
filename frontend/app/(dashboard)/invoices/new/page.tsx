@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PageContainer } from "@/components/ui/PageContainer";
+import { DocumentTotals } from "@/components/documents/DocumentTotals";
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
@@ -22,7 +23,7 @@ import {
   type PaymentTermsPresetKey,
 } from "@/lib/invoice-due-date";
 import { resolveDefaultInvoiceCurrency } from "@/lib/organization-settings";
-import { useDocumentLines } from "@/lib/use-document-lines";
+import { fractionFromPercent, useDocumentLines } from "@/lib/use-document-lines";
 import type { Customer, InvoiceCreatedResponse, PlanLimitReachedDetail } from "@/lib/types";
 
 function todayDateString(): string {
@@ -62,6 +63,7 @@ export default function NewInvoicePage() {
     taxRateFraction,
     lineAmounts,
     subtotal,
+    taxGroups,
     taxAmount,
     total,
   } = useDocumentLines();
@@ -119,6 +121,10 @@ export default function NewInvoicePage() {
       description: line.description.trim(),
       quantity: line.quantity,
       unit_price: line.unit_price,
+      // Phase 28 -- each line carries its own rate. The document-level
+      // tax_rate below remains in the payload purely as the documented
+      // API fallback for clients that don't send per-line values.
+      tax_rate: fractionFromPercent(line.tax_percent),
       product_id: line.product_id,
     }));
 
@@ -300,64 +306,13 @@ export default function NewInvoicePage() {
           disabled={isSubmitting}
         />
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div>
-              <label htmlFor="tax" className="text-sm font-medium text-slate-700">
-                {t("invoiceForm.taxRateLabel")}
-              </label>
-              <Input
-                id="tax"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                max="100"
-                step="0.01"
-                value={taxPercent}
-                onChange={(e) => onTaxPercentChange(e.target.value)}
-                disabled={isSubmitting}
-                className="mt-1 max-w-xs sm:max-w-none"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                {t("invoiceForm.taxRateHelpPrefix")}{" "}
-                <code className="rounded bg-slate-100 px-1">{taxRateFraction}</code>{" "}
-                {t("invoiceForm.taxRateHelpSuffix")}
-              </p>
-            </div>
-            <dl className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm sm:p-5">
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-600">{t("invoices.colSubtotal")}</dt>
-                <dd className="font-medium text-slate-900">
-                  {subtotal === null
-                    ? "—"
-                    : documentCurrency
-                      ? formatCurrency(subtotal, documentCurrency)
-                      : formatMoney(subtotal)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-600">{t("invoices.colTax")}</dt>
-                <dd className="font-medium text-slate-900">
-                  {taxAmount === null
-                    ? "—"
-                    : documentCurrency
-                      ? formatCurrency(taxAmount, documentCurrency)
-                      : formatMoney(taxAmount)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base">
-                <dt className="font-semibold text-slate-800">{t("invoices.colTotal")}</dt>
-                <dd className="font-semibold text-slate-900">
-                  {total === null
-                    ? "—"
-                    : documentCurrency
-                      ? formatCurrency(total, documentCurrency)
-                      : formatMoney(total)}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </section>
+        <DocumentTotals
+          subtotal={subtotal}
+          taxGroups={taxGroups}
+          taxAmount={taxAmount}
+          total={total}
+          documentCurrency={documentCurrency}
+        />
 
         {submitError ? (
           <div

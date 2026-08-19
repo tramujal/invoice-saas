@@ -195,6 +195,68 @@ def _financial_insight_failed(payload: dict, language: str) -> tuple[str, str]:
     return t(language, "notif_financial_insight_failed_title"), t(language, "notif_financial_insight_failed_body")
 
 
+
+def _note_label(payload: dict, language: str) -> str:
+    """The note's own formatted number ("CN-000004"), which the emitter
+    already put in the payload -- never re-derived here, so the
+    notification and the document can never disagree."""
+    return payload.get("note_number") or payload.get("note_id", "")
+
+
+def _note_kind(payload: dict, language: str) -> str:
+    key = (
+        "notif_credit_note_kind"
+        if payload.get("note_type") == "credit"
+        else "notif_debit_note_kind"
+    )
+    return t(language, key)
+
+
+def _adjustment_note_created(payload: dict, language: str) -> tuple[str, str]:
+    return (
+        t(language, "notif_adjustment_note_created_title").format(
+            kind=_note_kind(payload, language)
+        ),
+        t(language, "notif_adjustment_note_created_body").format(
+            note_number=_note_label(payload, language)
+        ),
+    )
+
+
+def _adjustment_note_issued(payload: dict, language: str) -> tuple[str, str]:
+    return (
+        t(language, "notif_adjustment_note_issued_title").format(
+            kind=_note_kind(payload, language)
+        ),
+        t(language, "notif_adjustment_note_issued_body").format(
+            note_number=_note_label(payload, language),
+            total=payload.get("total", ""),
+            currency=payload.get("currency_code", ""),
+        ),
+    )
+
+
+def _adjustment_note_voided(payload: dict, language: str) -> tuple[str, str]:
+    return (
+        t(language, "notif_adjustment_note_voided_title").format(
+            kind=_note_kind(payload, language)
+        ),
+        t(language, "notif_adjustment_note_voided_body").format(
+            note_number=_note_label(payload, language)
+        ),
+    )
+
+
+def _adjustment_note_sent(payload: dict, language: str) -> tuple[str, str]:
+    return (
+        t(language, "notif_adjustment_note_sent_title").format(
+            kind=_note_kind(payload, language)
+        ),
+        t(language, "notif_adjustment_note_sent_body").format(
+            note_number=_note_label(payload, language)
+        ),
+    )
+
 _RENDERERS: dict[WebhookEventType, _Renderer] = {
     WebhookEventType.customer_created: _customer_created,
     WebhookEventType.customer_updated: _customer_updated,
@@ -213,6 +275,10 @@ _RENDERERS: dict[WebhookEventType, _Renderer] = {
     WebhookEventType.invoice_created: _invoice_created,
     WebhookEventType.invoice_updated: _invoice_updated,
     WebhookEventType.invoice_sent: _invoice_sent,
+    WebhookEventType.adjustment_note_created: _adjustment_note_created,
+    WebhookEventType.adjustment_note_issued: _adjustment_note_issued,
+    WebhookEventType.adjustment_note_voided: _adjustment_note_voided,
+    WebhookEventType.adjustment_note_sent: _adjustment_note_sent,
     WebhookEventType.organization_plan_changed: _organization_plan_changed,
     WebhookEventType.financial_insight_requested: _financial_insight_requested,
     WebhookEventType.financial_insight_generated: _financial_insight_generated,

@@ -80,6 +80,8 @@ def run_startup_migrations(engine: Engine) -> None:
     _add_user_google_auth_fields(engine)
     _add_google_oauth_states_table(engine)
     _add_google_oauth_handoffs_table(engine)
+    _add_line_item_tax_rates(engine)
+    _add_adjustment_notes(engine)
 
 
 def _add_invoice_numbering(engine: Engine) -> None:
@@ -2429,3 +2431,199 @@ def _add_google_oauth_handoffs_table(engine: Engine) -> None:
                 ")"
             )
         )
+
+
+def _add_line_item_tax_rates(engine: Engine) -> None:
+    """Phase 28 -- adds tax_rate to invoice_line_items and
+    quote_line_items, then backfills it so pre-existing documents keep
+    recomputing to byte-identical totals.
+
+    WHY THE BACKFILL IS SAFE, AND WHY IT IS DIFFERENT FOR EACH TABLE:
+
+    Stored subtotal/tax_amount/total are NEVER touched here. Totals are
+    only ever recomputed when a document is edited (see
+    app.services.invoices.update_invoice_record); reads always return the
+    stored columns. So this migration cannot change any historical figure
+    by construction -- the backfill only decides what an *edit* would
+    recompute from, months from now.
+
+    quote_line_items: quotes persist their single tax_rate, so each line
+    simply inherits the parent quote's rate. Exact by definition.
+
+    invoice_line_items: invoices never had a tax_rate column at all --
+    only the resulting tax_amount -- so the original rate has to be
+    recovered as tax_amount / subtotal, rounded to the column's 4 decimal
+    places. For every rate a real invoice can carry (0, 0.10, 0.22, ...)
+    this recovers the exact original. Combined with
+    compute_invoice_totals' group-by-rate rule -- a single-rate document
+    computes quantize(subtotal * rate), identical to the pre-Phase-28
+    formula -- an untouched historical invoice recomputes to exactly what
+    it already stores. tests/test_line_item_taxes.py asserts precisely
+    this over generated historical data.
+
+    Zero-subtotal invoices get 0: a rate is genuinely undefined when
+    there is nothing to apply it to, and 0 is the only value that cannot
+    invent tax on a document that has none.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    for table, parent, parent_fk in (
+        ("invoice_line_items", "invoices", "invoice_id"),
+        ("quote_line_items", "quotes", "quote_id"),
+    ):
+        if table not in tables or parent not in tables:
+            continue
+        if "tax_rate" in {c["name"] for c in inspector.get_columns(table)}:
+            continue
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"ALTER TABLE {table} "
+                    "ADD COLUMN tax_rate NUMERIC(5, 4) NOT NULL DEFAULT 0"
+                )
+            )
+            if table == "quote_line_items":
+                # The parent quote's own persisted rate -- exact.
+                conn.execute(
+                    text(
+                        "UPDATE quote_line_items SET tax_rate = COALESCE("
+                        "(SELECT q.tax_rate FROM quotes q WHERE q.id = quote_line_items.quote_id), 0)"
+                    )
+                )
+            else:
+                # Recovered from the stored amounts; see the docstring.
+                # The `* 1.0` is load-bearing, not noise. SQLite gives
+                # NUMERIC columns integer affinity, so a subtotal of
+                # "1000.00" is stored as the INTEGER 1000 and
+                # `tax_amount / subtotal` becomes INTEGER DIVISION --
+                # 220 / 1000 = 0, silently backfilling every rate as
+                # zero. Forcing one operand to a real makes the division
+                # exact on SQLite and leaves Postgres' numeric division
+                # unchanged. tests/test_line_item_tax_migration.py pins
+                # this.
+                conn.execute(
+                    text(
+                        "UPDATE invoice_line_items SET tax_rate = COALESCE(("
+                        "  SELECT CASE WHEN i.subtotal > 0 "
+                        "         THEN ROUND(i.tax_amount * 1.0 / i.subtotal, 4) ELSE 0 END "
+                        "  FROM invoices i WHERE i.id = invoice_line_items.invoice_id"
+                        "), 0)"
+                    )
+                )
+
+
+def _add_adjustment_notes(engine: Engine) -> None:
+    """Phase 29 -- credit/debit notes. Purely ADDITIVE: two new tables and
+    two new counters on organizations. No existing column is altered, no
+    existing row is rewritten, and no invoice or quote total can move as
+    a result of running this.
+
+    Idempotent in the same way as every other migration here (guarded on
+    table/column existence), so it is safe on a brand-new database where
+    Base.metadata.create_all() already produced both tables, on an
+    existing pre-Phase-29 database, and on repeated startups.
+
+    The organizations counters start at 1 for every organization,
+    including existing ones: credit and debit numbering are new sequences
+    that have never issued a document, so 1 is simply correct rather than
+    a backfill decision.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "organizations" in tables:
+        columns = {c["name"] for c in inspector.get_columns("organizations")}
+        with engine.begin() as conn:
+            for name in ("next_credit_note_number", "next_debit_note_number"):
+                if name not in columns:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE organizations ADD COLUMN {name} "
+                            "INTEGER NOT NULL DEFAULT 1"
+                        )
+                    )
+
+    if "adjustment_notes" not in tables:
+        # References are omitted on SQLite for the same reason every other
+        # table-creating migration here omits them: SQLite cannot add a
+        # foreign key to an existing table afterward, and the ORM model is
+        # the authoritative declaration on a fresh create_all().
+        is_sqlite = engine.dialect.name == "sqlite"
+
+        def ref(clause: str) -> str:
+            return "" if is_sqlite else clause
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS adjustment_notes ("
+                    "id CHAR(36) PRIMARY KEY, "
+                    f"organization_id CHAR(36) NOT NULL{ref(' REFERENCES organizations(id) ON DELETE CASCADE')}, "
+                    f"source_invoice_id CHAR(36) NOT NULL{ref(' REFERENCES invoices(id)')}, "
+                    f"customer_id CHAR(36) NULL{ref(' REFERENCES customers(id) ON DELETE SET NULL')}, "
+                    f"created_by_user_id CHAR(36) NULL{ref(' REFERENCES users(id) ON DELETE SET NULL')}, "
+                    "note_type VARCHAR(16) NOT NULL, "
+                    "note_number INTEGER NOT NULL, "
+                    "status VARCHAR(16) NOT NULL DEFAULT 'draft', "
+                    "reason VARCHAR(1000) NOT NULL DEFAULT '', "
+                    "issue_date DATE NULL, "
+                    "subtotal NUMERIC(14, 2) NOT NULL, "
+                    "tax_amount NUMERIC(14, 2) NOT NULL, "
+                    "total NUMERIC(14, 2) NOT NULL, "
+                    "currency_code VARCHAR(8) NOT NULL DEFAULT 'USD', "
+                    "language VARCHAR(8) NOT NULL DEFAULT 'en', "
+                    "customer_name_snapshot VARCHAR(255) NULL, "
+                    "customer_email_snapshot VARCHAR(255) NULL, "
+                    "customer_phone_snapshot VARCHAR(64) NULL, "
+                    "customer_address_snapshot VARCHAR(512) NULL, "
+                    "issued_at TIMESTAMP NULL, "
+                    "voided_at TIMESTAMP NULL, "
+                    "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "CONSTRAINT uq_adjustment_notes_org_type_number "
+                    "UNIQUE (organization_id, note_type, note_number)"
+                    ")"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_adjustment_notes_source_invoice_id "
+                    "ON adjustment_notes (source_invoice_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_adjustment_notes_org_status "
+                    "ON adjustment_notes (organization_id, status)"
+                )
+            )
+
+    if "adjustment_note_line_items" not in tables:
+        is_sqlite = engine.dialect.name == "sqlite"
+
+        def ref_line(clause: str) -> str:
+            return "" if is_sqlite else clause
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS adjustment_note_line_items ("
+                    "id CHAR(36) PRIMARY KEY, "
+                    f"note_id CHAR(36) NOT NULL{ref_line(' REFERENCES adjustment_notes(id) ON DELETE CASCADE')}, "
+                    "description VARCHAR(512) NOT NULL, "
+                    "quantity NUMERIC(14, 4) NOT NULL, "
+                    "unit_price NUMERIC(14, 2) NOT NULL, "
+                    "line_total NUMERIC(14, 2) NOT NULL, "
+                    "tax_rate NUMERIC(5, 4) NOT NULL DEFAULT 0, "
+                    f"source_invoice_line_item_id CHAR(36) NULL{ref_line(' REFERENCES invoice_line_items(id) ON DELETE SET NULL')}"
+                    ")"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_adjustment_note_line_items_source_line "
+                    "ON adjustment_note_line_items (source_invoice_line_item_id)"
+                )
+            )

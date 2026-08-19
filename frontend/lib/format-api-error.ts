@@ -80,6 +80,15 @@ export function getTaxIdDuplicateDetail(err: unknown): TaxIdDuplicateDetail | nu
   return body.detail;
 }
 
+
+/** Phase 28 -- an invalid Uruguayan RUT. 422 (a malformed field), NOT
+ * 409: it is deliberately distinct from duplicate_tax_id so the UI never
+ * tells the user "duplicate" about a value that isn't even a valid RUT.
+ * The caller renders a translated message; the code is the contract. */
+export function isInvalidUruguayRutError(err: unknown): boolean {
+  return hasDetailCode(err, 422, "invalid_uruguay_rut");
+}
+
 export function formatApiError(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     const body = err.body;

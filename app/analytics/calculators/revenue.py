@@ -23,6 +23,7 @@ from app.effective_status import get_effective_payment_status
 from app.models import Invoice, Organization
 from app.org_time import get_organization_today
 from app.payment_status import PaymentStatus
+from app.services.adjustment_notes import get_adjusted_totals_by_invoice
 
 
 def get_revenue_by_currency(
@@ -31,15 +32,27 @@ def get_revenue_by_currency(
     """Total booked revenue per currency -- the base figure
     get_revenue_growth below derives from by calling this twice (once per
     window) rather than duplicating the query."""
-    query = select(Invoice.currency_code, func.coalesce(func.sum(Invoice.total), 0)).where(
+    # Phase 29 -- NET revenue: issued credit notes reduce it, issued
+    # debit notes increase it. Draft and void notes are ignored.
+    #
+    # Selected per invoice rather than pre-aggregated in SQL so each
+    # invoice's adjustment can be applied to it individually. The sign
+    # rule lives in exactly one place (signed_total, via the shared
+    # helper); nothing here re-derives it.
+    query = select(Invoice.id, Invoice.currency_code, Invoice.total).where(
         Invoice.organization_id == organization_id
     )
     if window is not None:
         query = query.where(Invoice.created_at >= window.start, Invoice.created_at < window.end)
-    query = query.group_by(Invoice.currency_code)
 
     rows = db.execute(query).all()
-    return {code: quantize_money(Decimal(total)) for code, total in rows}
+    adjustments = get_adjusted_totals_by_invoice(db, organization_id)
+
+    totals: dict[str, Decimal] = {}
+    for invoice_id, code, total in rows:
+        adjusted = Decimal(total) + adjustments.get(invoice_id, Decimal("0"))
+        totals[code] = totals.get(code, Decimal("0")) + adjusted
+    return {code: quantize_money(value) for code, value in totals.items()}
 
 
 @dataclass(frozen=True)

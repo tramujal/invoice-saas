@@ -8,6 +8,8 @@ duplicates these rules; both import from here.
 import re
 import unicodedata
 
+from app.uruguay_rut import strip_rut_prefix
+
 # Same shape as the frontend's pre-existing client-side check
 # (AddCustomerForm.tsx's simpleEmailValid) — deliberately simple (not a
 # full RFC 5322 validator): good enough to reject obviously-malformed
@@ -44,8 +46,17 @@ def normalize_tax_id(value: str) -> str:
     "RUT 12.345.678-9" and "123456789" must normalize identically. This is
     still a per-organization comparison key only — no cross-organization
     uniqueness is ever implied or enforced by this function.
+
+    Phase 28 bug fix: the "RUT" label itself is stripped first. Before
+    this, punctuation removal alone turned "RUT 12.345.678-9" into
+    "rut123456789" while "12.345.678-9" became "123456789" — so the two
+    did NOT collide, directly contradicting the requirement stated above
+    and silently letting the same taxpayer be created twice. Only the
+    label token is removed (see app.uruguay_rut.strip_rut_prefix); every
+    other alphanumeric identifier keeps all of its characters, so a
+    Spanish CIF "B12345678" is untouched.
     """
-    stripped = _TAX_ID_PUNCTUATION_RE.sub("", value)
+    stripped = _TAX_ID_PUNCTUATION_RE.sub("", strip_rut_prefix(value))
     # NFKD + drop combining marks handles accented characters the same way
     # header normalization does (see app/imports/column_mapping.py), so
     # e.g. a stray accented character doesn't cause two otherwise-identical

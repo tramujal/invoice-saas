@@ -19,6 +19,7 @@ export type NavIconName =
   | "/analytics"
   | "/invoices"
   | "/quotes"
+  | "/notes"
   | "/customers"
   | "/products"
   | "/assistant"
@@ -52,6 +53,18 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M14 2v6h6" />
       <path d="M9 15h6" />
       <path d="M12 12v6" />
+    </>
+  ),
+  // Phase 29 -- a document with a corner-fold plus a +/- adjustment mark,
+  // distinct from the invoice/quote glyphs above (which share a folded-
+  // page silhouette) so the three don't blur together in the sidebar.
+  "/notes": (
+    <>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 13h6M9 17h3" />
+      <circle cx="18" cy="17" r="3" />
+      <path d="M18 16v2M17 17h2" />
     </>
   ),
   "/customers": (

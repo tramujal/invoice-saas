@@ -23,6 +23,8 @@ from app.insights.limits import (
 from app.invoice_numbering import format_invoice_number
 from app.membership_role import InvitationRole, MembershipRole
 from app.organization_status import OrganizationStatus
+from app.adjustment_note_status import AdjustmentNoteStatus
+from app.adjustment_note_type import AdjustmentNoteType
 from app.payment_status import PaymentStatus
 from app.platform_permissions import PlatformRole
 from app.product_type import ProductType
@@ -488,10 +490,175 @@ class TeamSummaryResponse(BaseModel):
     pending_invitations: int
 
 
+# --- Phase 29: credit / debit notes -----------------------------------
+
+
+class AdjustmentNoteLineItemCreate(BaseModel):
+    """One requested note line.
+
+    `unit_price` and `tax_rate` are OPTIONAL when the line references an
+    invoice line: omitting them inherits that line's historical snapshot,
+    which is the normal case (crediting part of what was invoiced). They
+    are required for free-form lines, where there is nothing to inherit
+    -- see app.services.adjustment_notes._resolve_lines.
+    """
+
+    description: str = Field(default="", max_length=512)
+    quantity: Decimal = Field(gt=0, decimal_places=4, max_digits=14)
+    unit_price: Decimal | None = Field(default=None, ge=0, decimal_places=2, max_digits=14)
+    tax_rate: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        decimal_places=4,
+        max_digits=5,
+        description="Per-line tax rate as a fraction, e.g. 0.22 for 22%.",
+    )
+    # Credit notes only. A debit-note line referencing an invoice line is
+    # rejected server-side (see DebitLineCannotReferenceSourceError).
+    source_invoice_line_item_id: str | None = None
+
+    @model_validator(mode="after")
+    def _free_form_lines_need_a_price(self) -> "AdjustmentNoteLineItemCreate":
+        if self.source_invoice_line_item_id is None:
+            if self.unit_price is None:
+                raise ValueError("unit_price is required for a line with no source invoice line")
+            if not self.description.strip():
+                raise ValueError("description is required for a line with no source invoice line")
+        return self
+
+
+class AdjustmentNoteCreateRequest(BaseModel):
+    """Note that this carries NO organization, customer or currency: all
+    three are derived from the source invoice server-side, which is what
+    makes a cross-tenant or currency-mismatched note impossible rather
+    than merely validated against."""
+
+    line_items: list[AdjustmentNoteLineItemCreate] = Field(min_length=1)
+    reason: str = Field(default="", max_length=1000)
+    # Convenience for the common "create and issue in one step" flow;
+    # both happen in a single transaction.
+    issue_immediately: bool = False
+
+
+class AdjustmentNoteLineItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+    tax_rate: Decimal
+    source_invoice_line_item_id: str | None
+
+
+class AdjustmentNoteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    source_invoice_id: str
+    customer_id: str | None
+    customer_name: str | None
+    note_type: AdjustmentNoteType
+    note_number: str
+    status: AdjustmentNoteStatus
+    reason: str
+    issue_date: date | None
+    subtotal: Decimal
+    tax_amount: Decimal
+    total: Decimal
+    currency_code: str
+    language: str
+    issued_at: datetime | None
+    voided_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    line_items: list[AdjustmentNoteLineItemResponse]
+    tax_groups: list[TaxGroupResponse]
+
+    @field_validator("note_number", mode="before")
+    @classmethod
+    def _format_number(cls, value: int | str) -> str:
+        # Already formatted when serialized from the model's
+        # `formatted_number`; an int arrives only from a raw construction.
+        return value if isinstance(value, str) else str(value)
+
+
+class InvoiceAdjustmentSummary(BaseModel):
+    """The adjusted view of one invoice.
+
+    `original_total` is Invoice.total, unchanged and unmutated -- the
+    historical record of what was issued. Everything else is derived.
+    """
+
+    original_total: Decimal
+    credited_total: Decimal
+    debited_total: Decimal
+    adjusted_total: Decimal
+    remaining_creditable: Decimal
+    currency_code: str
+    issued_credit_note_count: int
+    issued_debit_note_count: int
+
+
+class CreditableLineResponse(BaseModel):
+    """What remains creditable on one invoice line -- powers the
+    "create credit note" prefill."""
+
+    invoice_line_item_id: str
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+    tax_rate: Decimal
+    credited_total: Decimal
+    remaining_creditable: Decimal
+
+
+class InvoiceCreditabilityResponse(BaseModel):
+    summary: InvoiceAdjustmentSummary
+    lines: list[CreditableLineResponse]
+
+
+class SendAdjustmentNoteEmailResponse(BaseModel):
+    sent_to: str
+    note_number: str
+
+
+class PaginatedAdjustmentNotesResponse(BaseModel):
+    items: list[AdjustmentNoteResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class InvoiceLineItemCreate(BaseModel):
     description: str = Field(min_length=1, max_length=512)
     quantity: Decimal = Field(gt=0, decimal_places=4, max_digits=14)
     unit_price: Decimal = Field(ge=0, decimal_places=2, max_digits=14)
+    # Phase 28 -- per-line tax, as a fraction (0.22 == 22%).
+    #
+    # OPTIONAL ON PURPOSE, and this is the entire API compatibility
+    # story: None means "no per-line rate supplied", and the line falls
+    # back to the request's document-level `tax_rate` (see
+    # compute_invoice_totals). An existing client that has never heard of
+    # per-line tax keeps sending only the document rate and keeps getting
+    # byte-identical results. A None here is therefore NOT the same as an
+    # explicit 0.0, which means "this line is genuinely exempt" and
+    # overrides the document rate.
+    tax_rate: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        decimal_places=4,
+        max_digits=5,
+        description=(
+            "Per-line tax rate as a fraction, e.g. 0.22 for 22%. "
+            "Omit to inherit the document-level tax_rate."
+        ),
+    )
     # Purely an analytics tag ("this line came from this catalog item") --
     # validated to resolve within the organization at creation time (see
     # create_invoice_record), but never used to re-derive description/
@@ -519,6 +686,23 @@ class InvoiceCreateRequest(BaseModel):
     due_date: date | None = None
 
 
+class TaxGroupResponse(BaseModel):
+    """One tax-rate bucket of a document (Phase 28). `base` is the net
+    amount taxed at `rate`; `tax` is what that produced.
+
+    Deliberately reports the BASE alongside the tax, so a 0% group can be
+    rendered honestly -- "Exento: base 200, tax 0" -- rather than as a
+    line reading "tax 0.00" that looks like tax was collected and
+    happened to round to nothing.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    rate: Decimal
+    base: Decimal
+    tax: Decimal
+
+
 class InvoiceLineItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -527,6 +711,9 @@ class InvoiceLineItemResponse(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     line_total: Decimal
+    # Phase 28 -- additive, always present on responses (0 for lines that
+    # predate per-line tax and carried no rate of their own).
+    tax_rate: Decimal
     product_id: str | None
 
 
@@ -551,6 +738,9 @@ class InvoiceResponse(BaseModel):
     language: str
     due_date: date | None
     line_items: list[InvoiceLineItemResponse]
+    # Phase 28 -- derived from the line snapshots (see Invoice.tax_groups),
+    # never stored. Always present; a single-rate invoice has one entry.
+    tax_groups: list[TaxGroupResponse]
 
     @field_validator("invoice_number", mode="before")
     @classmethod
@@ -619,6 +809,20 @@ class QuoteLineItemCreate(BaseModel):
     description: str = Field(min_length=1, max_length=512)
     quantity: Decimal = Field(gt=0, decimal_places=4, max_digits=14)
     unit_price: Decimal = Field(ge=0, decimal_places=2, max_digits=14)
+    # Phase 28 -- see InvoiceLineItemCreate.tax_rate. Identical semantics,
+    # including the None-inherits-document-rate compatibility rule, so a
+    # quote and the invoice it converts into can never disagree.
+    tax_rate: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        decimal_places=4,
+        max_digits=5,
+        description=(
+            "Per-line tax rate as a fraction, e.g. 0.22 for 22%. "
+            "Omit to inherit the document-level tax_rate."
+        ),
+    )
     # Purely an analytics tag -- see InvoiceLineItemCreate.product_id's
     # identical docstring.
     product_id: str | None = None
@@ -654,6 +858,8 @@ class QuoteLineItemResponse(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     line_total: Decimal
+    # Phase 28 -- see InvoiceLineItemResponse.tax_rate.
+    tax_rate: Decimal
     product_id: str | None
 
 
@@ -685,6 +891,8 @@ class QuoteResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     line_items: list[QuoteLineItemResponse]
+    # Phase 28 -- see InvoiceResponse.tax_groups.
+    tax_groups: list[TaxGroupResponse]
 
     @field_validator("quote_number", mode="before")
     @classmethod

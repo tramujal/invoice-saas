@@ -2,12 +2,12 @@
 
 import { useRef, useState } from "react";
 
-import { Input } from "@/components/ui/Input";
+import { Input, Select } from "@/components/ui/Input";
 import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatMoney } from "@/lib/money";
 import { getCurrencyLabel, type CurrencyCode } from "@/lib/organization-settings";
 import type { Product } from "@/lib/types";
-import type { LineDraft } from "@/lib/use-document-lines";
+import { TAX_RATE_PRESETS, type LineDraft } from "@/lib/use-document-lines";
 
 import { ManualLineEditor } from "./ManualLineEditor";
 import { ProductPicker } from "./ProductPicker";
@@ -24,10 +24,97 @@ type LineItemsEditorProps = {
     quantity: string;
     unitPrice: string;
   }) => void;
-  onUpdateLine: (id: string, patch: Partial<Pick<LineDraft, "description" | "quantity" | "unit_price">>) => void;
+  onUpdateLine: (
+    id: string,
+    patch: Partial<Pick<LineDraft, "description" | "quantity" | "unit_price" | "tax_percent">>
+  ) => void;
   onRemoveLine: (id: string) => void;
   disabled?: boolean;
 };
+
+const CUSTOM_TAX_OPTION = "__custom__";
+
+/** The per-line tax control (Phase 28).
+ *
+ * A plain <select> of the rates people actually use, which keeps the row
+ * quiet, plus an escape hatch to a free numeric input so nothing is
+ * locked to one country's rates. A value that isn't a preset (an
+ * existing document, or a rate typed earlier) is shown as its own option
+ * rather than silently snapping to the nearest preset.
+ */
+function LineTaxControl({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const isPreset = (TAX_RATE_PRESETS as readonly string[]).includes(value);
+  // Sticky: once the user opens the custom input for this line it stays
+  // open while they type, even at intermediate values like "1" that
+  // happen to be a valid number but not what they meant yet.
+  const [custom, setCustom] = useState(!isPreset);
+
+  if (custom) {
+    return (
+      <div className="mt-1 flex items-center gap-1">
+        <Input
+          id={id}
+          type="number"
+          inputMode="decimal"
+          min="0"
+          max="100"
+          step="0.01"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          aria-label={t("lineItemPicker.taxCustomLabel")}
+        />
+        <span className="text-sm text-slate-500">%</span>
+        <button
+          type="button"
+          onClick={() => {
+            setCustom(false);
+            onChange("0");
+          }}
+          disabled={disabled}
+          className="rounded-lg px-1.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-800 disabled:cursor-not-allowed"
+          aria-label={t("lineItemPicker.taxUsePresetLabel")}
+        >
+          ↩
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Select
+      id={id}
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === CUSTOM_TAX_OPTION) {
+          setCustom(true);
+          return;
+        }
+        onChange(e.target.value);
+      }}
+      disabled={disabled}
+      className="mt-1"
+    >
+      {TAX_RATE_PRESETS.map((preset) => (
+        <option key={preset} value={preset}>
+          {preset === "0" ? t("lineItemPicker.taxExemptOption") : `${preset}%`}
+        </option>
+      ))}
+      <option value={CUSTOM_TAX_OPTION}>{t("lineItemPicker.taxCustomOption")}</option>
+    </Select>
+  );
+}
 
 export function LineItemsEditor({
   lines,
@@ -138,8 +225,15 @@ export function LineItemsEditor({
                   {t("common.remove")}
                 </button>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:gap-4">
-                <div className="sm:col-span-5">
+              {/* Phase 28 -- the 12-column row starts at `xl`, not `sm`.
+                  With the sidebar taking 224px, a 768px tablet leaves
+                  ~480px here; twelve columns plus eleven 16px gaps
+                  squeezed the new tax control to 26px at 768 and 49px at
+                  1024, both measured. Stacking until `xl` -- and giving
+                  tax 3 columns rather than 2 -- keeps every field usable
+                  and costs nothing on a real desktop. */}
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-12 xl:gap-4">
+                <div className="xl:col-span-4">
                   <label className="text-xs font-medium text-slate-600">
                     {t("lineItemPicker.descriptionLabel")}
                   </label>
@@ -156,7 +250,7 @@ export function LineItemsEditor({
                     </p>
                   ) : null}
                 </div>
-                <div className="grid grid-cols-2 gap-3 sm:col-span-4 sm:grid-cols-2">
+                <div className="grid grid-cols-2 gap-3 xl:col-span-3">
                   <div>
                     <label className="text-xs font-medium text-slate-600">
                       {t("lineItemPicker.qtyLabel")}
@@ -188,7 +282,22 @@ export function LineItemsEditor({
                     />
                   </div>
                 </div>
-                <div className="sm:col-span-3">
+                {/* Phase 28 -- per-line tax. Two columns is enough for a
+                    compact select, and it comes out of the description's
+                    width rather than the total's, so the row keeps its
+                    12-column rhythm and the amount stays readable. */}
+                <div className="xl:col-span-3">
+                  <label className="text-xs font-medium text-slate-600" htmlFor={`tax-${line.id}`}>
+                    {t("lineItemPicker.taxLabel")}
+                  </label>
+                  <LineTaxControl
+                    id={`tax-${line.id}`}
+                    value={line.tax_percent}
+                    onChange={(next) => onUpdateLine(line.id, { tax_percent: next })}
+                    disabled={disabled}
+                  />
+                </div>
+                <div className="xl:col-span-2">
                   <label className="text-xs font-medium text-slate-600">
                     {t("lineItemPicker.lineTotalLabel")}
                   </label>

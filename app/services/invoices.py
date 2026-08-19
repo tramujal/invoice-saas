@@ -17,7 +17,7 @@ can translate them independently.
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -51,6 +51,7 @@ from app.reminder_status import ReminderStatus
 from app.reminder_type import ReminderType
 from app.services.plan_limits import LimitedResource, check_limit
 from app.services.products import ProductNotFoundError, get_product_in_org
+from app.tax_groups import TaxGroup, group_lines_by_tax_rate
 from app.notifications.service import emit_event
 from app.webhook_event_type import WebhookEventType
 from app.schemas import (
@@ -126,12 +127,27 @@ def _quantize_money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
+@dataclass(frozen=True)
+class _ResolvedLine:
+    """A line's net total paired with the tax rate that actually applies
+    to it, after the per-line/document-level fallback has been resolved.
+    Exists only to hand group_lines_by_tax_rate the same shape it gets
+    from persisted ORM rows."""
+
+    line_total: Decimal
+    tax_rate: Decimal
+
+
 @dataclass
 class InvoiceTotals:
     line_totals: list[Decimal]
     subtotal: Decimal
     tax_amount: Decimal
     total: Decimal
+    # Phase 28. Always populated -- a single-rate document simply has one
+    # group -- so no caller ever needs a "does this document have mixed
+    # taxes?" branch just to render a summary.
+    tax_groups: list[TaxGroup] = field(default_factory=list)
 
 
 def compute_invoice_totals(
@@ -141,19 +157,56 @@ def compute_invoice_totals(
     the real write (create_invoice_record) and for building an AI action
     proposal's preview summary, so a preview's numbers are guaranteed
     identical to what execution will actually produce, and a proposal is
-    never persisted with numbers the model supplied itself."""
+    never persisted with numbers the model supplied itself.
+
+    Phase 28 -- per-line tax. `tax_rate` is now the DOCUMENT-LEVEL
+    FALLBACK, applied only to lines that don't carry their own
+    `tax_rate`. That is what keeps the existing public API contract
+    working unchanged: a client that posts line items with no tax field
+    plus a document `tax_rate` gets exactly the same numbers it always
+    did.
+
+    ROUNDING: tax is quantized once PER TAX-RATE GROUP, not per line.
+    This is deliberate and load-bearing for backwards compatibility --
+    for a single-rate document it reduces to quantize(subtotal * rate),
+    character for character the pre-Phase-28 formula, so no historical
+    document can shift by a cent. Rounding per line would NOT be
+    equivalent: two 0.05 lines at 10% give 0.02 line-by-line but 0.01
+    document-wide. Grouping is also the fiscally conventional model --
+    tax is assessed on each taxable base, which is exactly what the
+    grouped summary shows the user.
+
+    Line totals remain NET of tax and are still quantized per line,
+    unchanged.
+    """
     line_totals: list[Decimal] = []
+    resolved: list[_ResolvedLine] = []
     subtotal = Decimal("0")
+
     for line in line_items:
         line_total = _quantize_money(line.quantity * line.unit_price)
         line_totals.append(line_total)
         subtotal += line_total
 
+        # None (or a line type with no tax field at all, e.g. an older
+        # internal caller) inherits the document rate -- see this
+        # function's docstring on why that is the compatibility contract.
+        per_line = getattr(line, "tax_rate", None)
+        resolved.append(
+            _ResolvedLine(line_total=line_total, tax_rate=tax_rate if per_line is None else per_line)
+        )
+
     subtotal = _quantize_money(subtotal)
-    tax_amount = _quantize_money(subtotal * tax_rate)
+
+    tax_groups = group_lines_by_tax_rate(resolved)
+    tax_amount = _quantize_money(sum((g.tax for g in tax_groups), Decimal("0")))
     total = _quantize_money(subtotal + tax_amount)
     return InvoiceTotals(
-        line_totals=line_totals, subtotal=subtotal, tax_amount=tax_amount, total=total
+        line_totals=line_totals,
+        subtotal=subtotal,
+        tax_amount=tax_amount,
+        total=total,
+        tax_groups=tax_groups,
     )
 
 
@@ -247,6 +300,11 @@ def create_invoice_record(
             quantity=line.quantity,
             unit_price=_quantize_money(line.unit_price),
             line_total=line_total,
+            # Snapshot the RESOLVED rate, never the raw request value: a
+            # line that inherited the document rate must persist that
+            # concrete number, so the invoice stays self-describing even
+            # though invoices have no document-level rate column.
+            tax_rate=(tax_rate if line.tax_rate is None else line.tax_rate),
             product_id=line.product_id,
         )
         for line, line_total in zip(line_items, totals.line_totals)

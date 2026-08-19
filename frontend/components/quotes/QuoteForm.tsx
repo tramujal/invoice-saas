@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { DocumentTotals } from "@/components/documents/DocumentTotals";
 import { LineItemsEditor } from "@/components/documents/LineItemsEditor";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -13,7 +14,7 @@ import { useTranslation } from "@/lib/i18n/useTranslation";
 import { formatCurrency, formatMoney, parseQuantity, parseUnitPrice } from "@/lib/money";
 import { resolveDefaultInvoiceCurrency, type CurrencyCode } from "@/lib/organization-settings";
 import type { Customer, Quote } from "@/lib/types";
-import { useDocumentLines, type LineDraft } from "@/lib/use-document-lines";
+import { percentFromFraction, fractionFromPercent, useDocumentLines, type LineDraft } from "@/lib/use-document-lines";
 
 function todayDateString(): string {
   return new Date().toISOString().slice(0, 10);
@@ -52,6 +53,10 @@ function seedLinesFromQuote(quote: Quote): LineDraft[] {
     product_id: li.product_id,
     currency_code: currency,
     default_tax_rate: null,
+    // Phase 28 -- seed from the line's OWN persisted rate, never from
+    // the product's current default: editing a quote must not silently
+    // re-price its tax because the catalog changed since it was issued.
+    tax_percent: percentFromFraction(li.tax_rate),
   }));
 }
 
@@ -90,6 +95,7 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
     taxRateFraction,
     lineAmounts,
     subtotal,
+    taxGroups,
     taxAmount,
     total,
   } = useDocumentLines({
@@ -117,7 +123,15 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
       const description = line.description.trim();
       const quantity = parseQuantity(line.quantity);
       const unit_price = parseUnitPrice(line.unit_price);
-      return { description, quantity, unit_price, product_id: line.product_id };
+      return {
+        description,
+        quantity,
+        unit_price,
+        product_id: line.product_id,
+        // Phase 28 -- each line carries its own rate; the document-level
+        // tax_rate below stays only as the API compatibility fallback.
+        tax_rate: fractionFromPercent(line.tax_percent),
+      };
     });
 
     for (const row of parsedLines) {
@@ -263,63 +277,13 @@ export function QuoteForm({ mode, initialQuote, backHref, onSubmit, isSubmitting
           disabled={isSubmitting}
         />
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div>
-              <label htmlFor="tax" className="text-sm font-medium text-slate-700">
-                {t("quoteForm.taxRateLabel")}
-              </label>
-              <Input
-                id="tax"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                max="100"
-                step="0.01"
-                value={taxPercent}
-                onChange={(e) => onTaxPercentChange(e.target.value)}
-                disabled={isSubmitting}
-                className="mt-1 max-w-xs sm:max-w-none"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                {t("quoteForm.taxRateHelpPrefix")} <code className="rounded bg-slate-100 px-1">{taxRateFraction}</code>{" "}
-                {t("quoteForm.taxRateHelpSuffix")}
-              </p>
-            </div>
-            <dl className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm sm:p-5">
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-600">{t("invoices.colSubtotal")}</dt>
-                <dd className="font-medium text-slate-900">
-                  {subtotal === null
-                    ? "—"
-                    : documentCurrency
-                      ? formatCurrency(subtotal, documentCurrency)
-                      : formatMoney(subtotal)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-600">{t("invoices.colTax")}</dt>
-                <dd className="font-medium text-slate-900">
-                  {taxAmount === null
-                    ? "—"
-                    : documentCurrency
-                      ? formatCurrency(taxAmount, documentCurrency)
-                      : formatMoney(taxAmount)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 border-t border-slate-200 pt-3 text-base">
-                <dt className="font-semibold text-slate-800">{t("invoices.colTotal")}</dt>
-                <dd className="font-semibold text-slate-900">
-                  {total === null
-                    ? "—"
-                    : documentCurrency
-                      ? formatCurrency(total, documentCurrency)
-                      : formatMoney(total)}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </section>
+        <DocumentTotals
+          subtotal={subtotal}
+          taxGroups={taxGroups}
+          taxAmount={taxAmount}
+          total={total}
+          documentCurrency={documentCurrency}
+        />
 
         {submitError ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
